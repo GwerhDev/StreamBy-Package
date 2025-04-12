@@ -13,7 +13,7 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
 
   return {
     async uploadFile(req: Request, projectId: string) {
-      const file = req.body.file; // Placeholder: adaptar con multer o stream
+      const file = req.body.file;
       const command = new PutObjectCommand({
         Bucket: config.bucket,
         Key: `${projectId}/${file.name}`,

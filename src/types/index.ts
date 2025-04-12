@@ -19,5 +19,13 @@ export interface StreamByConfig {
     type: StorageProviderType;
     config: S3Config;
   };
-  authProvider: (req: Request) => Promise<{ userId: string; projectId: string }>;
+  authProvider: (req: Request) => Promise<{ userId: string; projectId: string; role: 'viewer' | 'editor' | 'admin' }>;
 }
+
+export interface AuthContext {
+  userId: string;
+  projectId: string;
+  role: 'viewer' | 'editor' | 'admin';
+}
+
+export type AuthProvider = (req: Request) => Promise<AuthContext>;
