@@ -1,5 +1,5 @@
 {
-  "name": "@streamby/core",
+  "name": "streamby-core",
   "version": "0.1.0",
   "description": "StreamBy middleware framework for media storage management",
   "main": "dist/index.js",
