@@ -1,2 +1,4 @@
 /node_modules
-package-loc.json
+package-lock.json
+*.tgz
+*.log

@@ -6,9 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createStreamByRouter = createStreamByRouter;
 const express_1 = __importDefault(require("express"));
 const s3_1 = require("../adapters/s3");
+const file_1 = require("../services/file");
 function createStreamByRouter(config) {
     const router = express_1.default.Router();
-    const adapter = (() => {
+    const adapter = config.adapter || (() => {
         switch (config.storageProvider.type) {
             case 's3':
                 return (0, s3_1.createS3Adapter)(config.storageProvider.config);
@@ -19,7 +20,7 @@ function createStreamByRouter(config) {
     router.get('/files', async (req, res) => {
         try {
             const auth = await config.authProvider(req);
-            const files = await adapter.listFiles(auth.projectId);
+            const files = await (0, file_1.listFilesService)(adapter, req, auth.projectId);
             res.json(files);
         }
         catch (err) {
@@ -29,7 +30,7 @@ function createStreamByRouter(config) {
     router.post('/upload', async (req, res) => {
         try {
             const auth = await config.authProvider(req);
-            const result = await adapter.uploadFile(req, auth.projectId);
+            const result = await (0, file_1.uploadFileService)(adapter, req, auth.projectId);
             res.json(result);
         }
         catch (err) {

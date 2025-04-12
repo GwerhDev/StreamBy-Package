@@ -18,5 +18,12 @@ export interface StreamByConfig {
     authProvider: (req: Request) => Promise<{
         userId: string;
         projectId: string;
+        role: 'viewer' | 'editor' | 'admin';
     }>;
 }
+export interface AuthContext {
+    userId: string;
+    projectId: string;
+    role: 'viewer' | 'editor' | 'admin';
+}
+export type AuthProvider = (req: Request) => Promise<AuthContext>;

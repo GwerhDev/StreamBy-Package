@@ -12,7 +12,7 @@ function createS3Adapter(config) {
     });
     return {
         async uploadFile(req, projectId) {
-            const file = req.body.file; // Placeholder: adaptar con multer o stream
+            const file = req.body.file;
             const command = new client_s3_1.PutObjectCommand({
                 Bucket: config.bucket,
                 Key: `${projectId}/${file.name}`,
