@@ -13,21 +13,29 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
 
   return {
     async uploadFile(req: Request, projectId: string) {
-      const file = req.body.file;
+      const file = req.body?.file;
+
+      if (!file || !file.name || !file.buffer) {
+        throw new Error('Invalid file upload: missing name or buffer');
+      }
+
+      const key = `${projectId}/${file.name}`;
       const command = new PutObjectCommand({
         Bucket: config.bucket,
-        Key: `${projectId}/${file.name}`,
+        Key: key,
         Body: file.buffer,
       });
+
       await s3.send(command);
-      return { success: true, key: command.input.Key };
+      return { success: true, key };
     },
 
     async listFiles(projectId: string) {
       const command = new ListObjectsV2Command({
         Bucket: config.bucket,
-        Prefix: `${projectId}/`
+        Prefix: `${projectId}/`,
       });
+
       const result = await s3.send(command);
       return result.Contents || [];
     },

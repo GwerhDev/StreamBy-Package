@@ -14,18 +14,37 @@ export interface StorageAdapter {
   listFiles(projectId: string): Promise<any[]>;
 }
 
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  description?: string;
+  rootFolders?: FolderNode[];
+  settings?: {
+    allowUpload?: boolean;
+    allowSharing?: boolean;
+  };
+}
+
+export interface FolderNode {
+  id: string;
+  name: string;
+  children?: FolderNode[];
+}
+
 export interface StreamByConfig {
   storageProvider: {
     type: StorageProviderType;
     config: S3Config;
   };
-  authProvider: (req: Request) => Promise<{ userId: string; projectId: string; role: 'viewer' | 'editor' | 'admin' }>;
+  authProvider: AuthProvider;
+  projectProvider: ProjectProvider;
 }
 
 export interface AuthContext {
   userId: string;
-  projectId: string;
+  projects: string[];
   role: 'viewer' | 'editor' | 'admin';
 }
 
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
+export type ProjectProvider = (projectId: string) => Promise<ProjectInfo>;

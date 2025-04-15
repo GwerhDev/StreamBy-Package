@@ -18,7 +18,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/files', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      const files = await listFilesService(adapter, req, auth.projectId);
+      const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
+
+      if (!projectId || !auth.projects.includes(projectId)) {
+        return res.status(403).json({ error: 'Unauthorized or missing projectId' });
+      }
+
+      const files = await listFilesService(adapter, req, projectId);
       res.json(files);
     } catch (err) {
       res.status(500).json({ error: 'Failed to list files', details: err });
@@ -28,10 +34,32 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.post('/upload', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      const result = await uploadFileService(adapter, req, auth.projectId);
+      const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
+
+      if (!projectId || !auth.projects.includes(projectId)) {
+        return res.status(403).json({ error: 'Unauthorized or missing projectId' });
+      }
+
+      const result = await uploadFileService(adapter, req, projectId);
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: 'Failed to upload file', details: err });
+    }
+  });
+
+  router.get('/projects/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const projectId = req.params.id;
+
+      if (!projectId || !auth.projects.includes(projectId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      const project = await config.projectProvider(projectId);
+      res.json({ project });
+    } catch (err) {
+      res.status(404).json({ error: 'Project not found', details: err });
     }
   });
 

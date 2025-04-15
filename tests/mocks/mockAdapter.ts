@@ -7,6 +7,7 @@ export const mockAdapter: StorageAdapter = {
       { name: 'testfile.txt', key: `${projectId}/testfile.txt` },
     ];
   },
+
   async uploadFile(req: Request, projectId: string) {
     return {
       success: true,
