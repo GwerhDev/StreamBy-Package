@@ -4,7 +4,13 @@ import { StreamByConfig, AuthContext } from '../types';
 export async function resolveAuth(config: StreamByConfig, req: Request): Promise<AuthContext> {
   const auth = await config.authProvider(req);
 
-  if (!auth || !auth.userId || !auth.projectId || !auth.role) {
+  if (
+    !auth ||
+    !auth.userId ||
+    !Array.isArray(auth.projects) ||
+    auth.projects.length === 0 ||
+    !auth.role
+  ) {
     throw new Error('Invalid or missing authentication context');
   }
 
