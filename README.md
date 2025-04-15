@@ -7,7 +7,7 @@ Part of the [StreamBy](https://streamby.nhexa.cl) ecosystem by TerminalCore Labs
 
 ## 🚀 What is it?
 
-`@streamby/core` is a plug-and-play middleware for Express (or compatible frameworks) that enables file uploads, listings and project-based access over services like:
+`@streamby/core` is a plug-and-play middleware for Express (or compatible frameworks) that enables file uploads, listings and **multi-project access** over services like:
 
 - ✅ AWS S3
 - ✅ Google Cloud Storage (soon)
@@ -45,11 +45,21 @@ app.use('/streamby', createStreamByRouter({
     }
   },
   authProvider: async (req) => {
-    // validate token, session, etc.
+    // extract token/cookie and validate
     return {
       userId: 'demo',
-      projectId: 'demo-project',
+      projects: ['demo-project'],
       role: 'admin',
+    };
+  },
+  projectProvider: async (projectId) => {
+    // fetch project from your DB
+    return {
+      id: projectId,
+      name: 'Demo Project',
+      description: 'Demo for StreamBy integration',
+      rootFolders: [],
+      settings: { allowUpload: true }
     };
   }
 }));
@@ -71,11 +81,11 @@ Unit tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.co
 
 ## 📁 Features
 
+- 📂 Multi-project access control
+- 🔐 Project-aware file uploads & listings
 - 🧹 Modular adapters per storage provider
-- 🔐 Auth/permission integration per request
-- 📂 File listing, uploading and deletion
-- 🧰 Built-in testability with mock adapters
-- ⚡ Easy to extend and compose
+- 🧰 Built-in testability with mock auth & storage
+- ✨ Simple to extend for custom business logic
 
 ---
 
@@ -85,6 +95,7 @@ Unit tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.co
 - [ ] CLI tool for uploading files
 - [ ] Role-based access control middleware
 - [ ] Plugin system for extended routes
+- [ ] Streaming support (HLS, audio, etc.)
 
 ---
 
