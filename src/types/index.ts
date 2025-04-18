@@ -10,11 +10,9 @@ export interface S3Config {
 export type StorageProviderType = 's3';
 
 export interface StorageAdapter {
-  getPresignedUrl(projectId: string, filename: string, type?: string): Promise<{
-    url: string; key: string;
-  }>
   uploadFile(req: Request, projectId: string): Promise<any>;
   listFiles(projectId: string): Promise<any[]>;
+  getPresignedUrl?: (filename: string, contentType: string) => Promise<string>;
 }
 
 export interface ProjectInfo {

@@ -3,6 +3,7 @@ import { StreamByConfig, StorageAdapter } from '../types';
 import { createS3Adapter } from '../adapters/s3';
 import { listFilesService, uploadFileService } from '../services/file';
 import { createProjectService } from '../services/project';
+import { getPresignedUrl } from '../services/presign';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -25,23 +26,21 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.post('/upload-image', async (req: Request, res: Response) => {
+  router.post('/upload-url', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
   
-      const { filename, type } = req.body;
-      const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
+      const { filename, contentType } = req.body;
   
-      if (!filename || !projectId) {
-        return res.status(400).json({ error: 'Missing filename or projectId' });
+      if (!filename || !contentType) {
+        return res.status(400).json({ error: 'Missing filename or contentType' });
       }
   
-      const presigned = await adapter.getPresignedUrl(projectId, filename, type);
-      res.status(200).json(presigned);
-  
+      const url = await getPresignedUrl(adapter, filename, contentType);
+      res.json({ url });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
     }

@@ -13,20 +13,14 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
   });
 
   return {
-    async getPresignedUrl(projectId: string, filename: string, type?: string) {
-      const key = type === 'project-image'
-        ? `projects/${projectId}/image-${Date.now()}-${filename}`
-        : `${projectId}/${filename}`;
-
+    async getPresignedUrl(filename, contentType) {
       const command = new PutObjectCommand({
         Bucket: config.bucket,
-        Key: key,
-        ContentType: 'image/png' // o dinámico
+        Key: `uploads/${filename}`,
+        ContentType: contentType,
       });
-
-      const url = await getSignedUrl(s3, command, { expiresIn: 60 });
-
-      return { url, key };
+    
+      return getSignedUrl(s3, command, { expiresIn: 3600 });
     },
 
     async uploadFile(req: Request, projectId: string) {
