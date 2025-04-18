@@ -5,7 +5,22 @@ import { createStreamByRouter } from '../src/middleware/createRouter';
 import { mockAuthProvider } from './mocks/mockAuth';
 import { mockAdapter } from './mocks/mockAdapter';
 
+const mockProjectProvider = {
+  getById: async (id: string) => ({
+    id,
+    name: 'Test Project',
+    description: 'Mock project for testing',
+    rootFolders: [],
+    settings: { allowUpload: true }
+  }),
+  create: async (data: any) => ({
+    id: 'mock-project-id',
+    ...data
+  })
+};
+
 const app = express();
+app.use(express.json());
 
 app.use(
   '/streamby',
@@ -16,13 +31,7 @@ app.use(
     },
     authProvider: mockAuthProvider,
     adapter: mockAdapter,
-    projectProvider: async (id: string) => ({
-      id,
-      name: 'Test Project',
-      description: 'Mock project for testing',
-      rootFolders: [],
-      settings: { allowUpload: true }
-    })
+    projectProvider: mockProjectProvider,
   })
 );
 

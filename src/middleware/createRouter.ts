@@ -2,6 +2,7 @@ import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
 import { createS3Adapter } from '../adapters/s3';
 import { listFilesService, uploadFileService } from '../services/file';
+import { createProjectService } from '../services/project';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -56,10 +57,24 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const project = await config.projectProvider(projectId);
+      const project = await config.projectProvider.getById(projectId);
       res.json({ project });
     } catch (err) {
       res.status(404).json({ error: 'Project not found', details: err });
+    }
+  });
+
+  router.post('/projects', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      const created = await createProjectService(req, config.projectProvider);
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to create project', details: err.message });
     }
   });
 

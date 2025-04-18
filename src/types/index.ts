@@ -47,4 +47,14 @@ export interface AuthContext {
 }
 
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
-export type ProjectProvider = (projectId: string) => Promise<ProjectInfo>;
+
+export interface ProjectProvider {
+  getById(projectId: string): Promise<ProjectInfo>;
+  create(data: {
+    name: string;
+    description?: string;
+    allowUpload?: boolean;
+    allowSharing?: boolean;
+    rootFolders?: FolderNode[];
+  }): Promise<ProjectInfo>;
+}

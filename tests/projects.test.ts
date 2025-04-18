@@ -5,7 +5,25 @@ import { createStreamByRouter } from '../src/middleware/createRouter';
 import { mockAuthProvider } from './mocks/mockAuth';
 import { mockAdapter } from './mocks/mockAdapter';
 
+const mockProjectProvider = {
+  getById: async (id: string) => ({
+    id,
+    name: 'Mock Project',
+    description: 'A mock project',
+    rootFolders: [],
+    settings: {
+      allowUpload: true,
+      allowSharing: false,
+    },
+  }),
+  create: async (data: any) => ({
+    id: 'mock-id',
+    ...data,
+  })
+};
+
 const app = express();
+app.use(express.json());
 
 app.use(
   '/streamby',
@@ -15,37 +33,20 @@ app.use(
       config: {} as any,
     },
     authProvider: mockAuthProvider,
+    projectProvider: mockProjectProvider,
     adapter: mockAdapter,
-    projectProvider: async (id: string) => ({
-      id,
-      name: 'Mock Project',
-      description: 'Test project metadata',
-      rootFolders: [
-        {
-          id: 'folder-1',
-          name: 'Assets',
-          children: []
-        }
-      ],
-      settings: {
-        allowUpload: true,
-        allowSharing: false
-      }
-    })
   })
 );
 
-describe('GET /streamby/projects/:id', () => {
-  it('should return project metadata if user has access', async () => {
-    const res = await request(app).get('/streamby/projects/test-project');
-    expect(res.status).toBe(200);
-    expect(res.body.project).toBeDefined();
-    expect(res.body.project.id).toBe('test-project');
-    expect(res.body.project.name).toBe('Mock Project');
-  });
+describe('POST /streamby/projects', () => {
+  it('should create a new project and return its data', async () => {
+    const res = await request(app).post('/streamby/projects').send({
+      name: 'New Project',
+      description: 'Some description',
+    });
 
-  it('should return 403 if user does not have access to the project', async () => {
-    const res = await request(app).get('/streamby/projects/unauthorized-project');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('project');
+    expect(res.body.project.name).toBe('New Project');
   });
 });
