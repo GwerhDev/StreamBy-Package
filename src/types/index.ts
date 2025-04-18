@@ -53,6 +53,7 @@ export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
 export interface ProjectProvider {
   getById(projectId: string): Promise<ProjectInfo>;
+  updateImage: (projectId: string, imageKey: string) => Promise<ProjectInfo>;
   create(data: {
     name: string;
     image?: string;

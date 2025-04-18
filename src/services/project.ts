@@ -13,10 +13,7 @@ export async function createProjectService(
 
   const newProject = await projectProvider.create({
     name,
-    description: description || '',
-    rootFolders: [],
-    allowUpload: true,
-    allowSharing: false
+    description: description || ''
   });
 
   return {
@@ -25,6 +22,7 @@ export async function createProjectService(
       id: newProject.id,
       name: newProject.name,
       description: newProject.description,
+      image: newProject.image,
       settings: newProject.settings,
       rootFolders: newProject.rootFolders || [],
     }

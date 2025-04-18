@@ -10,12 +10,21 @@ const mockProjectProvider = {
     id,
     name: 'Mock Project',
     description: '',
+    image: '',
     rootFolders: [],
-    settings: { allowUpload: true }
+    settings: { allowUpload: true, allowSharing: false }
   }),
   create: async (data: any) => ({
     id: 'mock-id',
-    ...data
+    name: data.name,
+    description: data.description,
+    image: '',
+    rootFolders: [],
+    settings: { allowUpload: true, allowSharing: false }
+  }),
+  getPresignedUrl: async (projectId: string, filename: string, type: string) => ({
+    url: `https://mock-s3.com/${projectId}/${filename}`,
+    key: `${projectId}/${filename}`
   })
 };
 

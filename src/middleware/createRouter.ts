@@ -62,6 +62,27 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
+  router.patch('/projects/:id/image', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+  
+      const projectId = req.params.id;
+      const { image } = req.body;
+  
+      if (!image) {
+        return res.status(400).json({ error: 'Missing image key' });
+      }
+  
+      const updated = await config.projectProvider.updateImage(projectId, image);
+      res.status(200).json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update project image', details: err.message });
+    }
+  });
+  
   router.post('/upload', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
