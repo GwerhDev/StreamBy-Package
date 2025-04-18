@@ -10,6 +10,9 @@ export interface S3Config {
 export type StorageProviderType = 's3';
 
 export interface StorageAdapter {
+  getPresignedUrl(projectId: string, filename: string, type?: string): Promise<{
+    url: string; key: string;
+  }>
   uploadFile(req: Request, projectId: string): Promise<any>;
   listFiles(projectId: string): Promise<any[]>;
 }
@@ -17,6 +20,7 @@ export interface StorageAdapter {
 export interface ProjectInfo {
   id: string;
   name: string;
+  image?: string;
   description?: string;
   rootFolders?: FolderNode[];
   settings?: {
@@ -42,6 +46,7 @@ export interface StreamByConfig {
 
 export interface AuthContext {
   userId: string;
+  username: string;
   projects: string[];
   role: 'viewer' | 'editor' | 'admin';
 }
@@ -52,6 +57,7 @@ export interface ProjectProvider {
   getById(projectId: string): Promise<ProjectInfo>;
   create(data: {
     name: string;
+    image?: string;
     description?: string;
     allowUpload?: boolean;
     allowSharing?: boolean;

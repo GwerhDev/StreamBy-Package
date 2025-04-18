@@ -24,7 +24,29 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       res.status(401).json({ logged: false });
     }
   });
+
+  router.post('/upload-image', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
   
+      const { filename, type } = req.body;
+      const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
+  
+      if (!filename || !projectId) {
+        return res.status(400).json({ error: 'Missing filename or projectId' });
+      }
+  
+      const presigned = await adapter.getPresignedUrl(projectId, filename, type);
+      res.status(200).json(presigned);
+  
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
+    }
+  });  
+
   router.get('/files', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
