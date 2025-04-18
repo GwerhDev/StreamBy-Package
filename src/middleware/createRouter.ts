@@ -16,6 +16,15 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   })();
 
+  router.get('/auth', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      res.status(200).json({ logged: true, ...auth });
+    } catch (err) {
+      res.status(401).json({ logged: false });
+    }
+  });
+  
   router.get('/files', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
