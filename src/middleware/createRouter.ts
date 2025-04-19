@@ -32,20 +32,20 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
-  
+
       const { filename, contentType, projectId } = req.body;
-  
+
       if (!filename || !contentType || !projectId) {
         return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
       }
-  
+
       const url = await getPresignedUrl(adapter, filename, contentType, projectId);
       res.json(url);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
     }
   });
-  
+
   router.get('/files', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
@@ -68,14 +68,14 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
-  
+
       const projectId = req.params.id;
       const updates = req.body;
-  
+
       if (!updates || typeof updates !== 'object') {
         return res.status(400).json({ error: 'Missing updates payload' });
       }
-  
+
       const updated = await config.projectProvider.update(projectId, updates);
       res.status(200).json({ success: true, project: updated });
     } catch (err: any) {
@@ -105,13 +105,23 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
-
+      
       const created = await createProjectService(req, config.authProvider, config.projectProvider);
       res.status(201).json(created);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create project', details: err.message });
     }
   });
+
+  router.get('/projects', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const projects = await config.projectProvider.list(auth.userId);
+      res.json({ projects });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to list projects', details: err });
+    }
+  })
 
   return router;
 }
