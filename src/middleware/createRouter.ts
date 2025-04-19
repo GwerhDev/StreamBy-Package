@@ -1,7 +1,7 @@
 import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
 import { createS3Adapter } from '../adapters/s3';
-import { listFilesService, uploadFileService } from '../services/file';
+import { listFilesService } from '../services/file';
 import { createProjectService } from '../services/project';
 import { getPresignedUrl } from '../services/presign';
 
@@ -46,7 +46,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
   
-
   router.get('/files', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
@@ -81,22 +80,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       res.status(200).json({ success: true, project: updated });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to update project', details: err.message });
-    }
-  });
-
-  router.post('/upload', async (req: Request, res: Response) => {
-    try {
-      const auth = await config.authProvider(req);
-      const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
-
-      if (!projectId || !auth.projects.includes(projectId)) {
-        return res.status(403).json({ error: 'Unauthorized or missing projectId' });
-      }
-
-      const result = await uploadFileService(adapter, req, projectId);
-      res.json(result);
-    } catch (err) {
-      res.status(500).json({ error: 'Failed to upload file', details: err });
     }
   });
 
