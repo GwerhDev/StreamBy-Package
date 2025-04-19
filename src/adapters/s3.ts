@@ -14,7 +14,7 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
 
   return {
     async getPresignedUrl(filename, contentType, projectId) {
-      const key = `projects/${projectId}/file-${Date.now()}-${filename}`;
+      const key = `${projectId}/file-${Date.now()}-${filename}`;
       const command = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
