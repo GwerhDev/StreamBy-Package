@@ -5,7 +5,7 @@ export async function createProjectService(
   req: Request,
   projectProvider: ProjectProvider
 ) {
-  const { name, description } = req.body;
+  const { userId, name, description } = req.body;
 
   if (!name) {
     throw new Error('Project name is required');
@@ -13,7 +13,8 @@ export async function createProjectService(
 
   const newProject = await projectProvider.create({
     name,
-    description: description || ''
+    description: description || '',
+    userId,
   });
 
   return {
@@ -22,8 +23,12 @@ export async function createProjectService(
       id: newProject.id,
       name: newProject.name,
       image: newProject.image,
-      description: newProject.description,
+      members: [{
+        userId: newProject.members?.[0].userId,
+        role: newProject.members?.[0].role
+      }],
       settings: newProject.settings,
+      description: newProject.description,
       rootFolders: newProject.rootFolders || [],
     }
   };

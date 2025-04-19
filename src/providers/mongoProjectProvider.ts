@@ -12,6 +12,12 @@ export function createMongoProjectProvider(ProjectModel: Model<any>): ProjectPro
 
     async create(data) {
       const newProject = await ProjectModel.create({
+        members: [
+          {
+            userId: data.userId,
+            role: 'admin',
+          }
+        ],
         name: data.name,
         description: data.description || '',
         image: data.image || '',

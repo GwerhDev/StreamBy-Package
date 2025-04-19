@@ -9,11 +9,15 @@ export function initProjectModel(connection: mongoose.Connection) {
 
   const projectSchema = new mongoose.Schema({
     name: { type: String, required: true },
-    image: { type: String },
     description: { type: String },
+    image: { type: String },
     rootFolders: [folderNodeSchema],
     allowUpload: { type: Boolean, default: true },
     allowSharing: { type: Boolean, default: false },
+    members: [{
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      role: { type: String, enum: ['viewer', 'editor', 'admin'], default: 'viewer' }
+    }]
   }, {
     timestamps: true
   });

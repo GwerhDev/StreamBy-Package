@@ -19,6 +19,10 @@ export interface ProjectInfo {
   id: string;
   name: string;
   image?: string;
+  members?: {
+    userId: string;
+    role: 'viewer' | 'editor' | 'admin';
+  }[];
   description?: string;
   rootFolders?: FolderNode[];
   settings?: {
@@ -59,6 +63,7 @@ export interface ProjectProvider {
   create(data: {
     name: string;
     image?: string;
+    userId: string;
     description?: string;
     allowUpload?: boolean;
     allowSharing?: boolean;
