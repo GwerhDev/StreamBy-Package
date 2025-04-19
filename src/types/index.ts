@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import { Connection } from 'mongoose';
 
 export interface S3Config {
   bucket: string;
@@ -39,6 +40,7 @@ export interface StreamByConfig {
   };
   authProvider: AuthProvider;
   projectProvider: ProjectProvider;
+  dbConnection?: Connection;
 }
 
 export interface AuthContext {
@@ -51,6 +53,7 @@ export interface AuthContext {
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
 export interface ProjectProvider {
+  list(userId?: string): Promise<ProjectInfo[]>;
   getById(projectId: string): Promise<ProjectInfo>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;
   create(data: {
