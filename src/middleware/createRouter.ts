@@ -115,7 +115,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.post('/projects', async (req: Request, res: Response) => {
+  router.post('/projects/create', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       if (auth.role !== 'admin' && auth.role !== 'editor') {

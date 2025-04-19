@@ -19,10 +19,10 @@ export async function createProjectService(
   return {
     success: true,
     project: {
-      id: newProject.id,
+      _id: newProject._id,
       name: newProject.name,
-      description: newProject.description,
       image: newProject.image,
+      description: newProject.description,
       settings: newProject.settings,
       rootFolders: newProject.rootFolders || [],
     }
