@@ -33,18 +33,19 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Permission denied' });
       }
   
-      const { filename, contentType } = req.body;
+      const { filename, contentType, projectId } = req.body;
   
-      if (!filename || !contentType) {
-        return res.status(400).json({ error: 'Missing filename or contentType' });
+      if (!filename || !contentType || !projectId) {
+        return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
       }
   
-      const url = await getPresignedUrl(adapter, filename, contentType);
-      res.json({ url });
+      const url = await getPresignedUrl(adapter, filename, contentType, projectId);
+      res.json(url);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
     }
-  });  
+  });
+  
 
   router.get('/files', async (req: Request, res: Response) => {
     try {
@@ -62,7 +63,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.patch('/projects/:id/image', async (req: Request, res: Response) => {
+  router.patch('/projects/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       if (auth.role !== 'admin' && auth.role !== 'editor') {
@@ -70,19 +71,19 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
   
       const projectId = req.params.id;
-      const { image } = req.body;
+      const updates = req.body;
   
-      if (!image) {
-        return res.status(400).json({ error: 'Missing image key' });
+      if (!updates || typeof updates !== 'object') {
+        return res.status(400).json({ error: 'Missing updates payload' });
       }
   
-      const updated = await config.projectProvider.updateImage(projectId, image);
-      res.status(200).json(updated);
+      const updated = await config.projectProvider.update(projectId, updates);
+      res.status(200).json({ success: true, project: updated });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to update project image', details: err.message });
+      res.status(500).json({ error: 'Failed to update project', details: err.message });
     }
   });
-  
+
   router.post('/upload', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);

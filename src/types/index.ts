@@ -12,7 +12,7 @@ export type StorageProviderType = 's3';
 export interface StorageAdapter {
   uploadFile(req: Request, projectId: string): Promise<any>;
   listFiles(projectId: string): Promise<any[]>;
-  getPresignedUrl?: (filename: string, contentType: string) => Promise<string>;
+  getPresignedUrl?: (filename: string, contentType: string, projectId: string) => Promise<any>;
 }
 
 export interface ProjectInfo {
@@ -53,7 +53,7 @@ export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
 export interface ProjectProvider {
   getById(projectId: string): Promise<ProjectInfo>;
-  updateImage: (projectId: string, imageKey: string) => Promise<ProjectInfo>;
+  update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;
   create(data: {
     name: string;
     image?: string;
