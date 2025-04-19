@@ -36,7 +36,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>): ProjectPro
     },
 
     async list(userId?: string) {
-      const query = userId ? { members: userId } : {};
+      const query = userId ? { 'members.userId': userId } : {};
       const all = await ProjectModel.find(query);
       return all.map(formatProject);
     }
