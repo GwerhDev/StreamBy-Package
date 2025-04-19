@@ -1,11 +1,13 @@
 import { Request } from 'express';
-import { ProjectProvider } from '../types';
+import { AuthProvider, ProjectProvider, StreamByConfig } from '../types';
 
 export async function createProjectService(
   req: Request,
+  authProvider: AuthProvider,
   projectProvider: ProjectProvider
 ) {
-  const { userId, name, description } = req.body;
+  const { name, description } = req.body;
+  const auth = await authProvider(req);
 
   if (!name) {
     throw new Error('Project name is required');
@@ -13,8 +15,8 @@ export async function createProjectService(
 
   const newProject = await projectProvider.create({
     name,
+    userId: auth.userId,
     description: description || '',
-    userId,
   });
 
   return {

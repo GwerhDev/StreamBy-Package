@@ -106,7 +106,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Permission denied' });
       }
 
-      const created = await createProjectService(req, config.projectProvider);
+      const created = await createProjectService(req, config.authProvider, config.projectProvider);
       res.status(201).json(created);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create project', details: err.message });
