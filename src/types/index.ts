@@ -16,7 +16,7 @@ export interface StorageAdapter {
 }
 
 export interface ProjectInfo {
-  _id: string;
+  id: string;
   name: string;
   image?: string;
   description?: string;
@@ -28,7 +28,7 @@ export interface ProjectInfo {
 }
 
 export interface FolderNode {
-  _id: string;
+  id: string;
   name: string;
   children?: FolderNode[];
 }
