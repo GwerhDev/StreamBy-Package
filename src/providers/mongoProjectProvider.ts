@@ -47,8 +47,12 @@ function formatProject(doc: any): ProjectInfo {
   return {
     id: doc._id.toString(),
     name: doc.name,
-    description: doc.description,
     image: doc.image,
+    members: doc.members.map((m: any) => ({
+      userId: m.userId,
+      role: m.role,
+    })),
+    description: doc.description,
     rootFolders: doc.rootFolders || [],
     settings: {
       allowUpload: doc.allowUpload,
