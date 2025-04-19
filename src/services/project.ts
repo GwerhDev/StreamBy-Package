@@ -19,17 +19,6 @@ export async function createProjectService(
 
   return {
     success: true,
-    project: {
-      id: newProject.id,
-      name: newProject.name,
-      image: newProject.image,
-      members: [{
-        userId: newProject.members?.[0].userId,
-        role: newProject.members?.[0].role
-      }],
-      settings: newProject.settings,
-      description: newProject.description,
-      rootFolders: newProject.rootFolders || [],
-    }
+    project: newProject,
   };
 }
