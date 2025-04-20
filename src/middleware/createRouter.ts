@@ -87,17 +87,20 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
-
-      if (!projectId || !auth.projects.includes(projectId)) {
+  
+      const project = await config.projectProvider.getById(projectId);
+  
+      const isMember = project.members?.some((m) => m.userId?.toString() === auth.userId?.toString());
+  
+      if (!isMember) {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
-
-      const project = await config.projectProvider.getById(projectId);
+  
       res.json({ project });
     } catch (err) {
-      res.status(404).json({ error: 'Project not found', details: err });
+      res.status(404).json({ error: 'Project not found', details: (err as Error).message });
     }
-  });
+  });  
 
   router.post('/projects/create', async (req: Request, res: Response) => {
     try {
