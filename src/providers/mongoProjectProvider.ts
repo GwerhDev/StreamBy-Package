@@ -42,13 +42,13 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
     },
 
     async delete(projectId: string) {
-      const project = await ProjectModel.findById(projectId);
-      if (!project) throw new Error('Project not found');
-
-      await adapter.deleteProjectDirectory(projectId);
-      await project.deleteOne();
-
-      return { success: true };
+      try {
+        await ProjectModel.findByIdAndDelete(projectId);
+        await adapter.deleteProjectDirectory(projectId);
+        return { success: true };
+      } catch (error) {
+        throw new Error('Project not found');
+      }
     }
   };
 }
