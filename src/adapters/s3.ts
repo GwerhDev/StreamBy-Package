@@ -16,7 +16,7 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
     async getPresignedUrl(filename: string, contentType: string, projectId: string) {
       const salt = await bcrypt.genSalt();
       const hashedPassword = await bcrypt.hash(filename, salt);
-      const key = `${projectId}/${contentType}/file-${Date.now()}-${hashedPassword}`;
+      const key = encodeURIComponent(`${projectId}/${contentType}/file-${Date.now()}-${hashedPassword}`);
       const command = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
