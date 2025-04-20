@@ -25,7 +25,7 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
 
       const url = await getSignedUrl(s3, command, { expiresIn: 60 });
 
-      const publicUrl = encodeURI(`https://${config.bucket}.s3.${config.region}.amazonaws.com/${key}`);
+      const publicUrl = `https://${config.bucket}.s3.${config.region}.amazonaws.com/${encodeURIComponent(key)}`;
 
       return { url, publicUrl };
     },
