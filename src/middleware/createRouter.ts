@@ -87,20 +87,20 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
-  
+
       const project = await config.projectProvider.getById(projectId);
-  
+
       const isMember = project.members?.some((m) => m.userId?.toString() === auth.userId?.toString());
-  
+
       if (!isMember) {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
-  
+
       res.json({ project });
     } catch (err) {
       res.status(404).json({ error: 'Project not found', details: (err as Error).message });
     }
-  });  
+  });
 
   router.post('/projects/create', async (req: Request, res: Response) => {
     try {
@@ -108,11 +108,29 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
-      
+
       const created = await createProjectService(req, config.authProvider, config.projectProvider);
       res.status(201).json(created);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create project', details: err.message });
+    }
+  });
+
+  router.delete('/projects/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const projectId = req.params.id;
+
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      await config.projectProvider.delete(projectId);
+      await adapter.deleteProjectDirectory(projectId);
+
+      res.status(200).json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to delete project', details: err.message });
     }
   });
 

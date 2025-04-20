@@ -13,6 +13,7 @@ export type StorageProviderType = 's3';
 export interface StorageAdapter {
   listFiles(projectId: string): Promise<any[]>;
   getPresignedUrl?: (filename: string, contentType: string, projectId: string) => Promise<any>;
+  deleteProjectDirectory: (projectId: string) => Promise<void>;
 }
 
 export interface ProjectInfo {
@@ -59,6 +60,7 @@ export type AuthProvider = (req: Request) => Promise<AuthContext>;
 export interface ProjectProvider {
   list(userId?: string): Promise<ProjectInfo[]>;
   getById(projectId: string): Promise<ProjectInfo>;
+  delete(projectId: string): Promise<{ success: boolean }>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;
   create(data: {
     name: string;

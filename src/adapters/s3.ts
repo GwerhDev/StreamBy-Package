@@ -1,5 +1,10 @@
+import {
+  S3Client,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { S3Client, PutObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { StorageAdapter, S3Config } from '../types';
 import bcrypt from 'bcrypt';
 
@@ -24,7 +29,6 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
       });
 
       const url = await getSignedUrl(s3, command, { expiresIn: 60 });
-
       const publicUrl = `https://${config.bucket}.s3.${config.region}.amazonaws.com/${encodeURIComponent(key)}`;
 
       return { url, publicUrl };
@@ -38,6 +42,25 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
 
       const result = await s3.send(command);
       return result.Contents || [];
+    },
+
+    async deleteProjectDirectory(projectId: string) {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: config.bucket,
+        Prefix: `${projectId}/`,
+      });
+
+      const listedObjects = await s3.send(listCommand);
+      if (!listedObjects.Contents || listedObjects.Contents.length === 0) return;
+
+      const deleteCommand = new DeleteObjectsCommand({
+        Bucket: config.bucket,
+        Delete: {
+          Objects: listedObjects.Contents.map((item) => ({ Key: item.Key! })),
+        },
+      });
+
+      await s3.send(deleteCommand);
     },
   };
 }

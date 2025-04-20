@@ -1,7 +1,7 @@
-import { ProjectProvider, ProjectInfo, FolderNode } from '../types';
+import { ProjectProvider, ProjectInfo, StorageAdapter } from '../types';
 import { Model } from 'mongoose';
 
-export function createMongoProjectProvider(ProjectModel: Model<any>): ProjectProvider {
+export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: StorageAdapter): ProjectProvider {
   return {
     async getById(projectId) {
       const project = await ProjectModel.findById(projectId);
@@ -39,6 +39,16 @@ export function createMongoProjectProvider(ProjectModel: Model<any>): ProjectPro
       const query = userId ? { 'members.userId': userId } : {};
       const all = await ProjectModel.find(query);
       return all.map(formatProject);
+    },
+
+    async delete(projectId: string) {
+      const project = await ProjectModel.findById(projectId);
+      if (!project) throw new Error('Project not found');
+
+      await adapter.deleteProjectDirectory(projectId);
+      await project.deleteOne();
+
+      return { success: true };
     }
   };
 }
