@@ -1,5 +1,7 @@
 import {
   S3Client,
+  ListObjectsV2CommandOutput,
+  ObjectIdentifier,
   ListObjectsV2Command,
   DeleteObjectsCommand,
   PutObjectCommand,
@@ -20,8 +22,10 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
   return {
     async getPresignedUrl(filename: string, contentType: string, projectId: string) {
       const salt = await bcrypt.genSalt();
-      const hashedPassword = await bcrypt.hash(filename, salt);
-      const key = `${projectId}/${contentType}/file-${Date.now()}-${hashedPassword}`;
+      const hashed = await bcrypt.hash(filename, salt).then(result => result.replace(/\//g, '-'));
+
+      const key = `${projectId}/${contentType}/file-${Date.now()}-${hashed}`;
+
       const command = new PutObjectCommand({
         Bucket: config.bucket,
         Key: key,
@@ -29,6 +33,7 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
       });
 
       const url = await getSignedUrl(s3, command, { expiresIn: 60 });
+
       const publicUrl = `https://${config.bucket}.s3.${config.region}.amazonaws.com/${encodeURIComponent(key)}`;
 
       return { url, publicUrl };
@@ -44,23 +49,36 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
       return result.Contents || [];
     },
 
-    async deleteProjectDirectory(projectId: string) {
-      const listCommand = new ListObjectsV2Command({
-        Bucket: config.bucket,
-        Prefix: `${projectId}/`,
-      });
-
-      const listedObjects = await s3.send(listCommand);
-      if (!listedObjects.Contents || listedObjects.Contents.length === 0) return;
-
-      const deleteCommand = new DeleteObjectsCommand({
-        Bucket: config.bucket,
-        Delete: {
-          Objects: listedObjects.Contents.map((item) => ({ Key: item.Key! })),
-        },
-      });
-
-      await s3.send(deleteCommand);
-    },
+    async deleteProjectDirectory(projectId: string): Promise<void> {
+      const prefix: string = `${projectId}/`;
+      let continuationToken: string | undefined = undefined;
+    
+      while (true) {
+        const listCommand = new ListObjectsV2Command({
+          Bucket: config.bucket,
+          Prefix: prefix,
+          ContinuationToken: continuationToken
+        });
+    
+        const listedObjects: ListObjectsV2CommandOutput = await s3.send(listCommand);
+        const contents = listedObjects.Contents || [];
+    
+        if (contents.length > 0) {
+          const objectsToDelete: ObjectIdentifier[] = contents.map((item) => ({
+            Key: item.Key!
+          }));
+    
+          const deleteCommand = new DeleteObjectsCommand({
+            Bucket: config.bucket,
+            Delete: { Objects: objectsToDelete },
+          });
+    
+          await s3.send(deleteCommand);
+        }
+    
+        if (!listedObjects.IsTruncated) break;
+        continuationToken = listedObjects.NextContinuationToken;
+      }
+    }
   };
 }
