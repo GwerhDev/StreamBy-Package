@@ -8,7 +8,6 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageAdapter, S3Config } from '../types';
-import bcrypt from 'bcrypt';
 
 export function createS3Adapter(config: S3Config): StorageAdapter {
   const s3 = new S3Client({
@@ -21,10 +20,7 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
 
   return {
     async getPresignedUrl(filename: string, contentType: string, projectId: string) {
-      const salt = await bcrypt.genSalt();
-      const hashed = await bcrypt.hash(filename, salt);
-
-      const key = `${projectId}/${contentType}/file-${Date.now()}-${hashed.replace(/\//g, '-')}`;
+      const key = `${projectId}/${contentType}/file-${Date.now()}`;
 
       const command = new PutObjectCommand({
         Bucket: config.bucket,
