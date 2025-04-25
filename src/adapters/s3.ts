@@ -22,9 +22,9 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
   return {
     async getPresignedUrl(filename: string, contentType: string, projectId: string) {
       const salt = await bcrypt.genSalt();
-      const hashed = await bcrypt.hash(filename, salt).then(result => result.replace(/\//g, '-'));
+      const hashed = await bcrypt.hash(filename, salt);
 
-      const key = `${projectId}/${contentType}/file-${Date.now()}-${hashed}`;
+      const key = `${projectId}/${contentType}/file-${Date.now()}-${hashed.replace(/\//g, '-')}`;
 
       const command = new PutObjectCommand({
         Bucket: config.bucket,
