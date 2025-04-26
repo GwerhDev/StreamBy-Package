@@ -26,20 +26,20 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.post('/upload-project-image-url', async (req: Request, res: Response) => {
+  router.get('/upload-project-image-url/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
 
-      const { filename, contentType, projectId } = req.body;
+      const projectId = req.params.id;
 
-      if (!filename || !contentType || !projectId) {
+      if (!projectId) {
         return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
       }
 
-      const url = await getPresignedProjectImageUrl(adapter, filename);
+      const url = await getPresignedProjectImageUrl(adapter, projectId);
       res.json(url);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
