@@ -82,7 +82,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
       }
 
-      const url = await getPresignedUrl(adapter, filename, contentType, projectId);
+      const url = await getPresignedUrl(adapter, contentType, projectId);
       res.json(url);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
