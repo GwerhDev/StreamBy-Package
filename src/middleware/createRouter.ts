@@ -1,8 +1,8 @@
 import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
 import { createS3Adapter } from '../adapters/s3';
-import { listFilesService } from '../services/file';
-import { createProjectService } from '../services/project';
+import { deleteProjectImage, listFilesService } from '../services/file';
+import { createProjectService, deleteProjectImageService } from '../services/project';
 import { getPresignedProjectImageUrl, getPresignedUrl } from '../services/presign';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
@@ -41,6 +41,29 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const url = await getPresignedProjectImageUrl(adapter, projectId);
       res.json(url);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
+    }
+  });
+
+  router.delete('/delete-project-image-url/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+
+      if (!projectId) {
+        return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
+      }
+
+      await deleteProjectImage(adapter, projectId);
+      const updated = await deleteProjectImageService(req, config.authProvider, config.projectProvider);
+
+      res.status(201).json(updated);
+
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
     }

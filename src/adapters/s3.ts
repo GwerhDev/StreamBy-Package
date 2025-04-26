@@ -35,7 +35,20 @@ export function createS3Adapter(config: S3Config): StorageAdapter {
       return { url, publicUrl };
     },
 
-    async getPresignedUrl(filename: string, contentType: string, projectId: string) {
+    async deleteProjectImage(projectId: string) {
+      const key = `${projectId}/project-image`;
+
+      const command = new DeleteObjectsCommand({
+        Bucket: config.bucket,
+        Delete: {
+          Objects: [{ Key: key }],
+        },
+      });
+
+      await s3.send(command);
+    },
+
+    async getPresignedUrl(contentType: string, projectId: string) {
       const key = `${projectId}/${contentType}/file-${Date.now()}`;
 
       const command = new PutObjectCommand({
