@@ -12,8 +12,9 @@ export type StorageProviderType = 's3';
 
 export interface StorageAdapter {
   listFiles(projectId: string): Promise<any[]>;
-  getPresignedUrl?: (filename: string, contentType: string, projectId: string) => Promise<any>;
   deleteProjectDirectory: (projectId: string) => Promise<any>;
+  getPresignedUrl?: (filename: string, contentType: string, projectId: string) => Promise<any>;
+  getPresignedProjectImageUrl?: (projectId: string) => Promise<any>;
 }
 
 export interface ProjectInfo {
