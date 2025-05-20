@@ -1,5 +1,6 @@
 import { Request } from 'express';
-import { AuthProvider, ProjectProvider, StreamByConfig } from '../types';
+import { AuthProvider, ProjectProvider, StorageAdapter } from '../types';
+import { deleteProjectImage } from './file';
 
 export async function createProjectService(
   req: Request,
@@ -50,13 +51,13 @@ export async function updateProjectService(
     success: true,
     project: updatedProject,
   };
-
 }
 
 export async function deleteProjectImageService(
   req: Request,
   authProvider: AuthProvider,
-  projectProvider: ProjectProvider
+  projectProvider: ProjectProvider,
+  storageAdapter: StorageAdapter
 ) {
   const { projectId } = req.params;
   const auth = await authProvider(req);
@@ -71,10 +72,7 @@ export async function deleteProjectImageService(
     throw new Error('Unauthorized');
   }
 
-  await projectProvider.update(projectId, { image: '' });
+  await deleteProjectImage(storageAdapter, projectId);
 
-  return {
-    success: true,
-  };
+  return { success: true };
 }
-
