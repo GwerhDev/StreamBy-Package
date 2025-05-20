@@ -46,7 +46,6 @@ export interface StreamByConfig {
     config: S3Config;
   };
   authProvider: AuthProvider;
-  storageAdapter: StorageAdapter;
   projectProvider: ProjectProvider;
   dbConnection?: Connection;
 }
