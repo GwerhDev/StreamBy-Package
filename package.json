@@ -1,6 +1,6 @@
 {
   "name": "streamby-core",
-  "version": "0.9.23",
+  "version": "0.10.00",
   "description": "StreamBy middleware framework for media storage management",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
