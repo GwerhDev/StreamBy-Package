@@ -1,11 +1,7 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import mongoose from 'mongoose';
-import { createStreamByApp } from './src/index';
-import { initProjectModel } from './src/db/initProjectModel';
-import { createMongoProjectProvider } from './src/providers/mongoProjectProvider';
-import { createS3Adapter } from './src/adapters/s3';
+import { createDevServer } from './src/dev/server';
 import { dummyAuthProvider } from './src/services/auth';
 
 dotenv.config();
@@ -20,33 +16,27 @@ const config = {
 };
 
 async function main() {
-  await mongoose.connect(config.mongodbString!);
-  const connection = mongoose.connection;
-
-  const ProjectModel = initProjectModel(connection);
-
-  const adapter = createS3Adapter({
-    region: config.awsBucketRegion!,
-    bucket: config.awsBucket!,
-    accessKeyId: config.awsAccessKey!,
-    secretAccessKey: config.awsSecretKey!,
-  });
-
   const devApp = express();
 
-  const streamByApp = createStreamByApp({
+  const streamByApp = createDevServer({
     authProvider: dummyAuthProvider,
-    projectProvider: createMongoProjectProvider(ProjectModel, adapter),
-    storageProvider: {
-      type: 's3',
-      config: {
-        region: config.awsBucketRegion!,
-        bucket: config.awsBucket!,
-        accessKeyId: config.awsAccessKey!,
-        secretAccessKey: config.awsSecretKey!,
-      },
-    },
-    adapter,
+    databases: [
+      {
+        dbType: 'mongo',
+        connectionString: config.mongodbString!,
+      }
+    ],
+    storageProviders: [
+      {
+        type: 's3',
+        config: {
+          region: config.awsBucketRegion!,
+          bucket: config.awsBucket!,
+          accessKeyId: config.awsAccessKey!,
+          secretAccessKey: config.awsSecretKey!,
+        },
+      }
+    ]
   });
 
   devApp.use(cors({
@@ -57,7 +47,7 @@ async function main() {
   devApp.use('/streamby', streamByApp);
 
   devApp.listen(4000, () => {
-    console.log('🟢 StreamBy-core dev server listening on http://localhost:4000/');
+    console.log('🟢 StreamBy-core dev server listening on http://localhost:4000/streamby');
   });
 }
 

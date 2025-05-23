@@ -1,8 +1,9 @@
 import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
-import { createS3Adapter } from '../adapters/s3';
 import { deleteProjectImage, listFilesService } from '../services/file';
-import { getPresignedProjectImageUrl, getPresignedUrl } from '../services/presign';
+import { getPresignedProjectImageUrl } from '../services/presign';
+import { createStorageProvider } from '../providers/createStorageProvider';
+import { createDatabaseProvider } from '../providers/createDatabaseProvider';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
@@ -11,13 +12,14 @@ function isProjectMember(project: any, userId: string) {
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
-  const adapter: StorageAdapter = config.adapter || (() => {
-    switch (config.storageProvider.type) {
-      case 's3':
-        return createS3Adapter(config.storageProvider.config);
-      default:
-        throw new Error('Unsupported storage type');
+  const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
+
+  const projectProvider = config.projectProvider || (() => {
+    if (!config.databases) {
+      throw new Error('Either "projectProvider" or "databases" must be provided.');
     }
+    const dbResult = createDatabaseProvider(config.databases, adapter);
+    return dbResult.projectProvider;
   })();
 
   router.get('/auth', async (req: Request, res: Response) => {
@@ -61,30 +63,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await deleteProjectImage(adapter, projectId);
-      const updated = await config.projectProvider.update(projectId, { image: '' });
+      const updated = await projectProvider.update(projectId, { image: '' });
 
       res.status(201).json(updated);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to delete image', details: err.message });
-    }
-  });
-
-  router.post('/upload-url', async (req: Request, res: Response) => {
-    try {
-      const auth = await config.authProvider(req);
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
-      }
-
-      const { filename, contentType, projectId } = req.body;
-      if (!filename || !contentType || !projectId) {
-        return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
-      }
-
-      const url = await getPresignedUrl(adapter, contentType, projectId);
-      res.json(url);
-    } catch (err: any) {
-      res.status(500).json({ error: 'Failed to generate upload URL', details: err.message });
     }
   });
 
@@ -109,7 +92,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      const project = await config.projectProvider.getById(projectId);
+      const project = await projectProvider.getById(projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
@@ -134,7 +117,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const { name, description } = req.body;
 
-      const newProject = await config.projectProvider.create({
+      const newProject = await projectProvider.create({
         name,
         description: description || '',
         members: [{ userId: auth.userId, role: "admin" }]
@@ -155,7 +138,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const projectId = req.params.id;
       const updates = req.body;
-      const project = await config.projectProvider.getById(projectId);
+      const project = await projectProvider.getById(projectId);
 
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -169,7 +152,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const updated = await config.projectProvider.update(projectId, updates);
+      const updated = await projectProvider.update(projectId, updates);
       res.status(200).json({ success: true, project: updated });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to update project', details: err.message });
@@ -181,7 +164,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      const project = await config.projectProvider.getById(projectId);
+      const project = await projectProvider.getById(projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
@@ -190,7 +173,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await config.projectProvider.delete(projectId);
+      await projectProvider.delete(projectId);
 
       res.status(200).json({ success: true });
     } catch (err: any) {
@@ -201,7 +184,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      const projects = await config.projectProvider.list(auth.userId);
+      const projects = await projectProvider.list(auth.userId);
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });

@@ -1,5 +1,4 @@
 import { Request } from 'express';
-import { Connection } from 'mongoose';
 
 export interface S3Config {
   bucket: string;
@@ -9,6 +8,18 @@ export interface S3Config {
 }
 
 export type StorageProviderType = 's3';
+
+export interface S3Config {
+  bucket: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+}
+
+export type StorageProvider = {
+  type: StorageProviderType;
+  config: S3Config;
+};
 
 export interface StorageAdapter {
   listFiles(projectId: string): Promise<any[]>;
@@ -40,14 +51,22 @@ export interface FolderNode {
   children?: FolderNode[];
 }
 
+export type DatabaseType = 'mongo';
+
+export interface DatabaseCredential {
+  dbType: DatabaseType;
+  connectionString: string;
+}
+
 export interface StreamByConfig {
-  storageProvider: {
+  storageProviders: {
     type: StorageProviderType;
     config: S3Config;
-  };
+  }[];
   authProvider: AuthProvider;
-  projectProvider: ProjectProvider;
-  dbConnection?: Connection;
+  databases?: DatabaseCredential[];
+  projectProvider?: ProjectProvider;
+  adapter?: StorageAdapter;
 }
 
 export interface AuthContext {
