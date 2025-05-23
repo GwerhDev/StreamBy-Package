@@ -67,7 +67,10 @@ export interface ProjectProvider {
   create(data: {
     name: string;
     image?: string;
-    userId: string;
+    members?: {
+      userId: string;
+      role: 'viewer' | 'editor' | 'admin';
+    }[];
     description?: string;
     allowUpload?: boolean;
     allowSharing?: boolean;

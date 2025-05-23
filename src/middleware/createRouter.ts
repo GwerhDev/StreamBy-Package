@@ -2,7 +2,6 @@ import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
 import { createS3Adapter } from '../adapters/s3';
 import { deleteProjectImage, listFilesService } from '../services/file';
-import { createProjectService, deleteProjectImageService } from '../services/project';
 import { getPresignedProjectImageUrl, getPresignedUrl } from '../services/presign';
 
 function isProjectMember(project: any, userId: string) {
@@ -62,7 +61,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await deleteProjectImage(adapter, projectId);
-      const updated = await deleteProjectImageService(req, config.authProvider, config.projectProvider);
+      const updated = await config.projectProvider.update(projectId, { image: '' });
 
       res.status(201).json(updated);
     } catch (err: any) {
@@ -105,27 +104,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.patch('/projects/:id', async (req: Request, res: Response) => {
-    try {
-      const auth = await config.authProvider(req);
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
-      }
-
-      const projectId = req.params.id;
-      const updates = req.body;
-
-      if (!updates || typeof updates !== 'object') {
-        return res.status(400).json({ error: 'Missing updates payload' });
-      }
-
-      const updated = await config.projectProvider.update(projectId, updates);
-      res.status(200).json({ success: true, project: updated });
-    } catch (err: any) {
-      res.status(500).json({ error: 'Failed to update project', details: err.message });
-    }
-  });
-
   router.get('/projects/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
@@ -149,14 +127,52 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.post('/projects/create', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
 
-      const created = await createProjectService(req, config.authProvider, config.projectProvider);
-      res.status(201).json(created);
+      const { name, description } = req.body;
+
+      const newProject = await config.projectProvider.create({
+        name,
+        description: description || '',
+        members: [{ userId: auth.userId, role: "admin" }]
+      });
+
+      res.status(201).json({ project: newProject });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create project', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+      const updates = req.body;
+      const project = await config.projectProvider.getById(projectId);
+
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!updates || typeof updates !== 'object') {
+        return res.status(400).json({ error: 'Missing updates payload' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      const updated = await config.projectProvider.update(projectId, updates);
+      res.status(200).json({ success: true, project: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update project', details: err.message });
     }
   });
 
@@ -175,7 +191,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await config.projectProvider.delete(projectId);
-      await adapter.deleteProjectDirectory(projectId);
 
       res.status(200).json({ success: true });
     } catch (err: any) {

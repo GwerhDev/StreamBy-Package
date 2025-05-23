@@ -14,8 +14,8 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
       const newProject = await ProjectModel.create({
         members: [
           {
-            userId: data.userId,
-            role: 'admin',
+            userId: data.members?.[0].userId,
+            role: data.members?.[0].role,
           }
         ],
         name: data.name,

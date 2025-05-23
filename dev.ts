@@ -1,10 +1,13 @@
+import cors from 'cors';
 import dotenv from 'dotenv';
+import express from 'express';
 import mongoose from 'mongoose';
 import { createStreamByApp } from './src/index';
 import { initProjectModel } from './src/db/initProjectModel';
 import { createMongoProjectProvider } from './src/providers/mongoProjectProvider';
 import { createS3Adapter } from './src/adapters/s3';
 import { dummyAuthProvider } from './src/services/auth';
+
 dotenv.config();
 
 const config = {
@@ -17,14 +20,11 @@ const config = {
 };
 
 async function main() {
-  // 1. Conexión a MongoDB
   await mongoose.connect(config.mongodbString!);
   const connection = mongoose.connection;
 
-  // 2. Inicializar modelo
   const ProjectModel = initProjectModel(connection);
 
-  // 3. Crear adaptador S3
   const adapter = createS3Adapter({
     region: config.awsBucketRegion!,
     bucket: config.awsBucket!,
@@ -32,8 +32,9 @@ async function main() {
     secretAccessKey: config.awsSecretKey!,
   });
 
-  // 4. Crear app
-  const app = createStreamByApp({
+  const devApp = express();
+
+  const streamByApp = createStreamByApp({
     authProvider: dummyAuthProvider,
     projectProvider: createMongoProjectProvider(ProjectModel, adapter),
     storageProvider: {
@@ -48,9 +49,15 @@ async function main() {
     adapter,
   });
 
-  // 5. Iniciar servidor
-  app.listen(4000, () => {
-    console.log('🟢 StreamBy-core listening on http://localhost:4000');
+  devApp.use(cors({
+    origin: 'http://localhost:5173',
+    credentials: true
+  }));
+
+  devApp.use('/streamby', streamByApp);
+
+  devApp.listen(4000, () => {
+    console.log('🟢 StreamBy-core dev server listening on http://localhost:4000/');
   });
 }
 
