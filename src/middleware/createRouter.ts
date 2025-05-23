@@ -5,6 +5,10 @@ import { deleteProjectImage, listFilesService } from '../services/file';
 import { createProjectService, deleteProjectImageService } from '../services/project';
 import { getPresignedProjectImageUrl, getPresignedUrl } from '../services/presign';
 
+function isProjectMember(project: any, userId: string) {
+  return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
+}
+
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
@@ -34,9 +38,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       const projectId = req.params.id;
-
       if (!projectId) {
-        return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
+        return res.status(400).json({ error: 'Missing projectId' });
       }
 
       const url = await getPresignedProjectImageUrl(adapter, projectId);
@@ -54,18 +57,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       const projectId = req.params.id;
-
       if (!projectId) {
-        return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
+        return res.status(400).json({ error: 'Missing projectId' });
       }
 
       await deleteProjectImage(adapter, projectId);
       const updated = await deleteProjectImageService(req, config.authProvider, config.projectProvider);
 
       res.status(201).json(updated);
-
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
+      res.status(500).json({ error: 'Failed to delete image', details: err.message });
     }
   });
 
@@ -77,7 +78,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       const { filename, contentType, projectId } = req.body;
-
       if (!filename || !contentType || !projectId) {
         return res.status(400).json({ error: 'Missing filename, contentType, or projectId' });
       }
@@ -85,7 +85,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const url = await getPresignedUrl(adapter, contentType, projectId);
       res.json(url);
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
+      res.status(500).json({ error: 'Failed to generate upload URL', details: err.message });
     }
   });
 
@@ -132,16 +132,17 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const projectId = req.params.id;
 
       const project = await config.projectProvider.getById(projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
 
-      const isMember = project.members?.some((m) => m.userId?.toString() === auth.userId?.toString());
-
-      if (!isMember) {
+      if (!isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
       res.json({ project });
-    } catch (err) {
-      res.status(404).json({ error: 'Project not found', details: (err as Error).message });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch project', details: err.message });
     }
   });
 
@@ -159,13 +160,18 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.delete('/projects/:id', async (req: Request, res: Response) => {
+  router.delete('/projects/:id', async (req, res) => {
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
+      const project = await config.projectProvider.getById(projectId);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
       await config.projectProvider.delete(projectId);
@@ -185,7 +191,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
     }
-  })
+  });
 
   return router;
 }
