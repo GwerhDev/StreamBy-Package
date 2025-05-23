@@ -1,6 +1,6 @@
 {
   "name": "streamby-core",
-  "version": "0.9.21",
+  "version": "0.9.23",
   "description": "StreamBy middleware framework for media storage management",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest",
-    "dev": "tsc --watch",
+    "dev": "ts-node-dev --respawn --clear dev.ts",
     "prepublishOnly": "npm run build"
   },
   "repository": {
@@ -32,14 +32,17 @@
     "@aws-sdk/client-s3": "^3.528.0",
     "@aws-sdk/s3-request-presigner": "^3.787.0",
     "bcrypt": "^5.1.1",
+    "dotenv": "^16.5.0",
     "express": "^4.0.0",
     "mongoose": "^8.13.2"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^4.17.17",
+    "@types/node": "^22.15.21",
     "@types/supertest": "^6.0.3",
     "supertest": "^7.1.0",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.1"
   },

@@ -26,3 +26,12 @@ export function checkRole(auth: AuthContext, required: 'viewer' | 'editor' | 'ad
     throw new Error(`Insufficient role: requires ${required}, found ${auth.role}`);
   }
 }
+
+export async function dummyAuthProvider(req: Request): Promise<AuthContext> {
+  return {
+    userId: req.headers['x-user-id'] as string || 'dev-user-id',
+    username: 'dev-user',
+    projects: [],
+    role: 'admin'
+  };
+}
