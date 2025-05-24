@@ -34,8 +34,9 @@ export interface ProjectInfo {
   name: string;
   image?: string;
   members?: {
-    userId: string;
     role: 'viewer' | 'editor' | 'admin';
+    userId: string;
+    archived?: boolean;
   }[];
   description?: string;
   rootFolders?: FolderNode[];
@@ -79,7 +80,10 @@ export interface AuthContext {
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
 export interface ProjectProvider {
+  archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[], archivedProjects: ProjectInfo[] }>;
+  unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[], archivedProjects: ProjectInfo[] }>;
   list(userId?: string): Promise<ProjectInfo[]>;
+  listArchived(userId?: string): Promise<ProjectInfo[]>;
   getById(projectId: string): Promise<ProjectInfo>;
   delete(projectId: string): Promise<{ success: boolean }>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;

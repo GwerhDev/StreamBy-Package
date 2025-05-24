@@ -16,6 +16,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
           {
             userId: data.members?.[0].userId,
             role: data.members?.[0].role,
+            archived: false
           }
         ],
         name: data.name,
@@ -36,8 +37,16 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
     },
 
     async list(userId?: string) {
-      const query = userId ? { 'members.userId': userId } : {};
-      const all = await ProjectModel.find(query);
+      const all = await ProjectModel.find(userId
+        ? { 'members': { $elemMatch: { userId, archived: { $ne: true } } } }
+        : {});
+      return all.map(formatProject);
+    },
+
+    async listArchived(userId?: string) {
+      const all = await ProjectModel.find(userId
+        ? { 'members': { $elemMatch: { userId, archived: true } } }
+        : {});
       return all.map(formatProject);
     },
 
@@ -49,7 +58,24 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
       } catch (error) {
         throw new Error('Project not found');
       }
+    },
+
+    async archive(projectId, userId) {
+      await ProjectModel.updateOne(
+        { _id: projectId, 'members.userId': userId },
+        { $set: { 'members.$.archived': true } }
+      );
+      return { success: true, projects: await this.list(userId), archivedProjects: await this.listArchived(userId) };
+    },
+
+    async unarchive(projectId, userId) {
+      await ProjectModel.updateOne(
+        { _id: projectId, 'members.userId': userId },
+        { $set: { 'members.$.archived': false } }
+      );
+      return { success: true, projects: await this.list(userId), archivedProjects: await this.listArchived(userId) };
     }
+
   };
 }
 
@@ -61,6 +87,7 @@ function formatProject(doc: any): ProjectInfo {
     members: doc.members.map((m: any) => ({
       userId: m.userId,
       role: m.role,
+      archived: m.archived ?? false
     })),
     description: doc.description,
     rootFolders: doc.rootFolders || [],

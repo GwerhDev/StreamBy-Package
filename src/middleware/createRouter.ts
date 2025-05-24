@@ -87,6 +87,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
+  router.get('/projects/archived', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const archivedProjects = await projectProvider.listArchived(auth.userId);
+      res.json({ projects: archivedProjects });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to list archived projects', details: err });
+    }
+  });
+
   router.get('/projects/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
@@ -188,6 +198,48 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
+    }
+  });
+
+  router.patch('/projects/:id/archive', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const projectId = req.params.id;
+
+      const project = await projectProvider.getById(projectId);
+      if (!project || !isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      await projectProvider.archive(projectId, auth.userId);
+
+      const projects = await projectProvider.list(auth.userId);
+      const archivedProjects = await projectProvider.listArchived(auth.userId);
+
+      res.status(200).json({ success: true, projects, archivedProjects });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to archive project', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/unarchive', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const projectId = req.params.id;
+
+      const project = await projectProvider.getById(projectId);
+      if (!project || !isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      await projectProvider.unarchive(projectId, auth.userId);
+
+      const projects = await projectProvider.list(auth.userId);
+      const archivedProjects = await projectProvider.listArchived(auth.userId);
+
+      res.status(200).json({ success: true, projects, archivedProjects });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
     }
   });
 

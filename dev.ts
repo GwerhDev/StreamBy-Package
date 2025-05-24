@@ -1,8 +1,9 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import { createDevServer } from './src/dev/server';
 import { dummyAuthProvider } from './src/services/auth';
+import { createStreamByRouter } from './src/middleware/createRouter';
+import { StreamByConfig } from './src/types';
 
 dotenv.config();
 
@@ -18,7 +19,12 @@ const config = {
 async function main() {
   const devApp = express();
 
-  const streamByApp = createDevServer({
+  devApp.use(cors({
+    origin: 'http://localhost:5173',
+    credentials: true
+  }));
+
+  const streambyConfig: StreamByConfig = {
     authProvider: dummyAuthProvider,
     databases: [
       {
@@ -37,14 +43,9 @@ async function main() {
         },
       }
     ]
-  });
+  };
 
-  devApp.use(cors({
-    origin: 'http://localhost:5173',
-    credentials: true
-  }));
-
-  devApp.use('/streamby', streamByApp);
+  devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 
   devApp.listen(4000, () => {
     console.log('🟢 StreamBy-core dev server listening on http://localhost:4000/streamby');
