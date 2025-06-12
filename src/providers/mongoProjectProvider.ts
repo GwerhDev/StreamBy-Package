@@ -1,7 +1,7 @@
-import { ProjectProvider, ProjectInfo, StorageAdapter } from '../types';
-import { Model } from 'mongoose';
+import { ProjectProvider, ProjectInfo, StorageAdapter, ProjectListInfo } from '../types';
+import { Model, Connection } from 'mongoose';
 
-export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: StorageAdapter): ProjectProvider {
+export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: StorageAdapter, dbConnection?: Connection): ProjectProvider {
   return {
     async getById(projectId) {
       const project = await ProjectModel.findById(projectId);
@@ -38,16 +38,9 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
 
     async list(userId?: string) {
       const all = await ProjectModel.find(userId
-        ? { 'members': { $elemMatch: { userId, archived: { $ne: true } } } }
+        ? { 'members': { $elemMatch: { userId } } }
         : {});
-      return all.map(formatProject);
-    },
-
-    async listArchived(userId?: string) {
-      const all = await ProjectModel.find(userId
-        ? { 'members': { $elemMatch: { userId, archived: true } } }
-        : {});
-      return all.map(formatProject);
+      return all.map(doc => formatProjectList(doc, userId));
     },
 
     async delete(projectId: string) {
@@ -65,7 +58,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
         { _id: projectId, 'members.userId': userId },
         { $set: { 'members.$.archived': true } }
       );
-      return { success: true, projects: await this.list(userId), archivedProjects: await this.listArchived(userId) };
+      return { success: true, projects: await this.list(userId) };
     },
 
     async unarchive(projectId, userId) {
@@ -73,9 +66,15 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
         { _id: projectId, 'members.userId': userId },
         { $set: { 'members.$.archived': false } }
       );
-      return { success: true, projects: await this.list(userId), archivedProjects: await this.listArchived(userId) };
-    }
+      return { success: true, projects: await this.list(userId) };
+    },
 
+    async getExport(projectId: string, exportName: string) {
+      if (!dbConnection) throw new Error('Database connection not available');
+      const collectionName = `export__${projectId}__${exportName}`;
+      const result = await dbConnection.collection(collectionName).find().toArray();
+      return result;
+    }
   };
 }
 
@@ -95,5 +94,16 @@ function formatProject(doc: any): ProjectInfo {
       allowUpload: doc.allowUpload,
       allowSharing: doc.allowSharing,
     }
+  };
+}
+
+function formatProjectList(doc: any, userId?: string): ProjectListInfo {
+  const archived = doc.members?.find((m: any) => m.userId?.toString() === userId)?.archived ?? false;
+
+  return {
+    id: doc._id.toString(),
+    name: doc.name,
+    image: doc.image,
+    archived
   };
 }

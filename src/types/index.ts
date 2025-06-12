@@ -46,6 +46,13 @@ export interface ProjectInfo {
   };
 }
 
+export interface ProjectListInfo {
+  id: string;
+  name: string;
+  image?: string;
+  archived: boolean;
+}
+
 export interface FolderNode {
   id: string;
   name: string;
@@ -80,10 +87,10 @@ export interface AuthContext {
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
 export interface ProjectProvider {
-  archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[], archivedProjects: ProjectInfo[] }>;
-  unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[], archivedProjects: ProjectInfo[] }>;
+  getExport(projectId: string, exportName: string): Promise<any[]>;
+  archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[] }>;
+  unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[] }>;
   list(userId?: string): Promise<ProjectInfo[]>;
-  listArchived(userId?: string): Promise<ProjectInfo[]>;
   getById(projectId: string): Promise<ProjectInfo>;
   delete(projectId: string): Promise<{ success: boolean }>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;
