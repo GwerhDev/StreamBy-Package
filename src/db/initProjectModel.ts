@@ -20,7 +20,8 @@ export function initProjectModel(connection: mongoose.Connection) {
     rootFolders: [folderNodeSchema],
     allowUpload: { type: Boolean, default: true },
     allowSharing: { type: Boolean, default: false },
-    members: [memberSchema]
+    members: [memberSchema],
+    exports: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Export' }]
   }, {
     timestamps: true
   });

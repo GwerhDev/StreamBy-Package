@@ -1,12 +1,15 @@
 import { ProjectProvider, ProjectInfo, StorageAdapter, ProjectListInfo } from '../types';
-import { Model, Connection } from 'mongoose';
+import { Model } from 'mongoose';
 
-export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: StorageAdapter, dbConnection?: Connection): ProjectProvider {
+export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel: Model<any>, adapter: StorageAdapter): ProjectProvider {
   return {
-    async getById(projectId) {
-      const project = await ProjectModel.findById(projectId);
+    async getById(projectId, populateMembers = false) {
+      let query = ProjectModel.findById(projectId).populate('exports', ['_id', 'collectionName']);
+      if (populateMembers) {
+        query = query.populate('members.userId');
+      }
+      const project = await query;
       if (!project) throw new Error('Project not found');
-
       return formatProject(project);
     },
 
@@ -31,7 +34,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
     },
 
     async update(projectId, updates) {
-      const updated = await ProjectModel.findByIdAndUpdate(projectId, updates, { new: true });
+      const updated = await ProjectModel.findByIdAndUpdate(projectId, updates, { new: true }).populate('exports', ['_id', 'collectionName']);
       if (!updated) throw new Error('Project not found');
       return formatProject(updated);
     },
@@ -69,41 +72,51 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, adapter: St
       return { success: true, projects: await this.list(userId) };
     },
 
-    async getExport(projectId: string, exportName: string) {
-      if (!dbConnection) throw new Error('Database connection not available');
-      const collectionName = `export__${projectId}__${exportName}`;
-      const result = await dbConnection.collection(collectionName).find().toArray();
-      return result;
+    async getExport(projectId: string, exportId: string) {
+      const exportDoc = await ExportModel.findOne({ _id: exportId, project: projectId });
+      if (!exportDoc) throw new Error('Export not found');
+      return exportDoc;
+    },
+
+    async addExportToProject(projectId: string, exportId: string) {
+      await ProjectModel.findByIdAndUpdate(
+        projectId,
+        { $push: { exports: exportId } }
+      );
     }
-  };
-}
 
-function formatProject(doc: any): ProjectInfo {
-  return {
-    id: doc._id.toString(),
-    name: doc.name,
-    image: doc.image,
-    members: doc.members.map((m: any) => ({
-      userId: m.userId,
-      role: m.role,
-      archived: m.archived ?? false
-    })),
-    description: doc.description,
-    rootFolders: doc.rootFolders || [],
-    settings: {
-      allowUpload: doc.allowUpload,
-      allowSharing: doc.allowSharing,
-    }
   };
-}
 
-function formatProjectList(doc: any, userId?: string): ProjectListInfo {
-  const archived = doc.members?.find((m: any) => m.userId?.toString() === userId)?.archived ?? false;
+  function formatProject(doc: any): ProjectInfo {
+    return {
+      id: doc._id.toString(),
+      name: doc.name,
+      image: doc.image,
+      members: doc.members.map((m: any) => ({
+        userId: m.userId?._id || m.userId,
+        username: m.userId?.username,
+        email: m.userId?.email,
+        role: m.role,
+        archived: m.archived ?? false
+      })),
+      description: doc.description,
+      rootFolders: doc.rootFolders || [],
+      settings: {
+        allowUpload: doc.allowUpload,
+        allowSharing: doc.allowSharing,
+      },
+      exports: doc.exports || []
+    };
+  }
 
-  return {
-    id: doc._id.toString(),
-    name: doc.name,
-    image: doc.image,
-    archived
-  };
+  function formatProjectList(doc: any, userId?: string): ProjectListInfo {
+    const archived = doc.members?.find((m: any) => m.userId?.toString() === userId)?.archived ?? false;
+
+    return {
+      id: doc._id.toString(),
+      name: doc.name,
+      image: doc.image,
+      archived
+    };
+  }
 }

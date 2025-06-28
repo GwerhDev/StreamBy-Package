@@ -15,11 +15,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
   const dbResult = config.projectProvider
-    ? { projectProvider: config.projectProvider, mongoConnection: undefined }
+    ? { projectProvider: config.projectProvider, exportProvider: config.exportProvider, mongoConnection: undefined }
     : createDatabaseProvider(config.databases!, adapter);
 
   const projectProvider = dbResult.projectProvider;
-  const dbConnection = dbResult.mongoConnection;
+  const exportProvider = dbResult.exportProvider;
 
   router.get('/auth', async (req: Request, res: Response) => {
     try {
@@ -224,11 +224,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  router.get('/projects/:id/exports/:name', async (req: Request, res: Response) => {
+  router.get('/projects/:id/exports/:export_id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
-      const exportName = req.params.name;
+      const exportId = req.params.export_id;
 
       const project = await projectProvider.getById(projectId);
 
@@ -236,41 +236,65 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(404).json({ error: 'Project not found' });
       }
 
-      if (!project.members?.some(m => m.userId === auth.userId)) {
+      if (!isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized access' });
       }
 
-      const data = await projectProvider.getExport(projectId, exportName);
+      const data = await exportProvider!.getById(exportId);
 
-      res.json({ exportName, data });
+      res.json({ data });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to fetch export data', details: err.message });
     }
   });
 
-  router.post('/projects/:id/exports/:name', async (req: Request, res: Response) => {
+  router.post('/projects/:id/exports', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
-      const exportName = req.params.name;
-      const payload = req.body;
+      const { name, description, collectionName } = req.body;
+
+      if (!name || !collectionName) {
+        return res.status(400).json({ error: 'Missing export name or collectionName' });
+      }
 
       const project = await projectProvider.getById(projectId);
-      if (!project || !project.members?.some((m: any) => m.userId === auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized access' });
+      if (!project || !isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      if (!dbConnection) {
-        return res.status(500).json({ error: 'Database connection not available' });
-      }
+      const newExport = await exportProvider!.create({
+        name,
+        description,
+        collectionName,
+        projectId
+      });
 
-      const collection = dbConnection.collection(`export__${projectId}__${exportName}`);
-      await collection.deleteMany({});
-      await collection.insertMany(Array.isArray(payload) ? payload : [payload]);
+      await projectProvider.addExportToProject(projectId, newExport.id);
 
-      res.status(201).json({ success: true });
+      res.status(201).json({ data: newExport });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to save export data', details: err.message });
+      res.status(500).json({ error: 'Failed to create export', details: err.message });
+    }
+  });
+
+  router.get('/projects/:id/members', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      const projectId = req.params.id;
+
+      const project = await projectProvider.getById(projectId, true);
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      res.json({ members: project.members });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch project members', details: err.message });
     }
   });
 

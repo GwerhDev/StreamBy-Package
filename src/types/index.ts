@@ -40,6 +40,10 @@ export interface ProjectInfo {
   }[];
   description?: string;
   rootFolders?: FolderNode[];
+  exports?: {
+    _id: string;
+    collectionName: string;
+  }[];
   settings?: {
     allowUpload?: boolean;
     allowSharing?: boolean;
@@ -73,6 +77,7 @@ export interface StreamByConfig {
   }[];
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
+  exportProvider?: ExportProvider;
   projectProvider?: ProjectProvider;
   adapter?: StorageAdapter;
 }
@@ -86,12 +91,30 @@ export interface AuthContext {
 
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
+export interface Export {
+  id: string;
+  collectionName: string;
+  projectId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExportProvider {
+  getById(exportId: string): Promise<Export>;
+  create(data: {
+    name: string;
+    description?: string;
+    collectionName: string;
+    projectId: string;
+  }): Promise<Export>;
+}
+
 export interface ProjectProvider {
   getExport(projectId: string, exportName: string): Promise<any[]>;
   archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[] }>;
   unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[] }>;
   list(userId?: string): Promise<ProjectInfo[]>;
-  getById(projectId: string): Promise<ProjectInfo>;
+  getById(projectId: string, populateMembers?: boolean): Promise<ProjectInfo>;
   delete(projectId: string): Promise<{ success: boolean }>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;
   create(data: {
@@ -106,4 +129,5 @@ export interface ProjectProvider {
     allowSharing?: boolean;
     rootFolders?: FolderNode[];
   }): Promise<ProjectInfo>;
+  addExportToProject(projectId: string, exportId: string): Promise<void>;
 }
