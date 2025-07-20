@@ -3,8 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
-  mongoUri: process.env.MONGO_URI || 'mongodb://localhost:27017/streamby',
-  jwtSecret: process.env.JWT_SECRET || 'supersecretjwtkey',
+  mongoUri: process.env.MONGO_URI || '',
   s3: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',

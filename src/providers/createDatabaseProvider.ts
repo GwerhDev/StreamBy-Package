@@ -37,7 +37,10 @@ export function createDatabaseProvider(
 
   const prismaConfig = databases.find((db) => db.dbType === 'prisma');
   if (prismaConfig) {
-    prismaClient = createPrismaProvider() || undefined;
+    if (!prismaConfig.connectionString) {
+      throw new Error('Prisma connection string is required for prisma dbType.');
+    }
+    prismaClient = createPrismaProvider(prismaConfig.connectionString) || undefined;
   }
 
   if (!mongoConnection && !prismaClient) {
@@ -58,7 +61,10 @@ export function createDatabaseProvider(
 
   return {
     exportProvider: mongoExportProvider || prismaExportProvider,
-    projectProvider: mongoProjectProvider || prismaProjectProvider,
+    projectProviders: {
+      mongo: mongoProjectProvider,
+      prisma: prismaProjectProvider,
+    },
     exportCollectionProvider: prismaExportCollectionProvider, // Solo Prisma tiene este por ahora
     mongoConnection,
     prismaClient,

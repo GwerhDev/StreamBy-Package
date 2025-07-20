@@ -1,5 +1,5 @@
 import express, { Router, Request, Response } from 'express';
-import { StreamByConfig, StorageAdapter } from '../types';
+import { ProjectProvider, StreamByConfig, StorageAdapter } from '../types';
 import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
 import { createStorageProvider } from '../providers/createStorageProvider';
@@ -14,15 +14,23 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
-  const dbResult = config.projectProvider
-    ? { projectProvider: config.projectProvider, exportProvider: config.exportProvider, mongoConnection: undefined, prismaClient: undefined, exportCollectionProvider: undefined }
-    : createDatabaseProvider(config.databases!, adapter);
+  const projectProviders: Record<string, ProjectProvider | undefined> = {};
+  let exportProvider: any;
+  let exportCollectionProvider: any;
 
-  const projectProvider = dbResult.projectProvider;
-  const exportProvider = dbResult.exportProvider;
-  const exportCollectionProvider = dbResult.exportCollectionProvider;
+  if (config.databases) {
+    const db = createDatabaseProvider(config.databases, adapter);
+    projectProviders.mongo = db.projectProviders.mongo;
+    projectProviders.prisma = db.projectProviders.prisma;
+    exportProvider = db.exportProvider;
+    exportCollectionProvider = db.exportCollectionProvider;
+  } else {
+    projectProviders.default = config.projectProvider;
+    exportProvider = config.exportProvider;
+    exportCollectionProvider = config.exportCollectionProvider;
+  }
 
-  if (!projectProvider) {
+  if (!projectProviders.mongo && !projectProviders.prisma) {
     throw new Error('Project provider is not initialized. Please check your database configuration.');
   }
 
@@ -36,6 +44,15 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       res.status(200).json({ logged: true, ...auth });
     } catch (err) {
       res.status(401).json({ logged: false });
+    }
+  });
+
+  router.get('/databases', async (req: Request, res: Response) => {
+    try {
+      const databases = Object.keys(projectProviders).filter(key => projectProviders[key]);
+      res.status(200).json({ databases });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get databases' });
     }
   });
 
@@ -71,7 +88,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await deleteProjectImage(adapter, projectId);
-      const updated = await projectProvider.update(projectId, { image: '' });
+      const provider = await getProjectProvider(projectId);
+      if (!provider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+      const updated = await provider.update(projectId, { image: '' });
 
       res.status(201).json(updated);
     } catch (err: any) {
@@ -95,10 +116,48 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
+  async function getProjectProvider(projectId: string): Promise<ProjectProvider | null> {
+    // Try to find the project in mongo
+    if (projectProviders.mongo) {
+      try {
+        const project = await projectProviders.mongo.getById(projectId);
+        if (project) return projectProviders.mongo;
+      } catch (error) { /* ignore */ }
+    }
+
+    // Try to find the project in prisma
+    if (projectProviders.prisma) {
+      try {
+        const project = await projectProviders.prisma.getById(projectId);
+        if (project) return projectProviders.prisma;
+      } catch (error) { /* ignore */ }
+    }
+
+    // If a default provider is set (single DB mode), try that
+    if (projectProviders.default) {
+      try {
+        const project = await projectProviders.default.getById(projectId);
+        if (project) return projectProviders.default;
+      } catch (error) { /* ignore */ }
+    }
+
+    return null;
+  }
+
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      const projects = await projectProvider.list(auth.userId);
+      
+      const projects = [];
+      if (projectProviders.mongo) {
+        projects.push(...await projectProviders.mongo.list(auth.userId));
+      }
+      if (projectProviders.prisma) {
+        projects.push(...await projectProviders.prisma.list(auth.userId));
+      }
+      if (projectProviders.default) {
+        projects.push(...await projectProviders.default.list(auth.userId));
+      }
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
@@ -113,9 +172,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Permission denied' });
       }
 
-      const { name, description } = req.body;
+      const { name, description, dbType } = req.body;
 
-      const newProject = await projectProvider.create({
+      const provider = dbType ? projectProviders[dbType] : projectProviders.default || projectProviders.mongo || projectProviders.prisma;
+
+      if (!provider) {
+        return res.status(400).json({ error: 'Invalid dbType' });
+      }
+
+      const newProject = await provider.create({
+        dbType: dbType || 'mongo',
         name,
         description: description || '',
         members: [{ userId: auth.userId, role: "admin" }]
@@ -131,6 +197,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
+
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
 
       const project = await projectProvider.getById(projectId);
       if (!project) {
@@ -156,6 +227,12 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const projectId = req.params.id;
       const updates = req.body;
+
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
       const project = await projectProvider.getById(projectId);
 
       if (!project) {
@@ -182,6 +259,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
       const project = await projectProvider.getById(projectId);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -204,6 +286,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
       const project = await projectProvider.getById(projectId);
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized project access' });
@@ -220,6 +307,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
+
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
 
       const project = await projectProvider.getById(projectId);
       if (!project || !isProjectMember(project, auth.userId)) {
@@ -238,6 +330,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
       const exportId = req.params.export_id;
+
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
 
       const project = await projectProvider.getById(projectId);
 
@@ -267,6 +364,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(400).json({ error: 'Missing export name or collectionName' });
       }
 
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
       const project = await projectProvider.getById(projectId);
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized project access' });
@@ -291,6 +393,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
+
+      const projectProvider = await getProjectProvider(projectId);
+      if (!projectProvider) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
 
       const project = await projectProvider.getById(projectId, true);
       if (!project) {

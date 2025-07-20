@@ -14,6 +14,7 @@ const config = {
   awsSecretKey: process.env.AWS_SECRET_KEY,
   awsBucketRegion: process.env.AWS_BUCKET_REGION,
   mongodbString: process.env.MONGODB_STRING,
+  supabaseString: process.env.SUPABASE_STRING,
 };
 
 async function main() {
@@ -30,6 +31,10 @@ async function main() {
       {
         dbType: 'mongo',
         connectionString: config.mongodbString!,
+      },
+      {
+        dbType: 'prisma',
+        connectionString: config.supabaseString!,
       }
     ],
     storageProviders: [

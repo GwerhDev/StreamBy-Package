@@ -14,6 +14,7 @@ export function initProjectModel(connection: mongoose.Connection) {
   }, { _id: false });
 
   const projectSchema = new mongoose.Schema({
+    dbType: { type: String, required: true },
     name: { type: String, required: true },
     description: { type: String },
     image: { type: String },

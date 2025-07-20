@@ -9,6 +9,7 @@ generator client {
 
 model Project {
   id           String       @id @default(uuid())
+  dbType       String
   name         String
   description  String?
   image        String?

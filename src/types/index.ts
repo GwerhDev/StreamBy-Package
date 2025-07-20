@@ -31,6 +31,7 @@ export interface StorageAdapter {
 
 export interface ProjectInfo {
   id: string;
+  dbType: DatabaseType;
   name: string;
   image?: string;
   members?: {
@@ -119,6 +120,7 @@ export interface ProjectProvider {
   delete(projectId: string): Promise<{ success: boolean }>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'folders'>>): Promise<ProjectInfo>; // Cambiado de rootFolders a folders
   create(data: {
+    dbType: DatabaseType;
     name: string;
     image?: string;
     members?: {

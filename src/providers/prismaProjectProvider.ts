@@ -18,6 +18,7 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
     async create(data) {
       const newProject = await prisma.project.create({
         data: {
+          dbType: data.dbType,
           name: data.name,
           description: data.description || '',
           image: data.image || '',
@@ -119,6 +120,7 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
   function formatProject(doc: any): ProjectInfo {
     return {
       id: doc.id,
+      dbType: doc.dbType,
       name: doc.name,
       image: doc.image,
       members: doc.members.map((m: any) => ({

@@ -15,6 +15,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel
 
     async create(data) {
       const newProject = await ProjectModel.create({
+        dbType: data.dbType,
         members: [
           {
             userId: data.members?.[0].userId,
@@ -90,6 +91,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel
   function formatProject(doc: any): ProjectInfo {
     return {
       id: doc._id.toString(),
+      dbType: doc.dbType,
       name: doc.name,
       image: doc.image,
       members: doc.members.map((m: any) => ({
