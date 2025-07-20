@@ -74,8 +74,9 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
         await prisma.project.delete({ where: { id: projectId } });
         await adapter.deleteProjectDirectory(projectId);
         return { success: true };
-      } catch (error) {
-        throw new Error('Project not found');
+      } catch (error: any) {
+        console.error('Error deleting project:', error);
+        throw new Error(`Failed to delete project: ${error.message || error}`);
       }
     },
 
