@@ -40,10 +40,16 @@ export function createMongooseProjectProvider(ProjectModel: Model<any>, ExportMo
       return formatProject(updated);
     },
 
-    async list(userId?: string) {
-      const all = await ProjectModel.find(userId
-        ? { 'members': { $elemMatch: { userId } } }
-        : {});
+    async list(userId?: string, archived?: boolean) {
+      const query: any = {};
+      if (userId) {
+        const elemMatch: any = { userId };
+        if (typeof archived === 'boolean') {
+          elemMatch.archived = archived;
+        }
+        query['members'] = { $elemMatch: elemMatch };
+      }
+      const all = await ProjectModel.find(query);
       return all.map(doc => formatProjectList(doc, userId));
     },
 

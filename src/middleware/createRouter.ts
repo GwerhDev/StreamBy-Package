@@ -160,16 +160,17 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      const archived = req.query.archived ? String(req.query.archived).toLowerCase() === 'true' : undefined;
       
       const projects = [];
       if (projectProviders.nosql) {
-        projects.push(...await projectProviders.nosql.list(auth.userId));
+        projects.push(...await projectProviders.nosql.list(auth.userId, archived));
       }
       if (projectProviders.sql) {
-        projects.push(...await projectProviders.sql.list(auth.userId));
+        projects.push(...await projectProviders.sql.list(auth.userId, archived));
       }
       if (projectProviders.default) {
-        projects.push(...await projectProviders.default.list(auth.userId));
+        projects.push(...await projectProviders.default.list(auth.userId, archived));
       }
       res.json({ projects });
     } catch (err) {
@@ -312,8 +313,18 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const result = await projectProvider.archive(projectId, auth.userId);
-      res.status(200).json(result);
+      await projectProvider.archive(projectId, auth.userId);
+      const projects = [];
+      if (projectProviders.nosql) {
+        projects.push(...await projectProviders.nosql.list(auth.userId));
+      }
+      if (projectProviders.sql) {
+        projects.push(...await projectProviders.sql.list(auth.userId));
+      }
+      if (projectProviders.default) {
+        projects.push(...await projectProviders.default.list(auth.userId));
+      }
+      res.status(200).json({ success: true, projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to archive project', details: err.message });
     }
@@ -334,8 +345,18 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const result = await projectProvider.unarchive(projectId, auth.userId);
-      res.status(200).json(result);
+      await projectProvider.unarchive(projectId, auth.userId);
+      const projects = [];
+      if (projectProviders.nosql) {
+        projects.push(...await projectProviders.nosql.list(auth.userId));
+      }
+      if (projectProviders.sql) {
+        projects.push(...await projectProviders.sql.list(auth.userId));
+      }
+      if (projectProviders.default) {
+        projects.push(...await projectProviders.default.list(auth.userId));
+      }
+      res.status(200).json({ success: true, projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
     }

@@ -59,9 +59,19 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
       return formatProject(updated);
     },
 
-    async list(userId?: string) {
+    async list(userId?: string, archived?: boolean) {
+      const whereClause: any = {};
+      if (userId) {
+        whereClause.members = {
+          some: {
+            userId,
+            ...(typeof archived === 'boolean' && { archived }),
+          },
+        };
+      }
+
       const all = await prisma.project.findMany({
-        where: userId ? { members: { some: { userId } } } : {},
+        where: whereClause,
         include: {
           members: true,
         },
