@@ -1,10 +1,12 @@
 datasource db {
   provider = "postgresql"
   url      = env("SUPABASE_STRING")
+  schemas  = ["streamby"]
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 model Project {
@@ -21,6 +23,8 @@ model Project {
   members      Member[]
   exports      Export[]
   exportCollections ExportCollection[]
+
+  @@schema("streamby")
 }
 
 model FolderNode {
@@ -31,6 +35,8 @@ model FolderNode {
   project    Project     @relation(fields: [projectId], references: [id])
   parent     FolderNode? @relation("FolderChildren", fields: [parentId], references: [id])
   children   FolderNode[] @relation("FolderChildren")
+
+  @@schema("streamby")
 }
 
 model Member {
@@ -40,6 +46,8 @@ model Member {
   archived   Boolean  @default(false)
   projectId  String
   project    Project  @relation(fields: [projectId], references: [id])
+
+  @@schema("streamby")
 }
 
 model Export {
@@ -51,6 +59,8 @@ model Export {
   project      Project  @relation(fields: [projectId], references: [id])
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@schema("streamby")
 }
 
 model ExportCollection {
@@ -63,6 +73,7 @@ model ExportCollection {
   entries    ExportEntry[]
 
   @@unique([projectId, name])
+  @@schema("streamby")
 }
 
 model ExportEntry {
@@ -71,4 +82,6 @@ model ExportEntry {
   value              String
   exportCollectionId String
   exportCollection   ExportCollection @relation(fields: [exportCollectionId], references: [id])
+
+  @@schema("streamby")
 }
