@@ -6,7 +6,7 @@ export function createMongooseProjectProvider(ProjectModel: Model<any>, ExportMo
     async getById(projectId, populateMembers = false) {
       let query = ProjectModel.findById(projectId).populate('exports', ['_id', 'collectionName']);
       if (populateMembers) {
-        query = query.populate('members.userId');
+        // No longer populating 'members.userId' to avoid dependency on external User model
       }
       const project = await query;
       if (!project) throw new Error('Project not found');
@@ -95,9 +95,7 @@ export function createMongooseProjectProvider(ProjectModel: Model<any>, ExportMo
       name: doc.name,
       image: doc.image,
       members: doc.members.map((m: any) => ({
-        userId: m.userId?._id || m.userId,
-        username: m.userId?.username,
-        email: m.userId?.email,
+        userId: m.userId,
         role: m.role,
         archived: m.archived ?? false
       })),

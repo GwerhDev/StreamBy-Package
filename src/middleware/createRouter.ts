@@ -136,9 +136,10 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
           if (project) return specificProvider;
         } catch (error) { /* ignore */ }
       }
+      return null; // If dbType was provided and no project found in that specific provider, return null.
     }
 
-    // Fallback to searching all providers if dbType is not provided or project not found in specific dbType
+    // If dbType is not provided, search both nosql and sql
     if (projectProviders.nosql) {
       try {
         const project = await projectProviders.nosql.getById(projectId, true);
@@ -153,14 +154,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       } catch (error) { /* ignore */ }
     }
 
-    if (projectProviders.default) {
-      try {
-        const project = await projectProviders.default.getById(projectId, true);
-        if (project) return projectProviders.default;
-      } catch (error) { /* ignore */ }
-    }
-
-    return null;
+    return null; // If not found in either nosql or sql, return null.
   }
 
   router.get('/projects', async (req: Request, res: Response) => {
@@ -219,7 +213,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const dbType = req.query.dbType as string | undefined;
 
       const projectProvider = await getProjectProvider(projectId, dbType);
-      console.log('Project Provider:', projectProvider);
+      
 
       if (!projectProvider) {
         return res.status(404).json({ error: 'Project not found' });

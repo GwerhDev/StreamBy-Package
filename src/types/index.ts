@@ -117,7 +117,7 @@ export interface ProjectProvider {
   archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectListInfo[] }>; // Cambiado a ProjectListInfo[]
   unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectListInfo[] }>; // Cambiado a ProjectListInfo[]
   list(userId?: string): Promise<ProjectListInfo[]>; // Cambiado a ProjectListInfo[]
-  getById(projectId: string, populateMembers?: boolean): Promise<ProjectInfo>;
+  getById(projectId: string, populateMembers?: boolean): Promise<ProjectInfo | null>;
   delete(projectId: string): Promise<{ success: boolean }>;
   update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'folders'>>): Promise<ProjectInfo>; // Cambiado de rootFolders a folders
   create(data: {

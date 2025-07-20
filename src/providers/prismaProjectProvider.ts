@@ -11,7 +11,7 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
           members: populateMembers ? true : false,
         },
       });
-      if (!project) throw new Error('Project not found');
+      if (!project) return null;
       return formatProject(project);
     },
 
