@@ -1,7 +1,7 @@
 import { ProjectProvider, ProjectInfo, StorageAdapter, ProjectListInfo } from '../types';
 import { Model } from 'mongoose';
 
-export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel: Model<any>, adapter: StorageAdapter): ProjectProvider {
+export function createMongooseProjectProvider(ProjectModel: Model<any>, ExportModel: Model<any>, adapter: StorageAdapter): ProjectProvider {
   return {
     async getById(projectId, populateMembers = false) {
       let query = ProjectModel.findById(projectId).populate('exports', ['_id', 'collectionName']);

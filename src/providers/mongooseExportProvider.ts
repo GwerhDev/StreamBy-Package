@@ -1,7 +1,7 @@
 import { Model } from 'mongoose';
 import { ExportProvider } from '../types';
 
-export function createMongoExportProvider(ExportModel: Model<any>): ExportProvider {
+export function createMongooseExportProvider(ExportModel: Model<any>): ExportProvider {
   return {
     async getById(exportId: string): Promise<any> {
       return await ExportModel.findById(exportId).lean();

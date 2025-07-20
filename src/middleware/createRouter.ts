@@ -219,6 +219,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const dbType = req.query.dbType as string | undefined;
 
       const projectProvider = await getProjectProvider(projectId, dbType);
+      console.log('Project Provider:', projectProvider);
+
       if (!projectProvider) {
         return res.status(404).json({ error: 'Project not found' });
       }

@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
-  mongoUri: process.env.MONGO_URI || '',
   s3: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
@@ -18,5 +17,6 @@ export const config = {
   local: {
     storagePath: process.env.LOCAL_STORAGE_PATH || './uploads',
   },
-  supabaseString: process.env.SUPABASE_STRING || '',
+  mongooseString: process.env.MONGOOSE_STRING || '',
+  prismaString: process.env.PRISMA_STRING || '',
 };

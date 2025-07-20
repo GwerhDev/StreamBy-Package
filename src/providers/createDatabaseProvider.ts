@@ -1,8 +1,7 @@
 import mongoose from 'mongoose';
 import { initProjectModel } from '../db/initProjectModel';
-import { initUserModel } from '../db/initUserModel';
-import { createMongoExportProvider } from './mongoExportProvider';
-import { createMongoProjectProvider } from './mongoProjectProvider';
+import { createMongooseExportProvider } from './mongooseExportProvider';
+import { createMongooseProjectProvider } from './mongooseProjectProvider';
 import { StorageAdapter, DatabaseCredential } from '../types';
 import { initExportModel } from '../db/initExportModel';
 import { createPrismaProvider } from './createPrismaProvider';
@@ -43,10 +42,9 @@ export function createDatabaseProvider(
   // If mongoConnection is not defined, we can't create mongo-based providers
   const ExportModel = mongoConnection ? initExportModel(mongoConnection) : undefined;
   const ProjectModel = mongoConnection ? initProjectModel(mongoConnection) : undefined;
-  const UserModel = mongoConnection ? initUserModel(mongoConnection) : undefined;
 
-  const mongoExportProvider = ExportModel ? createMongoExportProvider(ExportModel) : undefined;
-  const mongoProjectProvider = ProjectModel && ExportModel ? createMongoProjectProvider(ProjectModel, ExportModel, adapter) : undefined;
+  const mongoExportProvider = ExportModel ? createMongooseExportProvider(ExportModel) : undefined;
+  const mongoProjectProvider = ProjectModel && ExportModel ? createMongooseProjectProvider(ProjectModel, ExportModel, adapter) : undefined;
 
   const prismaExportProvider = prismaClient ? createPrismaExportProvider(prismaClient) : undefined;
   const prismaProjectProvider = prismaClient ? createPrismaProjectProvider(prismaClient, adapter) : undefined;
