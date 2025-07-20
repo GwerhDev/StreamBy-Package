@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import mongoose from 'mongoose';
 
 export interface S3Config {
   bucket: string;
@@ -164,6 +165,6 @@ export interface DatabaseProviders {
     sql?: ProjectProvider;
   };
   exportCollectionProvider?: ExportCollectionProvider;
-  mongoConnection?: mongoose.Connection;
+  mongooseClient?: mongoose.Connection;
   prismaClient?: any; // Using any for PrismaClient to avoid direct dependency in types
 }

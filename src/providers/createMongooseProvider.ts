@@ -11,12 +11,12 @@ export function createMongooseProvider(connectionString: string, adapter: Storag
     return null;
   }
 
-  const mongoConnection = mongoose.createConnection(connectionString, {
+  const mongooseClient = mongoose.createConnection(connectionString, {
     dbName: undefined,
   });
 
-  const ExportModel = initExportModel(mongoConnection);
-  const ProjectModel = initProjectModel(mongoConnection);
+  const ExportModel = initExportModel(mongooseClient);
+  const ProjectModel = initProjectModel(mongooseClient);
 
   const exportProvider: ExportProvider = createMongooseExportProvider(ExportModel);
   const projectProvider: ProjectProvider = createMongooseProjectProvider(ProjectModel, ExportModel, adapter);
@@ -26,7 +26,7 @@ export function createMongooseProvider(connectionString: string, adapter: Storag
   const exportCollectionProvider: ExportCollectionProvider | undefined = undefined;
 
   return {
-    mongoConnection,
+    mongooseClient,
     exportProvider,
     projectProvider,
     exportCollectionProvider,

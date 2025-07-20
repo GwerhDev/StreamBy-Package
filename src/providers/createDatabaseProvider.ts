@@ -36,7 +36,7 @@ export function createDatabaseProvider(
       sql: prismaProviders?.projectProvider,
     },
     exportCollectionProvider: mongoProviders?.exportCollectionProvider || prismaProviders?.exportCollectionProvider,
-    mongoConnection: mongoProviders?.mongoConnection,
+    mongooseClient: mongoProviders?.mongooseClient,
     prismaClient: prismaProviders?.prismaClient,
   };
 }
