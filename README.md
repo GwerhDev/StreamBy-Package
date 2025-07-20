@@ -89,6 +89,98 @@ Unit tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.co
 
 ---
 
+## 🗺️ API Endpoints
+
+Here's a summary of the key API endpoints provided by `@streamby/core`:
+
+### `GET /streamby/projects`
+
+Lists all projects accessible by the authenticated user.
+
+**Query Parameters:**
+- `archived`: (Optional) Filter projects by their archived status.
+  - `true`: Returns only archived projects.
+  - `false`: Returns only unarchived projects.
+  - (Omitted): Returns all projects (both archived and unarchived).
+
+**Example Response:**
+```json
+{
+  "projects": [
+    {
+      "id": "project1_id",
+      "dbType": "nosql",
+      "name": "My NoSQL Project",
+      "image": "url_to_image",
+      "archived": false
+    },
+    {
+      "id": "project2_id",
+      "dbType": "sql",
+      "name": "My SQL Project",
+      "image": "url_to_image",
+      "archived": true
+    }
+  ]
+}
+```
+
+### `PATCH /streamby/projects/:id/archive`
+
+Archives a specific project. After archiving, it returns the complete list of projects for the user, including the updated project.
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "projects": [
+    {
+      "id": "project1_id",
+      "dbType": "nosql",
+      "name": "My NoSQL Project",
+      "image": "url_to_image",
+      "archived": true
+    },
+    {
+      "id": "project2_id",
+      "dbType": "sql",
+      "name": "My SQL Project",
+      "image": "url_to_image",
+      "archived": false
+    }
+  ]
+}
+```
+
+### `PATCH /streamby/projects/:id/unarchive`
+
+Unarchives a specific project. After unarchiving, it returns the complete list of projects for the user, including the updated project.
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "projects": [
+    {
+      "id": "project1_id",
+      "dbType": "nosql",
+      "name": "My NoSQL Project",
+      "image": "url_to_image",
+      "archived": false
+    },
+    {
+      "id": "project2_id",
+      "dbType": "sql",
+      "name": "My SQL Project",
+      "image": "url_to_image",
+      "archived": false
+    }
+  ]
+}
+```
+
+---
+
 ## 🚣 Roadmap
 
 - [ ] Support for Google Cloud Storage
