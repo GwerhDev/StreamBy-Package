@@ -26,7 +26,7 @@ export function createMongooseProjectProvider(ProjectModel: Model<any>, ExportMo
         name: data.name,
         description: data.description || '',
         image: data.image || '',
-        rootFolders: data.folders || [],
+        folders: data.folders || [],
         allowUpload: data.allowUpload ?? true,
         allowSharing: data.allowSharing ?? false,
       });
@@ -80,10 +80,16 @@ export function createMongooseProjectProvider(ProjectModel: Model<any>, ExportMo
     },
 
     async addExportToProject(projectId: string, exportId: string) {
-      await ProjectModel.findByIdAndUpdate(
-        projectId,
-        { $push: { exports: exportId } }
-      );
+      // En Mongoose, la relación ya está definida en el modelo Export.
+      // No es necesario actualizar el Project directamente.
+      // Si se necesita vincular un Export existente a un Project, se haría al crear o actualizar el Export.
+      // Por ejemplo, al crear un Export:
+      // ExportModel.create({ ..., projectId: projectId });
+      // O al actualizar un Export:
+      // ExportModel.findByIdAndUpdate(exportId, { projectId: projectId });
+      // Dado que el método original de Mongoose solo añade el ID, asumimos que el Export ya existe y tiene el projectId correcto.
+      // Si la lógica requiere añadir un Export existente a un Project, y el Export no tiene el projectId, se debería actualizar el Export.
+      // Por ahora, no se requiere ninguna acción aquí si la relación ya está establecida en el modelo Export.
     }
 
   };

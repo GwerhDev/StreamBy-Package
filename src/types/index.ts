@@ -156,3 +156,14 @@ export interface ExportCollectionProvider {
   }): Promise<any>;
   delete(id: string): Promise<{ success: boolean }>;
 }
+
+export interface DatabaseProviders {
+  exportProvider?: ExportProvider;
+  projectProviders: {
+    nosql?: ProjectProvider;
+    sql?: ProjectProvider;
+  };
+  exportCollectionProvider?: ExportCollectionProvider;
+  mongoConnection?: mongoose.Connection;
+  prismaClient?: any; // Using any for PrismaClient to avoid direct dependency in types
+}
