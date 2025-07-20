@@ -4,14 +4,12 @@ import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
 import { createStorageProvider } from '../providers/createStorageProvider';
 import { createDatabaseProvider } from '../providers/createDatabaseProvider';
-import { pushPrismaSchema } from '../utils/pushPrismaSchema';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
 }
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
-  pushPrismaSchema();
   const router = express.Router();
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
