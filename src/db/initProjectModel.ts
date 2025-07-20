@@ -24,7 +24,8 @@ export function initProjectModel(connection: mongoose.Connection) {
     members: [memberSchema],
     exports: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Export' }]
   }, {
-    timestamps: true
+    timestamps: true,
+    collection: 'streamby_projects'
   });
 
   return connection.model('Project', projectSchema);

@@ -7,7 +7,8 @@ export function initExportModel(connection: mongoose.Connection) {
     collectionName: { type: String, required: true },
     projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', required: true },
   }, {
-    timestamps: true
+    timestamps: true,
+    collection: 'streamby_exports'
   });
 
   return connection.model('Export', exportSchema);
