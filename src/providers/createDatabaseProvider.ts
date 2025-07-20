@@ -1,4 +1,4 @@
-import { StorageAdapter, DatabaseCredential } from '../types';
+import { StorageAdapter, DatabaseCredential, DatabaseProviders } from '../types';
 import { createPrismaProvider } from './createPrismaProvider';
 import { createMongooseProvider } from './createMongooseProvider';
 
