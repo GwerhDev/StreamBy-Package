@@ -1,11 +1,12 @@
 {
   "name": "streamby-core",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "description": "StreamBy middleware framework for media storage management",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "prisma"
   ],
   "scripts": {
     "build": "tsc",
