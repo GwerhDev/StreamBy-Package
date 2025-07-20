@@ -8,7 +8,7 @@ export function initProjectModel(connection: mongoose.Connection) {
   }, { _id: false });
 
   const memberSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, required: true },
+    userId: { type: String, required: true },
     role: { type: String, enum: ['viewer', 'editor', 'admin'], default: 'viewer' },
     archived: { type: Boolean, default: false }
   }, { _id: false });
