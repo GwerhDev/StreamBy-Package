@@ -49,6 +49,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   router.get('/databases', async (req: Request, res: Response) => {
     try {
+      const auth = await config.authProvider(req);
+      if (!auth) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
       const databases = [];
       if (projectProviders.nosql) {
         databases.push({ name: "NoSQL (Mongo)", value: "nosql" });
@@ -179,6 +184,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       const { name, description, dbType } = req.body;
+      console.log(dbType)
 
       const provider = dbType ? projectProviders[dbType] : projectProviders.default || projectProviders.nosql || projectProviders.sql;
 
