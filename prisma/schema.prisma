@@ -1,0 +1,73 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("SUPABASE_STRING")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Project {
+  id           String       @id @default(uuid())
+  name         String
+  description  String?
+  image        String?
+  allowUpload  Boolean      @default(true)
+  allowSharing Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  folders      FolderNode[]
+  members      Member[]
+  exports      Export[]
+  exportCollections ExportCollection[]
+}
+
+model FolderNode {
+  id         String      @id @default(uuid())
+  name       String
+  projectId  String
+  parentId   String?
+  project    Project     @relation(fields: [projectId], references: [id])
+  parent     FolderNode? @relation("FolderChildren", fields: [parentId], references: [id])
+  children   FolderNode[] @relation("FolderChildren")
+}
+
+model Member {
+  id         String   @id @default(uuid())
+  userId     String
+  role       String
+  archived   Boolean  @default(false)
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id])
+}
+
+model Export {
+  id           String   @id @default(uuid())
+  name         String
+  description  String?
+  collectionName String
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ExportCollection {
+  id         String       @id @default(uuid())
+  projectId  String
+  name       String
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  project    Project      @relation(fields: [projectId], references: [id])
+  entries    ExportEntry[]
+
+  @@unique([projectId, name])
+}
+
+model ExportEntry {
+  id                 String         @id @default(uuid())
+  key                String
+  value              String
+  exportCollectionId String
+  exportCollection   ExportCollection @relation(fields: [exportCollectionId], references: [id])
+}

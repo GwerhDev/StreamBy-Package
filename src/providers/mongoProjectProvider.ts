@@ -25,7 +25,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel
         name: data.name,
         description: data.description || '',
         image: data.image || '',
-        rootFolders: data.rootFolders || [],
+        rootFolders: data.folders || [],
         allowUpload: data.allowUpload ?? true,
         allowSharing: data.allowSharing ?? false,
       });
@@ -100,7 +100,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel
         archived: m.archived ?? false
       })),
       description: doc.description,
-      rootFolders: doc.rootFolders || [],
+      folders: doc.rootFolders || [],
       settings: {
         allowUpload: doc.allowUpload,
         allowSharing: doc.allowSharing,

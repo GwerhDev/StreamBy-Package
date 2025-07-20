@@ -39,9 +39,9 @@ export interface ProjectInfo {
     archived?: boolean;
   }[];
   description?: string;
-  rootFolders?: FolderNode[];
+  folders?: FolderNode[]; // Cambiado de rootFolders a folders
   exports?: {
-    _id: string;
+    id: string; // Cambiado de _id a id
     collectionName: string;
   }[];
   settings?: {
@@ -63,11 +63,11 @@ export interface FolderNode {
   children?: FolderNode[];
 }
 
-export type DatabaseType = 'mongo';
+export type DatabaseType = 'mongo' | 'prisma'; // Añadido 'prisma'
 
 export interface DatabaseCredential {
   dbType: DatabaseType;
-  connectionString: string;
+  connectionString?: string; // connectionString ahora es opcional
 }
 
 export interface StreamByConfig {
@@ -79,6 +79,7 @@ export interface StreamByConfig {
   databases?: DatabaseCredential[];
   exportProvider?: ExportProvider;
   projectProvider?: ProjectProvider;
+  exportCollectionProvider?: ExportCollectionProvider; // Añadido
   adapter?: StorageAdapter;
 }
 
@@ -100,7 +101,7 @@ export interface Export {
 }
 
 export interface ExportProvider {
-  getById(exportId: string): Promise<Export>;
+  getById(exportId: string): Promise<Export | null>; // Puede ser null
   create(data: {
     name: string;
     description?: string;
@@ -110,13 +111,13 @@ export interface ExportProvider {
 }
 
 export interface ProjectProvider {
-  getExport(projectId: string, exportName: string): Promise<any[]>;
-  archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[] }>;
-  unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectInfo[] }>;
-  list(userId?: string): Promise<ProjectInfo[]>;
+  getExport(projectId: string, exportId: string): Promise<any | null>; // Puede ser null
+  archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectListInfo[] }>; // Cambiado a ProjectListInfo[]
+  unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectListInfo[] }>; // Cambiado a ProjectListInfo[]
+  list(userId?: string): Promise<ProjectListInfo[]>; // Cambiado a ProjectListInfo[]
   getById(projectId: string, populateMembers?: boolean): Promise<ProjectInfo>;
   delete(projectId: string): Promise<{ success: boolean }>;
-  update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'rootFolders'>>): Promise<ProjectInfo>;
+  update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'folders'>>): Promise<ProjectInfo>; // Cambiado de rootFolders a folders
   create(data: {
     name: string;
     image?: string;
@@ -127,7 +128,28 @@ export interface ProjectProvider {
     description?: string;
     allowUpload?: boolean;
     allowSharing?: boolean;
-    rootFolders?: FolderNode[];
+    folders?: FolderNode[]; // Cambiado de rootFolders a folders
   }): Promise<ProjectInfo>;
   addExportToProject(projectId: string, exportId: string): Promise<void>;
+}
+
+export interface ExportEntry {
+  id: string;
+  key: string;
+  value: string;
+  exportCollectionId: string;
+}
+
+export interface ExportCollectionProvider {
+  getById(id: string): Promise<any | null>;
+  create(data: {
+    projectId: string;
+    name: string;
+    entries: Array<{ key: string; value: string }>;
+  }): Promise<any>;
+  update(id: string, data: {
+    name?: string;
+    entries?: Array<{ key: string; value: string }>;
+  }): Promise<any>;
+  delete(id: string): Promise<{ success: boolean }>;
 }

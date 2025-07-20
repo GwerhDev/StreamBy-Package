@@ -15,11 +15,20 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
   const dbResult = config.projectProvider
-    ? { projectProvider: config.projectProvider, exportProvider: config.exportProvider, mongoConnection: undefined }
+    ? { projectProvider: config.projectProvider, exportProvider: config.exportProvider, mongoConnection: undefined, prismaClient: undefined, exportCollectionProvider: undefined }
     : createDatabaseProvider(config.databases!, adapter);
 
   const projectProvider = dbResult.projectProvider;
   const exportProvider = dbResult.exportProvider;
+  const exportCollectionProvider = dbResult.exportCollectionProvider;
+
+  if (!projectProvider) {
+    throw new Error('Project provider is not initialized. Please check your database configuration.');
+  }
+
+  if (!exportProvider) {
+    throw new Error('Export provider is not initialized. Please check your database configuration.');
+  }
 
   router.get('/auth', async (req: Request, res: Response) => {
     try {
