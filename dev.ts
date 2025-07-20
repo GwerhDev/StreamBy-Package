@@ -29,11 +29,11 @@ async function main() {
     authProvider: dummyAuthProvider,
     databases: [
       {
-        dbType: 'mongo',
+        dbType: 'nosql',
         connectionString: config.mongodbString!,
       },
       {
-        dbType: 'prisma',
+        dbType: 'sql',
         connectionString: config.supabaseString!,
       }
     ],

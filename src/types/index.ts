@@ -53,6 +53,7 @@ export interface ProjectInfo {
 
 export interface ProjectListInfo {
   id: string;
+  dbType: DatabaseType;
   name: string;
   image?: string;
   archived: boolean;
@@ -64,7 +65,7 @@ export interface FolderNode {
   children?: FolderNode[];
 }
 
-export type DatabaseType = 'mongo' | 'prisma'; // Añadido 'prisma'
+export type DatabaseType = 'sql' | 'nosql';
 
 export interface DatabaseCredential {
   dbType: DatabaseType;

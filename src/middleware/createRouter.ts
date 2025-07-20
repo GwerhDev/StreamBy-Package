@@ -20,8 +20,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   if (config.databases) {
     const db = createDatabaseProvider(config.databases, adapter);
-    projectProviders.mongo = db.projectProviders.mongo;
-    projectProviders.prisma = db.projectProviders.prisma;
+        projectProviders.nosql = db.projectProviders.nosql;
+    projectProviders.sql = db.projectProviders.sql;
     exportProvider = db.exportProvider;
     exportCollectionProvider = db.exportCollectionProvider;
   } else {
@@ -30,7 +30,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     exportCollectionProvider = config.exportCollectionProvider;
   }
 
-  if (!projectProviders.mongo && !projectProviders.prisma) {
+  if (!projectProviders.nosql && !projectProviders.sql) {
     throw new Error('Project provider is not initialized. Please check your database configuration.');
   }
 
@@ -49,7 +49,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   router.get('/databases', async (req: Request, res: Response) => {
     try {
-      const databases = Object.keys(projectProviders).filter(key => projectProviders[key]);
+      const databases = [];
+      if (projectProviders.nosql) {
+        databases.push({ name: "NoSQL (Mongo)", value: "nosql" });
+      }
+      if (projectProviders.sql) {
+        databases.push({ name: "SQL (Prisma)", value: "sql" });
+      }
       res.status(200).json({ databases });
     } catch (err) {
       res.status(500).json({ error: 'Failed to get databases' });
@@ -117,19 +123,19 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   });
 
   async function getProjectProvider(projectId: string): Promise<ProjectProvider | null> {
-    // Try to find the project in mongo
-    if (projectProviders.mongo) {
+    // Try to find the project in nosql
+    if (projectProviders.nosql) {
       try {
-        const project = await projectProviders.mongo.getById(projectId);
-        if (project) return projectProviders.mongo;
+        const project = await projectProviders.nosql.getById(projectId);
+        if (project) return projectProviders.nosql;
       } catch (error) { /* ignore */ }
     }
 
-    // Try to find the project in prisma
-    if (projectProviders.prisma) {
+    // Try to find the project in sql
+    if (projectProviders.sql) {
       try {
-        const project = await projectProviders.prisma.getById(projectId);
-        if (project) return projectProviders.prisma;
+        const project = await projectProviders.sql.getById(projectId);
+        if (project) return projectProviders.sql;
       } catch (error) { /* ignore */ }
     }
 
@@ -149,11 +155,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       
       const projects = [];
-      if (projectProviders.mongo) {
-        projects.push(...await projectProviders.mongo.list(auth.userId));
+      if (projectProviders.nosql) {
+        projects.push(...await projectProviders.nosql.list(auth.userId));
       }
-      if (projectProviders.prisma) {
-        projects.push(...await projectProviders.prisma.list(auth.userId));
+      if (projectProviders.sql) {
+        projects.push(...await projectProviders.sql.list(auth.userId));
       }
       if (projectProviders.default) {
         projects.push(...await projectProviders.default.list(auth.userId));
@@ -174,14 +180,14 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const { name, description, dbType } = req.body;
 
-      const provider = dbType ? projectProviders[dbType] : projectProviders.default || projectProviders.mongo || projectProviders.prisma;
+      const provider = dbType ? projectProviders[dbType] : projectProviders.default || projectProviders.nosql || projectProviders.sql;
 
       if (!provider) {
         return res.status(400).json({ error: 'Invalid dbType' });
       }
 
       const newProject = await provider.create({
-        dbType: dbType || 'mongo',
+        dbType: dbType || 'nosql',
         name,
         description: description || '',
         members: [{ userId: auth.userId, role: "admin" }]

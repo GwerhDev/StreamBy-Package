@@ -145,6 +145,7 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
 
     return {
       id: doc.id,
+      dbType: doc.dbType,
       name: doc.name,
       image: doc.image,
       archived

@@ -3,20 +3,13 @@ import { initProjectModel } from '../db/initProjectModel';
 import { initUserModel } from '../db/initUserModel';
 import { createMongoExportProvider } from './mongoExportProvider';
 import { createMongoProjectProvider } from './mongoProjectProvider';
-import { StorageAdapter } from '../types';
+import { StorageAdapter, DatabaseCredential } from '../types';
 import { initExportModel } from '../db/initExportModel';
 import { createPrismaProvider } from './createPrismaProvider';
 import { PrismaClient } from '@prisma/client';
 import { createPrismaExportProvider } from './prismaExportProvider';
 import { createPrismaProjectProvider } from './prismaProjectProvider';
 import { createPrismaExportCollectionProvider } from './prismaExportCollectionProvider';
-
-type SupportedDbType = 'mongo' | 'prisma';
-
-export interface DatabaseCredential {
-  dbType: SupportedDbType;
-  connectionString?: string;
-}
 
 export function createDatabaseProvider(
   databases: DatabaseCredential[],
@@ -25,7 +18,7 @@ export function createDatabaseProvider(
   let mongoConnection: mongoose.Connection | undefined;
   let prismaClient: PrismaClient | undefined;
 
-  const mongoConfig = databases.find((db) => db.dbType === 'mongo');
+  const mongoConfig = databases.find((db) => db.dbType === 'nosql');
   if (mongoConfig) {
     if (!mongoConfig.connectionString) {
       throw new Error('MongoDB connection string is required for mongo dbType.');
@@ -35,7 +28,7 @@ export function createDatabaseProvider(
     });
   }
 
-  const prismaConfig = databases.find((db) => db.dbType === 'prisma');
+  const prismaConfig = databases.find((db) => db.dbType === 'sql');
   if (prismaConfig) {
     if (!prismaConfig.connectionString) {
       throw new Error('Prisma connection string is required for prisma dbType.');
@@ -62,8 +55,8 @@ export function createDatabaseProvider(
   return {
     exportProvider: mongoExportProvider || prismaExportProvider,
     projectProviders: {
-      mongo: mongoProjectProvider,
-      prisma: prismaProjectProvider,
+      nosql: mongoProjectProvider,
+      sql: prismaProjectProvider,
     },
     exportCollectionProvider: prismaExportCollectionProvider, // Solo Prisma tiene este por ahora
     mongoConnection,

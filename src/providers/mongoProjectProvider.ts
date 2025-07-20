@@ -116,6 +116,7 @@ export function createMongoProjectProvider(ProjectModel: Model<any>, ExportModel
 
     return {
       id: doc._id.toString(),
+      dbType: doc.dbType,
       name: doc.name,
       image: doc.image,
       archived
