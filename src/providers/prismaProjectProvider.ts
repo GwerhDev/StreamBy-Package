@@ -123,13 +123,13 @@ export function createPrismaProjectProvider(prisma: PrismaClient, adapter: Stora
       dbType: doc.dbType,
       name: doc.name,
       image: doc.image,
-      members: doc.members.map((m: any) => ({
+      members: doc.members?.map((m: any) => ({
         userId: m.userId,
         username: m.username, // Asumimos que el username y email se obtendrán de un servicio externo si es necesario
         email: m.email,
         role: m.role,
         archived: m.archived ?? false
-      })),
+      })) || [],
       description: doc.description,
       folders: doc.folders || [], // Prisma usa 'folders' en lugar de 'rootFolders'
       settings: {
