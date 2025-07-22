@@ -13,8 +13,8 @@ const config = {
   awsAccessKey: process.env.AWS_ACCESS_KEY,
   awsSecretKey: process.env.AWS_SECRET_KEY,
   awsBucketRegion: process.env.AWS_BUCKET_REGION,
-  mongooseString: process.env.MONGOOSE_STRING,
-  prismaString: process.env.PRISMA_STRING,
+  mongoUri: process.env.MONGO_URI,
+  postgresUri: process.env.POSTGRES_URI,
 };
 
 async function main() {
@@ -30,11 +30,11 @@ async function main() {
     databases: [
       {
         dbType: 'nosql',
-        connectionString: config.mongooseString!,
+        connectionString: config.mongoUri!,
       },
       {
         dbType: 'sql',
-        connectionString: config.prismaString!,
+        connectionString: config.postgresUri!,
       }
     ],
     storageProviders: [
