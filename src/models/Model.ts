@@ -109,9 +109,11 @@ export class Model<T extends Document> {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-        deletedCount += await sqlAdapter.delete(connection, this.tableName, processedFilter);
+        const count = await sqlAdapter.delete(connection, this.tableName, processedFilter);
+        deletedCount += count;
       } else if (connection instanceof MongoClient) {
-        deletedCount += await nosqlAdapter.delete(connection, this.tableName, processedFilter);
+        const count = await nosqlAdapter.delete(connection, this.tableName, processedFilter);
+        deletedCount += count;
       }
     }
     return deletedCount;
