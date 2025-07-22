@@ -1,6 +1,6 @@
 import { getConnection, getConnectedIds } from '../adapters/database/connectionManager';
 import { Pool } from 'pg';
-import { MongoClient, Document } from 'mongodb';
+import { MongoClient, Document, ObjectId } from 'mongodb';
 import { sqlAdapter } from '../adapters/database/sql';
 import { nosqlAdapter } from '../adapters/database/nosql';
 
@@ -82,16 +82,44 @@ export class Model<T extends Document> {
       const connection = getConnection(connectionId);
       let processedFilter = { ...filter };
 
-      if (connection instanceof Pool) {
-        if (processedFilter._id) {
-          processedFilter.id = processedFilter._id;
-          delete processedFilter._id;
+      // Handle specific member archiving/unarchiving
+      if (data["members.$.archived"] !== undefined && processedFilter["_id"] && processedFilter["members.userId"]) {
+        const projectId = processedFilter["_id"];
+        const userIdToUpdate = processedFilter["members.userId"];
+        const newArchivedStatus = data["members.$.archived"];
+        const archivedBy = data["members.$.archivedBy"];
+        const archivedAt = data["members.$.archivedAt"];
+
+        // Fetch the project to modify its members array
+        const projectToUpdate = await this.findOne({ _id: projectId });
+        if (!projectToUpdate || !projectToUpdate.members) {
+          continue; // Project not found or has no members, try next connection
         }
-        const result = await sqlAdapter.update(connection, this.tableName, processedFilter, data);
+
+        const updatedMembers = projectToUpdate.members.map((member: any) => {
+          if (member.userId === userIdToUpdate) {
+            return { ...member, archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt };
+          }
+          return member;
+        });
+
+        // Update the project with the modified members array
+        const result = await (connection instanceof Pool ? sqlAdapter.update(connection, this.tableName, { id: projectId }, { members: updatedMembers }) : nosqlAdapter.update(connection, this.tableName, { _id: new ObjectId(projectId) }, { members: updatedMembers }));
         if (result) return result as T;
-      } else if (connection instanceof MongoClient) {
-        const result = await nosqlAdapter.update(connection, this.tableName, processedFilter, data);
-        if (result) return result as T;
+
+      } else {
+        // General update logic
+        if (connection instanceof Pool) {
+          if (processedFilter._id) {
+            processedFilter.id = processedFilter._id;
+            delete processedFilter._id;
+          }
+          const result = await sqlAdapter.update(connection, this.tableName, processedFilter, data);
+          if (result) return result as T;
+        } else if (connection instanceof MongoClient) {
+          const result = await nosqlAdapter.update(connection, this.tableName, processedFilter, data);
+          if (result) return result as T;
+        }
       }
     }
     return null;

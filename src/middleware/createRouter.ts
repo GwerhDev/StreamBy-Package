@@ -105,13 +105,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const archived = req.query.archived ? String(req.query.archived).toLowerCase() === 'true' : undefined;
       
-      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived })).map(project => ({
-        id: project._id || project.id,
-        dbType: project.dbType,
-        name: project.name,
-        image: project.image || '',
-        archived: project.archived || false,
-      }));
+      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived })).map(project => {
+        const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+        return {
+          id: project._id || project.id,
+          dbType: project.dbType,
+          name: project.name,
+          image: project.image || '',
+          archived: currentUserMember ? currentUserMember.archived || false : false,
+        };
+      });
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
@@ -132,7 +135,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         dbType: dbType || 'nosql',
         name,
         description: description || '',
-        members: [{ userId: auth.userId, role: "admin" }]
+        members: [{ userId: auth.userId, role: "admin", archived: false }]
       });
 
       res.status(201).json({ project: { ...newProject, id: newProject._id || newProject.id, _id: undefined } });
@@ -228,11 +231,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await Project.update({ _id: projectId }, { archived: true, archivedBy: auth.userId, archivedAt: new Date() });
+      await Project.update(
+        { _id: projectId, "members.userId": auth.userId },
+        { "members.$.archived": true, "members.$.archivedBy": auth.userId, "members.$.archivedAt": new Date() }
+      );
       const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => ({
-        ...project,
         id: project._id || project.id,
-        _id: undefined,
+        dbType: project.dbType,
+        name: project.name,
+        image: project.image || '',
+        archived: project.archived || false,
       }));
       res.status(200).json({ success: true, projects });
     } catch (err: any) {
@@ -250,11 +258,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await Project.update({ _id: projectId }, { archived: false });
+      await Project.update(
+        { _id: projectId, "members.userId": auth.userId },
+        { "members.$.archived": false, "members.$.archivedBy": null, "members.$.archivedAt": null }
+      );
       const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => ({
-        ...project,
         id: project._id || project.id,
-        _id: undefined,
+        dbType: project.dbType,
+        name: project.name,
+        image: project.image || '',
+        archived: project.archived || false,
       }));
       res.status(200).json({ success: true, projects });
     } catch (err: any) {
