@@ -1,11 +1,11 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import { dummyAuthProvider } from './src/services/auth';
-import { createStreamByRouter } from './src/middleware/createRouter';
+import { registerModel } from './src/models/manager';
 import { StreamByConfig } from './src/types';
 import { initConnections } from './src/adapters/database/connectionManager';
-import { registerModel } from './src/models/modelManager';
+import { dummyAuthProvider } from './src/services/auth';
+import { createStreamByRouter } from './src/middleware/createRouter';
 
 dotenv.config();
 
