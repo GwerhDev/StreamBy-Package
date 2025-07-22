@@ -23,13 +23,17 @@ export const nosqlAdapter = {
     return { ...data, _id: result.insertedId } as T;
   },
 
-  update: async (connection: MongoClient, tableName: string, filter: any, data: Document): Promise<Document | null> => {
+  update: async (connection: MongoClient, tableName: string, filter: any, data: Partial<Document>): Promise<Document | null> => {
     const db = connection.db();
-    const result = await db.collection(tableName).findOneAndUpdate(filter, { $set: data }, { returnDocument: 'after' });
+    let processedFilter = { ...filter };
+    if (processedFilter._id && typeof processedFilter._id === 'string') {
+      processedFilter._id = new ObjectId(processedFilter._id);
+    }
+    const result = await db.collection(tableName).findOneAndUpdate(processedFilter, { $set: data }, { returnDocument: 'after' });
     if (!result) {
       return null;
     }
-    return result.value;
+    return result;
   },
 
   delete: async (connection: MongoClient, tableName: string, filter: any): Promise<number> => {
