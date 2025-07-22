@@ -4,6 +4,7 @@ import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
 import { getModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
+import { getConnectedIds } from '../adapters/database/connectionManager';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
@@ -33,7 +34,10 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const databases = (config.databases || []).map(db => ({ name: db.id, value: db.type }));
+      const connectedDbIds = getConnectedIds();
+      const databases = (config.databases || [])
+        .filter(db => connectedDbIds.includes(db.id))
+        .map(db => ({ name: db.id, value: db.type }));
       res.status(200).json({ databases });
     } catch (err) {
       res.status(500).json({ error: 'Failed to get databases' });
