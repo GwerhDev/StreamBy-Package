@@ -4,7 +4,6 @@ import express from 'express';
 import { registerModel } from './src/models/manager';
 import { StreamByConfig } from './src/types';
 import { initConnections } from './src/adapters/database/connectionManager';
-import { dummyAuthProvider } from './src/services/auth';
 import { createStreamByRouter } from './src/middleware/createRouter';
 
 dotenv.config();
@@ -28,10 +27,12 @@ async function main() {
   }));
 
   const streambyConfig: StreamByConfig = {
-    authProvider: {
-      userId: process.env.DUMMY_ID || '',
-      username: 'dev-user',
-      role: 'admin'
+    authProvider: async (req) => {
+      return {
+        userId: process.env.DUMMY_ID || '',
+        username: 'dev-user',
+        role: 'admin'
+      };
     },
     databases: [
       {

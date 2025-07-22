@@ -89,7 +89,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
 
-      if (!projectId || !auth.projects.includes(projectId)) {
+      if (!projectId) {
         return res.status(403).json({ error: 'Unauthorized or missing projectId' });
       }
 

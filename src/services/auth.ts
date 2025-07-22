@@ -7,8 +7,6 @@ export async function resolveAuth(config: StreamByConfig, req: Request): Promise
   if (
     !auth ||
     !auth.userId ||
-    !Array.isArray(auth.projects) ||
-    auth.projects.length === 0 ||
     !auth.role
   ) {
     throw new Error('Invalid or missing authentication context');

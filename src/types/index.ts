@@ -73,7 +73,7 @@ export interface StreamByConfig {
 export interface AuthContext {
   userId: string;
   username: string;
-  projects: string[];
+  
   role: 'viewer' | 'editor' | 'admin';
 }
 
