@@ -43,14 +43,14 @@ export class Model<T extends Document> {
     return data;
   }
 
-  async update(filter: any, data: Partial<T>): Promise<number> {
+  async update(filter: any, data: Partial<T>): Promise<T | null> {
     const connection = getConnection(this.connectionId);
     if (connection instanceof Pool) {
       return sqlAdapter.update(connection, this.tableName, filter, data);
     } else if (connection instanceof MongoClient) {
       return nosqlAdapter.update(connection, this.tableName, filter, data);
     }
-    return 0;
+    return null;
   }
 
   async delete(filter: any): Promise<number> {

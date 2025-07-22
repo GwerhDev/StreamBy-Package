@@ -19,10 +19,13 @@ export const nosqlAdapter = {
     return { ...data, _id: result.insertedId } as T;
   },
 
-  update: async <T extends Document>(connection: MongoClient, tableName: string, filter: any, data: Partial<T>): Promise<number> => {
+  update: async <T extends Document>(connection: MongoClient, tableName: string, filter: any, data: Partial<T>): Promise<T | null> => {
     const db = connection.db();
-    const result = await db.collection<T>(tableName).updateMany(filter, { $set: data });
-    return result.modifiedCount;
+    const result = await db.collection<T>(tableName).findOneAndUpdate(filter, { $set: data }, { returnDocument: 'after' });
+    if (!result) {
+      return null;
+    }
+    return result.value ? result.value as T : null;
   },
 
   delete: async <T extends Document>(connection: MongoClient, tableName: string, filter: any): Promise<number> => {

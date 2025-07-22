@@ -25,14 +25,14 @@ export const sqlAdapter = {
     return result.rows[0];
   },
 
-  update: async <T>(connection: Pool, tableName: string, filter: any, data: Partial<T>): Promise<number> => {
+  update: async <T>(connection: Pool, tableName: string, filter: any, data: Partial<T>): Promise<T | null> => {
     const dataKeys = Object.keys(data);
     const filterKeys = Object.keys(filter);
     const values = [...Object.values(data), ...Object.values(filter)];
-    const setClause = dataKeys.map((key, i) => `"${key}" = $${i + 1}`).join(', ');
-    const whereClause = filterKeys.map((key, i) => `"${key}" = $${dataKeys.length + i + 1}`).join(' AND ');
-    const result = await connection.query(`UPDATE "${tableName}" SET ${setClause} WHERE ${whereClause}`, values);
-    return result.rowCount || 0;
+    const setClause = dataKeys.map((key, i) => `"${key}" = ${i + 1}`).join(', ');
+    const whereClause = filterKeys.map((key, i) => `"${key}" = ${dataKeys.length + i + 1}`).join(' AND ');
+    const result = await connection.query(`UPDATE "${tableName}" SET ${setClause} WHERE ${whereClause} RETURNING *`, values);
+    return result.rows[0] || null;
   },
 
   delete: async (connection: Pool, tableName: string, filter: any): Promise<number> => {

@@ -101,7 +101,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const archived = req.query.archived ? String(req.query.archived).toLowerCase() === 'true' : undefined;
       
-      const projects = await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived });
+      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived })).map(project => ({
+        ...project,
+        id: project._id || project.id,
+        _id: undefined, // Remove _id if it exists
+      }));
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
@@ -125,7 +129,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         members: [{ userId: auth.userId, role: "admin" }]
       });
 
-      res.status(201).json({ project: newProject });
+      res.status(201).json({ project: { ...newProject, id: newProject._id || newProject.id, _id: undefined } });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create project', details: err.message });
     }
@@ -146,7 +150,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      res.json({ project });
+      res.json({ project: { ...project, id: project._id || project.id, _id: undefined } });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to fetch project', details: err.message });
     }
@@ -177,7 +181,10 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       const updated = await Project.update({ _id: projectId }, updates);
-      res.status(200).json({ success: true, project: updated });
+      if (!updated) {
+        return res.status(404).json({ error: 'Project not found or not updated' });
+      }
+      res.status(200).json({ success: true, project: { ...updated, id: updated._id || updated.id, _id: undefined } });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to update project', details: err.message });
     }
@@ -216,7 +223,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await Project.update({ _id: projectId }, { archived: true, archivedBy: auth.userId, archivedAt: new Date() });
-      const projects = await Project.find({ members: { $elemMatch: { userId: auth.userId } } });
+      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => ({
+        ...project,
+        id: project._id || project.id,
+        _id: undefined,
+      }));
       res.status(200).json({ success: true, projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to archive project', details: err.message });
@@ -234,7 +245,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await Project.update({ _id: projectId }, { archived: false });
-      const projects = await Project.find({ members: { $elemMatch: { userId: auth.userId } } });
+      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => ({
+        ...project,
+        id: project._id || project.id,
+        _id: undefined,
+      }));
       res.status(200).json({ success: true, projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
@@ -259,7 +274,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const data = await Export.findOne({ _id: exportId });
 
-      res.json({ data });
+      res.json({ data: { ...data, id: data._id || data.id, _id: undefined } });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to fetch export data', details: err.message });
     }
@@ -289,7 +304,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       await Project.update({ _id: projectId }, { $push: { exports: newExport._id } });
 
-      res.status(201).json({ data: newExport });
+      res.status(201).json({ data: { ...newExport, id: newExport._id || newExport.id, _id: undefined } });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create export', details: err.message });
     }
