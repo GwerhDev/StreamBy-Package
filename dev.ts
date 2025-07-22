@@ -4,6 +4,7 @@ import express from 'express';
 import { dummyAuthProvider } from './src/services/auth';
 import { createStreamByRouter } from './src/middleware/createRouter';
 import { StreamByConfig } from './src/types';
+import { defineModel, initConnections } from './src/database';
 
 dotenv.config();
 
@@ -29,11 +30,13 @@ async function main() {
     authProvider: dummyAuthProvider,
     databases: [
       {
-        dbType: 'nosql',
+        id: 'mongo',
+        type: 'nosql',
         connectionString: config.mongoUri!,
       },
       {
-        dbType: 'sql',
+        id: 'postgres',
+        type: 'sql',
         connectionString: config.postgresUri!,
       }
     ],
@@ -49,6 +52,11 @@ async function main() {
       }
     ]
   };
+
+  await initConnections(streambyConfig.databases || []);
+
+  defineModel('Project', 'mongo', 'projects');
+  defineModel('Export', 'mongo', 'exports');
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 

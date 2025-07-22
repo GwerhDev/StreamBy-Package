@@ -1,5 +1,4 @@
 import { Request } from 'express';
-import mongoose from 'mongoose';
 
 export interface S3Config {
   bucket: string;
@@ -9,13 +8,6 @@ export interface S3Config {
 }
 
 export type StorageProviderType = 's3';
-
-export interface S3Config {
-  bucket: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-}
 
 export type StorageProvider = {
   type: StorageProviderType;
@@ -41,9 +33,8 @@ export interface ProjectInfo {
     archived?: boolean;
   }[];
   description?: string;
-  folders?: FolderNode[]; // Cambiado de rootFolders a folders
   exports?: {
-    id: string; // Cambiado de _id a id
+    id: string; 
     collectionName: string;
   }[];
   settings?: {
@@ -60,17 +51,12 @@ export interface ProjectListInfo {
   archived: boolean;
 }
 
-export interface FolderNode {
-  id: string;
-  name: string;
-  children?: FolderNode[];
-}
-
 export type DatabaseType = 'sql' | 'nosql';
 
 export interface DatabaseCredential {
-  dbType: DatabaseType;
-  connectionString?: string; // connectionString ahora es opcional
+  id: string;
+  type: DatabaseType;
+  connectionString?: string;
 }
 
 export interface StreamByConfig {
@@ -80,9 +66,6 @@ export interface StreamByConfig {
   }[];
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
-  exportProvider?: ExportProvider;
-  projectProvider?: ProjectProvider;
-  exportCollectionProvider?: ExportCollectionProvider; // Añadido
   adapter?: StorageAdapter;
 }
 
@@ -101,70 +84,4 @@ export interface Export {
   projectId: string;
   createdAt: Date;
   updatedAt: Date;
-}
-
-export interface ExportProvider {
-  getById(exportId: string): Promise<Export | null>; // Puede ser null
-  create(data: {
-    name: string;
-    description?: string;
-    collectionName: string;
-    projectId: string;
-  }): Promise<Export>;
-}
-
-export interface ProjectProvider {
-  getExport(projectId: string, exportId: string): Promise<any | null>; // Puede ser null
-  archive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectListInfo[] }>; // Cambiado a ProjectListInfo[]
-  unarchive(projectId: string, userId: string): Promise<{ success: boolean, projects: ProjectListInfo[] }>; // Cambiado a ProjectListInfo[]
-  list(userId?: string, archived?: boolean): Promise<ProjectListInfo[]>; // Cambiado a ProjectListInfo[]
-  getById(projectId: string, populateMembers?: boolean): Promise<ProjectInfo | null>;
-  delete(projectId: string): Promise<{ success: boolean }>;
-  update(projectId: string, updates: Partial<Omit<ProjectInfo, 'id' | 'folders'>>): Promise<ProjectInfo>; // Cambiado de rootFolders a folders
-  create(data: {
-    dbType: DatabaseType;
-    name: string;
-    image?: string;
-    members?: {
-      userId: string;
-      role: 'viewer' | 'editor' | 'admin';
-    }[];
-    description?: string;
-    allowUpload?: boolean;
-    allowSharing?: boolean;
-    folders?: FolderNode[]; // Cambiado de rootFolders a folders
-  }): Promise<ProjectInfo>;
-  addExportToProject(projectId: string, exportId: string): Promise<void>;
-}
-
-export interface ExportEntry {
-  id: string;
-  key: string;
-  value: string;
-  exportCollectionId: string;
-}
-
-export interface ExportCollectionProvider {
-  getById(id: string): Promise<any | null>;
-  create(data: {
-    projectId: string;
-    name: string;
-    entries: Array<{ key: string; value: string }>;
-  }): Promise<any>;
-  update(id: string, data: {
-    name?: string;
-    entries?: Array<{ key: string; value: string }>;
-  }): Promise<any>;
-  delete(id: string): Promise<{ success: boolean }>;
-}
-
-export interface DatabaseProviders {
-  exportProvider?: ExportProvider;
-  projectProviders: {
-    nosql?: ProjectProvider;
-    sql?: ProjectProvider;
-  };
-  exportCollectionProvider?: ExportCollectionProvider;
-  mongooseClient?: mongoose.Connection;
-  prismaClient?: any; // Using any for PrismaClient to avoid direct dependency in types
 }

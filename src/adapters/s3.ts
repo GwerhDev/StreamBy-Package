@@ -1,109 +1,73 @@
-import {
-  S3Client,
-  ListObjectsV2CommandOutput,
-  ObjectIdentifier,
-  ListObjectsV2Command,
-  DeleteObjectsCommand,
-  PutObjectCommand,
-} from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { StorageAdapter, S3Config } from '../types';
+import { S3Config, StorageAdapter } from '../types';
 
-export function createS3Adapter(config: S3Config): StorageAdapter {
-  const s3 = new S3Client({
-    region: config.region,
-    credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-    },
-  });
+export class S3Adapter implements StorageAdapter {
+  private s3: S3Client;
+  private bucket: string;
 
-  return {
-    async getPresignedProjectImageUrl(projectId: string) {
-      const key = `${projectId}/project-image`;
+  constructor(config: S3Config) {
+    this.s3 = new S3Client({
+      region: config.region,
+      credentials: {
+        accessKeyId: config.accessKeyId,
+        secretAccessKey: config.secretAccessKey,
+      },
+    });
+    this.bucket = config.bucket;
+  }
 
-      const command = new PutObjectCommand({
-        Bucket: config.bucket,
-        Key: key,
-        ContentType: 'image/*',
-      });
+  async listFiles(projectId: string): Promise<any[]> {
+    const command = new ListObjectsV2Command({
+      Bucket: this.bucket,
+      Prefix: `${projectId}/`,
+    });
+    const result = await this.s3.send(command);
+    return result.Contents || [];
+  }
 
-      const url = await getSignedUrl(s3, command, { expiresIn: 60 });
+  async deleteProjectImage(projectId: string): Promise<any> {
+    const command = new DeleteObjectCommand({
+      Bucket: this.bucket,
+      Key: `${projectId}/project-image`,
+    });
+    return await this.s3.send(command);
+  }
 
-      const publicUrl = `https://${config.bucket}.s3.${config.region}.amazonaws.com/${encodeURIComponent(key)}`;
+  async deleteProjectDirectory(projectId: string): Promise<any> {
+    const listCommand = new ListObjectsV2Command({
+      Bucket: this.bucket,
+      Prefix: `${projectId}/`,
+    });
+    const listedObjects = await this.s3.send(listCommand);
 
-      return { url, publicUrl };
-    },
-
-    async deleteProjectImage(projectId: string) {
-      const key = `${projectId}/project-image`;
-
-      const command = new DeleteObjectsCommand({
-        Bucket: config.bucket,
-        Delete: {
-          Objects: [{ Key: key }],
-        },
-      });
-
-      await s3.send(command);
-    },
-
-    async getPresignedUrl(contentType: string, projectId: string) {
-      const key = `${projectId}/${contentType}/file-${Date.now()}`;
-
-      const command = new PutObjectCommand({
-        Bucket: config.bucket,
-        Key: key,
-        ContentType: contentType,
-      });
-
-      const url = await getSignedUrl(s3, command, { expiresIn: 60 });
-
-      const publicUrl = `https://${config.bucket}.s3.${config.region}.amazonaws.com/${encodeURIComponent(key)}`;
-
-      return { url, publicUrl };
-    },
-
-    async listFiles(projectId: string) {
-      const command = new ListObjectsV2Command({
-        Bucket: config.bucket,
-        Prefix: `${projectId}/`,
-      });
-
-      const result = await s3.send(command);
-      return result.Contents || [];
-    },
-
-    async deleteProjectDirectory(projectId: string): Promise<void> {
-      const prefix: string = `${projectId}/`;
-      let continuationToken: string | undefined = undefined;
-
-      while (true) {
-        const listCommand = new ListObjectsV2Command({
-          Bucket: config.bucket,
-          Prefix: prefix,
-          ContinuationToken: continuationToken
-        });
-
-        const listedObjects: ListObjectsV2CommandOutput = await s3.send(listCommand);
-        const contents = listedObjects.Contents || [];
-
-        if (contents.length > 0) {
-          const objectsToDelete: ObjectIdentifier[] = contents.map((item) => ({
-            Key: item.Key!
-          }));
-
-          const deleteCommand = new DeleteObjectsCommand({
-            Bucket: config.bucket,
-            Delete: { Objects: objectsToDelete },
-          });
-
-          await s3.send(deleteCommand);
-        }
-
-        if (!listedObjects.IsTruncated) break;
-        continuationToken = listedObjects.NextContinuationToken;
-      }
+    if (!listedObjects.Contents || listedObjects.Contents.length === 0) {
+      return;
     }
-  };
+
+    const deleteParams = {
+      Bucket: this.bucket,
+      Delete: { Objects: listedObjects.Contents.map(({ Key }) => ({ Key })) },
+    };
+    const deleteCommand = new DeleteObjectCommand(deleteParams as any);
+    return await this.s3.send(deleteCommand as any);
+  }
+
+  async getPresignedUrl(contentType: string, projectId: string): Promise<any> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: `${projectId}/${Date.now()}`,
+      ContentType: contentType,
+    });
+    return await getSignedUrl(this.s3, command, { expiresIn: 3600 });
+  }
+
+  async getPresignedProjectImageUrl(projectId: string): Promise<any> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: `${projectId}/project-image`,
+      ContentType: 'image/jpeg',
+    });
+    return await getSignedUrl(this.s3, command, { expiresIn: 3600 });
+  }
 }

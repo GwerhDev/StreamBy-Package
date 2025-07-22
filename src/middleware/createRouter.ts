@@ -1,9 +1,9 @@
 import express, { Router, Request, Response } from 'express';
-import { ProjectProvider, StreamByConfig, StorageAdapter } from '../types';
+import { StreamByConfig, StorageAdapter } from '../types';
 import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
+import { getModel } from '../database';
 import { createStorageProvider } from '../providers/createStorageProvider';
-import { createDatabaseProvider } from '../providers/createDatabaseProvider';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
@@ -14,29 +14,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
-  const projectProviders: Record<string, ProjectProvider | undefined> = {};
-  let exportProvider: any;
-  let exportCollectionProvider: any;
-
-  if (config.databases) {
-    const db = createDatabaseProvider(config.databases, adapter);
-        projectProviders.nosql = db.projectProviders.nosql;
-    projectProviders.sql = db.projectProviders.sql;
-    exportProvider = db.exportProvider;
-    exportCollectionProvider = db.exportCollectionProvider;
-  } else {
-    projectProviders.default = config.projectProvider;
-    exportProvider = config.exportProvider;
-    exportCollectionProvider = config.exportCollectionProvider;
-  }
-
-  if (!projectProviders.nosql && !projectProviders.sql) {
-    throw new Error('Project provider is not initialized. Please check your database configuration.');
-  }
-
-  if (!exportProvider) {
-    throw new Error('Export provider is not initialized. Please check your database configuration.');
-  }
+  const Project = getModel('Project');
+  const Export = getModel('Export');
 
   router.get('/auth', async (req: Request, res: Response) => {
     try {
@@ -54,13 +33,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      const databases = [];
-      if (projectProviders.nosql) {
-        databases.push({ name: "NoSQL (Mongo)", value: "nosql" });
-      }
-      if (projectProviders.sql) {
-        databases.push({ name: "SQL (Prisma)", value: "sql" });
-      }
+      const databases = (config.databases || []).map(db => ({ name: db.id, value: db.type }));
       res.status(200).json({ databases });
     } catch (err) {
       res.status(500).json({ error: 'Failed to get databases' });
@@ -99,11 +72,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       }
 
       await deleteProjectImage(adapter, projectId);
-      const provider = await getProjectProvider(projectId);
-      if (!provider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-      const updated = await provider.update(projectId, { image: '' });
+      const updated = await Project.update({ _id: projectId }, { image: '' });
 
       res.status(201).json(updated);
     } catch (err: any) {
@@ -127,51 +96,12 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   });
 
-  async function getProjectProvider(projectId: string, dbType?: string): Promise<ProjectProvider | null> {
-    if (dbType) {
-      const specificProvider = projectProviders[dbType];
-      if (specificProvider) {
-        try {
-          const project = await specificProvider.getById(projectId, true);
-          if (project) return specificProvider;
-        } catch (error) { /* ignore */ }
-      }
-      return null; // If dbType was provided and no project found in that specific provider, return null.
-    }
-
-    // If dbType is not provided, search both nosql and sql
-    if (projectProviders.nosql) {
-      try {
-        const project = await projectProviders.nosql.getById(projectId, true);
-        if (project) return projectProviders.nosql;
-      } catch (error) { /* ignore */ }
-    }
-
-    if (projectProviders.sql) {
-      try {
-        const project = await projectProviders.sql.getById(projectId, true);
-        if (project) return projectProviders.sql;
-      } catch (error) { /* ignore */ }
-    }
-
-    return null; // If not found in either nosql or sql, return null.
-  }
-
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       const archived = req.query.archived ? String(req.query.archived).toLowerCase() === 'true' : undefined;
       
-      const projects = [];
-      if (projectProviders.nosql) {
-        projects.push(...await projectProviders.nosql.list(auth.userId, archived));
-      }
-      if (projectProviders.sql) {
-        projects.push(...await projectProviders.sql.list(auth.userId, archived));
-      }
-      if (projectProviders.default) {
-        projects.push(...await projectProviders.default.list(auth.userId, archived));
-      }
+      const projects = await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived });
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
@@ -188,13 +118,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
       const { name, description, dbType } = req.body;
 
-      const provider = dbType ? projectProviders[dbType] : projectProviders.default || projectProviders.nosql || projectProviders.sql;
-
-      if (!provider) {
-        return res.status(400).json({ error: 'Invalid dbType' });
-      }
-
-      const newProject = await provider.create({
+      const newProject = await Project.create({
         dbType: dbType || 'nosql',
         name,
         description: description || '',
@@ -211,16 +135,9 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     try {
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
-      const dbType = req.query.dbType as string | undefined;
 
-      const projectProvider = await getProjectProvider(projectId, dbType);
-      
+      const project = await Project.findOne({ _id: projectId });
 
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
@@ -245,12 +162,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const projectId = req.params.id;
       const updates = req.body;
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
 
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -264,7 +176,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const updated = await projectProvider.update(projectId, updates);
+      const updated = await Project.update({ _id: projectId }, updates);
       res.status(200).json({ success: true, project: updated });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to update project', details: err.message });
@@ -276,12 +188,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
@@ -290,7 +197,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await projectProvider.delete(projectId);
+      await Project.delete({ _id: projectId });
 
       res.status(200).json({ success: true });
     } catch (err: any) {
@@ -303,27 +210,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await projectProvider.archive(projectId, auth.userId);
-      const projects = [];
-      if (projectProviders.nosql) {
-        projects.push(...await projectProviders.nosql.list(auth.userId));
-      }
-      if (projectProviders.sql) {
-        projects.push(...await projectProviders.sql.list(auth.userId));
-      }
-      if (projectProviders.default) {
-        projects.push(...await projectProviders.default.list(auth.userId));
-      }
+      await Project.update({ _id: projectId }, { archived: true, archivedBy: auth.userId, archivedAt: new Date() });
+      const projects = await Project.find({ members: { $elemMatch: { userId: auth.userId } } });
       res.status(200).json({ success: true, projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to archive project', details: err.message });
@@ -335,27 +228,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await projectProvider.unarchive(projectId, auth.userId);
-      const projects = [];
-      if (projectProviders.nosql) {
-        projects.push(...await projectProviders.nosql.list(auth.userId));
-      }
-      if (projectProviders.sql) {
-        projects.push(...await projectProviders.sql.list(auth.userId));
-      }
-      if (projectProviders.default) {
-        projects.push(...await projectProviders.default.list(auth.userId));
-      }
+      await Project.update({ _id: projectId }, { archived: false });
+      const projects = await Project.find({ members: { $elemMatch: { userId: auth.userId } } });
       res.status(200).json({ success: true, projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
@@ -368,12 +247,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const projectId = req.params.id;
       const exportId = req.params.export_id;
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
 
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -383,7 +257,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized access' });
       }
 
-      const data = await exportProvider!.getById(exportId);
+      const data = await Export.findOne({ _id: exportId });
 
       res.json({ data });
     } catch (err: any) {
@@ -401,24 +275,19 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(400).json({ error: 'Missing export name or collectionName' });
       }
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const newExport = await exportProvider!.create({
+      const newExport = await Export.create({
         name,
         description,
         collectionName,
         projectId
       });
 
-      await projectProvider.addExportToProject(projectId, newExport.id);
+      await Project.update({ _id: projectId }, { $push: { exports: newExport._id } });
 
       res.status(201).json({ data: newExport });
     } catch (err: any) {
@@ -431,12 +300,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const auth = await config.authProvider(req);
       const projectId = req.params.id;
 
-      const projectProvider = await getProjectProvider(projectId);
-      if (!projectProvider) {
-        return res.status(404).json({ error: 'Project not found' });
-      }
-
-      const project = await projectProvider.getById(projectId, true);
+      const project = await Project.findOne({ _id: projectId });
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
       }
