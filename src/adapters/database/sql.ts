@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 
 export const sqlAdapter = {
-  find: async <T>(connection: Pool, tableName: string, filter: any): Promise<T[]> => {
+  find: async (connection: Pool, tableName: string, filter: any): Promise<any[]> => {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
     const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
@@ -9,23 +9,23 @@ export const sqlAdapter = {
     return result.rows;
   },
 
-  findOne: async <T>(connection: Pool, tableName: string, filter: any): Promise<T | null> => {
+  findOne: async (connection: Pool, tableName: string, filter: any): Promise<any | null> => {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
-    const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
+    const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND ');
     const result = await connection.query(`SELECT * FROM "${tableName}" WHERE ${where} LIMIT 1`, values);
     return result.rows[0] || null;
   },
 
-  create: async <T>(connection: Pool, tableName: string, data: T): Promise<T> => {
+  create: async (connection: Pool, tableName: string, data: any): Promise<any> => {
     const keys = Object.keys(data as any).join(', ');
     const values = Object.values(data as any);
-    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+    const placeholders = values.map((_, i) => `${i + 1}`).join(', ');
     const result = await connection.query(`INSERT INTO "${tableName}" (${keys}) VALUES (${placeholders}) RETURNING *`, values);
     return result.rows[0];
   },
 
-  update: async <T>(connection: Pool, tableName: string, filter: any, data: Partial<T>): Promise<T | null> => {
+  update: async (connection: Pool, tableName: string, filter: any, data: any): Promise<any | null> => {
     const dataKeys = Object.keys(data);
     const filterKeys = Object.keys(filter);
     const values = [...Object.values(data), ...Object.values(filter)];

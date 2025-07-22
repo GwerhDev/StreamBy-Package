@@ -1,5 +1,5 @@
 import { defineModel } from './registry';
 
-export const registerModel = (name: string, connectionId: string, tableName: string) => {
-  defineModel(name, connectionId, tableName);
+export const registerModel = (name: string, connectionIds: string[], tableName: string) => {
+  defineModel(name, connectionIds, tableName);
 };

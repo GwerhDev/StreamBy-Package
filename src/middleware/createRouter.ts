@@ -102,9 +102,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       const archived = req.query.archived ? String(req.query.archived).toLowerCase() === 'true' : undefined;
       
       const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived })).map(project => ({
-        ...project,
         id: project._id || project.id,
-        _id: undefined, // Remove _id if it exists
+        dbType: project.dbType,
+        name: project.name,
+        image: project.image || '',
+        archived: project.archived || false,
       }));
       res.json({ projects });
     } catch (err) {

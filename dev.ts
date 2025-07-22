@@ -56,8 +56,8 @@ async function main() {
 
   await initConnections(streambyConfig.databases || []);
 
-  registerModel('Project', 'mongo', 'projects');
-  registerModel('Export', 'mongo', 'exports');
+  registerModel('Project', ['mongo', 'postgres'], 'projects');
+  registerModel('Export', ['mongo', 'postgres'], 'exports');
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 

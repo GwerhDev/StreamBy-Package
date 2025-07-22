@@ -4,6 +4,7 @@ import { MongoClient } from 'mongodb';
 import { DatabaseCredential } from '../../types';
 
 const clients: { [key: string]: Pool | MongoClient } = {};
+const connectedIds: string[] = [];
 
 export const initConnections = async (configs: DatabaseCredential[]) => {
   for (const config of configs) {
@@ -16,11 +17,13 @@ export const initConnections = async (configs: DatabaseCredential[]) => {
         const pool = new Pool({ connectionString: config.connectionString });
         await pool.connect();
         clients[config.id] = pool;
+        connectedIds.push(config.id);
         console.log(`🟢 PostgreSQL connection established for ID: ${config.id}`);
       } else if (config.type === 'nosql') {
         const client = new MongoClient(config.connectionString);
         await client.connect();
         clients[config.id] = client;
+        connectedIds.push(config.id);
         console.log(`🟢 MongoDB connection established for ID: ${config.id}`);
       }
     } catch (error) {
@@ -35,4 +38,8 @@ export const getConnection = (id: string) => {
     throw new Error(`Connection with id ${id} not found.`);
   }
   return client;
+};
+
+export const getConnectedIds = (): string[] => {
+  return connectedIds;
 };

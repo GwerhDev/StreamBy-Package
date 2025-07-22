@@ -23,6 +23,7 @@ export interface StorageAdapter {
 }
 
 export interface ProjectInfo {
+  _id?: string;
   id: string;
   dbType: DatabaseType;
   name: string;
@@ -79,6 +80,7 @@ export interface AuthContext {
 export type AuthProvider = (req: Request) => Promise<AuthContext>;
 
 export interface Export {
+  _id?: string;
   id: string;
   collectionName: string;
   projectId: string;

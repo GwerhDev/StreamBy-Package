@@ -1,16 +1,20 @@
-import { MongoClient, Document } from 'mongodb';
+import { MongoClient, Document, ObjectId } from 'mongodb';
 
 export const nosqlAdapter = {
-  find: async <T extends Document>(connection: MongoClient, tableName: string, filter: any): Promise<T[]> => {
+  find: async (connection: MongoClient, tableName: string, filter: any): Promise<Document[]> => {
     const db = connection.db();
-    const result = await db.collection<T>(tableName).find(filter).toArray();
-    return result as T[];
+    const result = await db.collection(tableName).find(filter).toArray();
+    return result;
   },
 
-  findOne: async <T extends Document>(connection: MongoClient, tableName: string, filter: any): Promise<T | null> => {
+  findOne: async (connection: MongoClient, tableName: string, filter: any): Promise<Document | null> => {
     const db = connection.db();
-    const result = await db.collection<T>(tableName).findOne(filter);
-    return result as T | null;
+    let processedFilter = { ...filter };
+    if (processedFilter._id && typeof processedFilter._id === 'string') {
+      processedFilter._id = new ObjectId(processedFilter._id);
+    }
+    const result = await db.collection(tableName).findOne(processedFilter);
+    return result;
   },
 
   create: async <T extends Document>(connection: MongoClient, tableName: string, data: T): Promise<T> => {
@@ -19,18 +23,18 @@ export const nosqlAdapter = {
     return { ...data, _id: result.insertedId } as T;
   },
 
-  update: async <T extends Document>(connection: MongoClient, tableName: string, filter: any, data: Partial<T>): Promise<T | null> => {
+  update: async (connection: MongoClient, tableName: string, filter: any, data: Document): Promise<Document | null> => {
     const db = connection.db();
-    const result = await db.collection<T>(tableName).findOneAndUpdate(filter, { $set: data }, { returnDocument: 'after' });
+    const result = await db.collection(tableName).findOneAndUpdate(filter, { $set: data }, { returnDocument: 'after' });
     if (!result) {
       return null;
     }
-    return result.value ? result.value as T : null;
+    return result.value;
   },
 
-  delete: async <T extends Document>(connection: MongoClient, tableName: string, filter: any): Promise<number> => {
+  delete: async (connection: MongoClient, tableName: string, filter: any): Promise<number> => {
     const db = connection.db();
-    const result = await db.collection<T>(tableName).deleteMany(filter);
+    const result = await db.collection(tableName).deleteMany(filter);
     return result.deletedCount;
   },
 };
