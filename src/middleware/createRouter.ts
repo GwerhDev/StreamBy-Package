@@ -235,14 +235,24 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         { _id: projectId, "members.userId": auth.userId },
         { "members.$.archived": true, "members.$.archivedBy": auth.userId, "members.$.archivedAt": new Date() }
       );
-      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => ({
-        id: project._id || project.id,
-        dbType: project.dbType,
-        name: project.name,
-        image: project.image || '',
-        archived: project.archived || false,
-      }));
-      res.status(200).json({ success: true, projects });
+
+      const updatedProject = await Project.findOne({ _id: projectId }); // Fetch the updated project
+
+      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => {
+        const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+        return {
+          id: project._id || project.id,
+          dbType: project.dbType,
+          name: project.name,
+          image: project.image || '',
+          archived: currentUserMember ? currentUserMember.archived || false : false,
+        };
+      });
+
+      // Replace the old project with the updated one in the list
+      const finalProjects = projects.map(p => p.id === (updatedProject?._id || updatedProject?.id) ? ({ ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }) : p);
+
+      res.status(200).json({ success: true, projects: finalProjects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to archive project', details: err.message });
     }
@@ -262,14 +272,24 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         { _id: projectId, "members.userId": auth.userId },
         { "members.$.archived": false, "members.$.archivedBy": null, "members.$.archivedAt": null }
       );
-      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => ({
-        id: project._id || project.id,
-        dbType: project.dbType,
-        name: project.name,
-        image: project.image || '',
-        archived: project.archived || false,
-      }));
-      res.status(200).json({ success: true, projects });
+
+      const updatedProject = await Project.findOne({ _id: projectId }); // Fetch the updated project
+
+      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } } })).map(project => {
+        const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+        return {
+          id: project._id || project.id,
+          dbType: project.dbType,
+          name: project.name,
+          image: project.image || '',
+          archived: currentUserMember ? currentUserMember.archived || false : false,
+        };
+      });
+
+      // Replace the old project with the updated one in the list
+      const finalProjects = projects.map(p => p.id === (updatedProject?._id || updatedProject?.id) ? ({ ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }) : p);
+
+      res.status(200).json({ success: true, projects: finalProjects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
     }
