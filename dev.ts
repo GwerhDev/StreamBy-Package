@@ -2,7 +2,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import { StreamByConfig } from './src/types';
-import { initConnections } from './src/adapters/database/connectionManager';
 import { createStreamByRouter } from './src/middleware/createRouter';
 
 dotenv.config();
@@ -57,10 +56,6 @@ async function main() {
       }
     ]
   };
-
-  await initConnections(streambyConfig.databases || []);
-
-  
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 

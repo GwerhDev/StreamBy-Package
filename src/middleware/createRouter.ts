@@ -4,7 +4,7 @@ import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
 import { getModel, registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
-import { getConnectedIds } from '../adapters/database/connectionManager';
+import { getConnectedIds, initConnections } from '../adapters/database/connectionManager';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
@@ -12,6 +12,8 @@ function isProjectMember(project: any, userId: string) {
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
+
+  initConnections(config.databases || []);
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
