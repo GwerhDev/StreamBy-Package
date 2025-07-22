@@ -15,6 +15,15 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
+  if (config.databases) {
+    for (const db of config.databases) {
+      if (db.type === 'sql') {
+        registerModel('Project', [db.id], 'projects');
+        registerModel('Export', [db.id], 'exports');
+      }
+    }
+  }
+
   const Project = getModel('Project');
   const Export = getModel('Export');
 
