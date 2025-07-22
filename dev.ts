@@ -28,7 +28,11 @@ async function main() {
   }));
 
   const streambyConfig: StreamByConfig = {
-    authProvider: dummyAuthProvider,
+    authProvider: {
+      userId: process.env.DUMMY_ID || '',
+      username: 'dev-user',
+      role: 'admin'
+    },
     databases: [
       {
         id: 'mongo',

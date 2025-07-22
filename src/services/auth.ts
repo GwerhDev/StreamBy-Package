@@ -27,11 +27,3 @@ export function checkRole(auth: AuthContext, required: 'viewer' | 'editor' | 'ad
   }
 }
 
-export async function dummyAuthProvider(req: Request): Promise<AuthContext> {
-  return {
-    userId: process.env.DUMMY_ID || '',
-    username: 'dev-user',
-    projects: [],
-    role: 'admin'
-  };
-}
