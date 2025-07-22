@@ -1,7 +1,6 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import { registerModel } from './src/models/manager';
 import { StreamByConfig } from './src/types';
 import { initConnections } from './src/adapters/database/connectionManager';
 import { createStreamByRouter } from './src/middleware/createRouter';
@@ -61,8 +60,7 @@ async function main() {
 
   await initConnections(streambyConfig.databases || []);
 
-  registerModel('Project', ['mongo', 'postgres'], 'projects');
-  registerModel('Export', ['mongo', 'postgres'], 'exports');
+  
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 

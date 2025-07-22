@@ -2,7 +2,7 @@ import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
 import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
-import { getModel } from '../models/manager';
+import { getModel, registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
 import { getConnectedIds } from '../adapters/database/connectionManager';
 
