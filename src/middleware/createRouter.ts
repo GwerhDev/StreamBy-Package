@@ -2,8 +2,8 @@ import express, { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../types';
 import { deleteProjectImage, listFilesService } from '../services/file';
 import { getPresignedProjectImageUrl } from '../services/presign';
-import { getModel } from '../database';
-import { createStorageProvider } from '../providers/createStorageProvider';
+import { getModel } from '../models/manager';
+import { createStorageProvider } from '../providers/storage';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());

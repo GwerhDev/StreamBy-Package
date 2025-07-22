@@ -1,5 +1,5 @@
 import { StorageAdapter, StorageProvider } from '../types';
-import { S3Adapter } from '../adapters/s3';
+import { S3Adapter } from '../adapters/storage/s3';
 
 export const createStorageProvider = (providers: StorageProvider[]): StorageAdapter => {
   const s3Provider = providers.find(p => p.type === 's3');

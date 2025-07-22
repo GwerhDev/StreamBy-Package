@@ -4,7 +4,8 @@ import express from 'express';
 import { dummyAuthProvider } from './src/services/auth';
 import { createStreamByRouter } from './src/middleware/createRouter';
 import { StreamByConfig } from './src/types';
-import { defineModel, initConnections } from './src/database';
+import { initConnections } from './src/adapters/database/connectionManager';
+import { registerModel } from './src/models/modelManager';
 
 dotenv.config();
 
@@ -55,8 +56,8 @@ async function main() {
 
   await initConnections(streambyConfig.databases || []);
 
-  defineModel('Project', 'mongo', 'projects');
-  defineModel('Export', 'mongo', 'exports');
+  registerModel('Project', 'mongo', 'projects');
+  registerModel('Export', 'mongo', 'exports');
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 

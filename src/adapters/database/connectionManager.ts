@@ -1,7 +1,7 @@
 
 import { Pool } from 'pg';
 import { MongoClient } from 'mongodb';
-import { DatabaseCredential } from '../types';
+import { DatabaseCredential } from '../../types';
 
 const clients: { [key: string]: Pool | MongoClient } = {};
 
