@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { MongoClient } from 'mongodb';
+import { ensureCollectionsExist } from './nosql';
 import { DatabaseCredential } from '../../types';
 
 const connectedClients: { id: string, type: 'sql' | 'nosql', client: Pool | MongoClient }[] = [];
@@ -22,6 +23,7 @@ export const initConnections = async (configs: DatabaseCredential[]) => {
         await client.connect();
         connectedClients.push({ id: config.id, type: 'nosql', client: client });
         console.log(`🟢 MongoDB connection established for ID: ${config.id}`);
+        await ensureCollectionsExist(client);
       }
     } catch (error) {
       console.error(`❌ Failed to establish ${config.type} connection for ID: ${config.id}. Error:`, error);
@@ -63,6 +65,19 @@ const ensureTablesExist = async (pool: Pool) => {
       );
     `);
     console.log('✅ "exports" table ensured to exist.');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS project_members (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        "projectId" UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        "userId" VARCHAR(255) NOT NULL,
+        archived BOOLEAN NOT NULL DEFAULT FALSE,
+        "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE ("projectId", "userId")
+      );
+    `);
+    console.log('✅ "project_members" table ensured to exist.');
   } catch (error) {
     console.error('❌ Error ensuring tables exist:', error);
   }
