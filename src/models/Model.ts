@@ -90,6 +90,15 @@ export class Model<T extends Document> {
           return transformedResult as T;
         }
       } else if (dbType === 'nosql') {
+        if (processedFilter._id && typeof processedFilter._id === 'string') {
+          try {
+            processedFilter._id = new ObjectId(processedFilter._id);
+          } catch (e) {
+            // If it's not a valid ObjectId string, it might be a UUID from a SQL project.
+            // In this case, this NoSQL connection won't find it, so we can just continue.
+            continue;
+          }
+        }
         const result = await nosqlAdapter.findOne(connection as MongoClient, this.tableName, processedFilter);
         if (result) return result as T;
       }
