@@ -6,7 +6,7 @@ export const sqlAdapter = {
     const values = Object.values(filter);
     let query = `SELECT * FROM "${tableName}"`;
     if (keys.length > 0) {
-      const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND ');
+      const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
       query += ` WHERE ${where}`;
     }
     const result = await connection.query(query, values);

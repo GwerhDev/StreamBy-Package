@@ -30,7 +30,17 @@ export class Model<T extends Document> {
         }
         const sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter);
         for (const item of sqlResults) {
-          allResults.push(this.transformResult(item));
+          const transformedItem = this.transformResult(item);
+          if (this.tableName === 'projects') {
+            // For projects, fetch members from project_members table
+            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id });
+            (transformedItem as any).members = projectMembers.map((member: any) => ({
+              userId: member.userId,
+              role: member.role, // Assuming role is also stored in project_members
+              archived: member.archived,
+            }));
+          }
+          allResults.push(transformedItem);
         }
       } else if (dbType === 'nosql') {
         console.log(`NoSQL find: tableName=${this.tableName}, filter=`, processedFilter);
@@ -66,7 +76,19 @@ export class Model<T extends Document> {
           delete processedFilter._id;
         }
         const result = await sqlAdapter.findOne(connection as Pool, this.tableName, processedFilter);
-        if (result) return result as T;
+        if (result) {
+          const transformedResult = this.transformResult(result);
+          if (this.tableName === 'projects') {
+            // For projects, fetch members from project_members table
+            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedResult.id });
+            (transformedResult as any).members = projectMembers.map((member: any) => ({
+              userId: member.userId,
+              role: member.role, // Assuming role is also stored in project_members
+              archived: member.archived,
+            }));
+          }
+          return transformedResult as T;
+        }
       } else if (dbType === 'nosql') {
         const result = await nosqlAdapter.findOne(connection as MongoClient, this.tableName, processedFilter);
         if (result) return result as T;
@@ -158,9 +180,24 @@ export class Model<T extends Document> {
         });
 
         // Update the project with the modified members array
-        const result = await (dbType === 'sql' ? sqlAdapter.update(connection as Pool, this.tableName, { id: projectId }, { members: updatedMembers }) : nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: new ObjectId(projectId) }, { members: updatedMembers }));
-        if (result) return result as T;
-
+        if (dbType === 'sql') {
+          // For SQL, update the project_members table
+          const memberUpdateResult = await sqlAdapter.update(
+            connection as Pool,
+            'project_members',
+            { projectId: projectId, userId: userIdToUpdate },
+            { archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt }
+          );
+          // After updating the member, fetch the full project to return
+          if (memberUpdateResult) {
+            const updatedProject = await this.findOne({ _id: projectId });
+            return updatedProject as T;
+          }
+        } else if (dbType === 'nosql') {
+          // For NoSQL, update the embedded members array
+          const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: new ObjectId(projectId) }, { members: updatedMembers });
+          if (result) return result as T;
+        }
       } else {
         // General update logic
         if (dbType === 'sql') {
@@ -170,7 +207,8 @@ export class Model<T extends Document> {
           }
           const result = await sqlAdapter.update(connection as Pool, this.tableName, processedFilter, data);
           if (result) return result as T;
-        } else if (dbType === 'nosql') {
+        }
+         else if (dbType === 'nosql') {
           const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, processedFilter, data);
           if (result) return result as T;
         }
