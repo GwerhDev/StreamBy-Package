@@ -5,6 +5,7 @@ import { getPresignedProjectImageUrl } from '../services/presign';
 import { getModel, registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
 import { getConnectedIds, initConnections } from '../adapters/database/connectionManager';
+import { resolveAuth } from '../services/auth';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
@@ -20,18 +21,18 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   if (config.databases) {
     for (const db of config.databases) {
       if (db.type === 'sql') {
-        registerModel('Project', [db.id], 'projects');
-        registerModel('Export', [db.id], 'exports');
+        registerModel('projects', [db.id], 'projects');
+        registerModel('exports', [db.id], 'exports');
       }
     }
   }
 
-  const Project = getModel('Project');
-  const Export = getModel('Export');
+  const Project = getModel('projects');
+  const Export = getModel('exports');
 
   router.get('/auth', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
+      const auth = await resolveAuth(config, req);
       res.status(200).json({ logged: true, ...auth });
     } catch (err) {
       res.status(401).json({ logged: false });

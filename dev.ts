@@ -27,7 +27,7 @@ async function main() {
   const streambyConfig: StreamByConfig = {
     authProvider: async (req) => {
       return {
-        userId: process.env.DUMMY_ID || '',
+        userId: process.env.DUMMY_ID || 'dummy-user-id',
         username: 'dev-user',
         role: 'admin'
       };

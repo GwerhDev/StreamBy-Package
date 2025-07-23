@@ -18,14 +18,22 @@ export class Model<T extends Document> {
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
 
     for (const connectionId of activeConnectionIds) {
-      const connection = getConnection(connectionId);
-      if (connection instanceof Pool) {
-        const sqlResults = await sqlAdapter.find(connection, this.tableName, filter);
+      const clientEntry = getConnection(connectionId);
+      const connection = clientEntry.client;
+      const dbType = clientEntry.type;
+      let processedFilter = { ...filter };
+
+      if (dbType === 'sql') {
+        if (processedFilter._id) {
+          processedFilter.id = processedFilter._id;
+          delete processedFilter._id;
+        }
+        const sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter);
         for (const item of sqlResults) {
           allResults.push(this.transformResult(item));
         }
-      } else if (connection instanceof MongoClient) {
-        const nosqlResults = await nosqlAdapter.find(connection, this.tableName, filter);
+      } else if (dbType === 'nosql') {
+        const nosqlResults = await nosqlAdapter.find(connection as MongoClient, this.tableName, processedFilter);
         for (const item of nosqlResults) {
           allResults.push(this.transformResult(item));
         }
@@ -45,18 +53,20 @@ export class Model<T extends Document> {
   async findOne(filter: any): Promise<T | null> {
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
     for (const connectionId of activeConnectionIds) {
-      const connection = getConnection(connectionId);
+      const clientEntry = getConnection(connectionId);
+      const connection = clientEntry.client;
+      const dbType = clientEntry.type;
       let processedFilter = { ...filter };
 
-      if (connection instanceof Pool) {
+      if (dbType === 'sql') {
         if (processedFilter._id) {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-        const result = await sqlAdapter.findOne(connection, this.tableName, processedFilter);
+        const result = await sqlAdapter.findOne(connection as Pool, this.tableName, processedFilter);
         if (result) return result as T;
-      } else if (connection instanceof MongoClient) {
-        const result = await nosqlAdapter.findOne(connection, this.tableName, processedFilter);
+      } else if (dbType === 'nosql') {
+        const result = await nosqlAdapter.findOne(connection as MongoClient, this.tableName, processedFilter);
         if (result) return result as T;
       }
     }
@@ -65,12 +75,15 @@ export class Model<T extends Document> {
 
   async create(data: T): Promise<T> {
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
-    const connection = getConnection(activeConnectionIds[0]); // Use the first active connection for creation
-    if (connection instanceof Pool) {
-      const created = await sqlAdapter.create(connection, this.tableName, data);
+    const clientEntry = getConnection(activeConnectionIds[0]); // Use the first active connection for creation
+    const connection = clientEntry.client;
+    const dbType = clientEntry.type;
+
+    if (dbType === 'sql') {
+      const created = await sqlAdapter.create(connection as Pool, this.tableName, data);
       return created as T;
-    } else if (connection instanceof MongoClient) {
-      const created = await nosqlAdapter.create(connection, this.tableName, data);
+    } else if (dbType === 'nosql') {
+      const created = await nosqlAdapter.create(connection as MongoClient, this.tableName, data);
       return created as T;
     }
     return data;
@@ -79,7 +92,9 @@ export class Model<T extends Document> {
   async update(filter: any, data: Partial<T>): Promise<T | null> {
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
     for (const connectionId of activeConnectionIds) {
-      const connection = getConnection(connectionId);
+      const clientEntry = getConnection(connectionId);
+      const connection = clientEntry.client;
+      const dbType = clientEntry.type;
       let processedFilter = { ...filter };
 
       // Handle specific member archiving/unarchiving
@@ -104,20 +119,20 @@ export class Model<T extends Document> {
         });
 
         // Update the project with the modified members array
-        const result = await (connection instanceof Pool ? sqlAdapter.update(connection, this.tableName, { id: projectId }, { members: updatedMembers }) : nosqlAdapter.update(connection, this.tableName, { _id: new ObjectId(projectId) }, { members: updatedMembers }));
+        const result = await (dbType === 'sql' ? sqlAdapter.update(connection as Pool, this.tableName, { id: projectId }, { members: updatedMembers }) : nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: new ObjectId(projectId) }, { members: updatedMembers }));
         if (result) return result as T;
 
       } else {
         // General update logic
-        if (connection instanceof Pool) {
+        if (dbType === 'sql') {
           if (processedFilter._id) {
             processedFilter.id = processedFilter._id;
             delete processedFilter._id;
           }
-          const result = await sqlAdapter.update(connection, this.tableName, processedFilter, data);
+          const result = await sqlAdapter.update(connection as Pool, this.tableName, processedFilter, data);
           if (result) return result as T;
-        } else if (connection instanceof MongoClient) {
-          const result = await nosqlAdapter.update(connection, this.tableName, processedFilter, data);
+        } else if (dbType === 'nosql') {
+          const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, processedFilter, data);
           if (result) return result as T;
         }
       }
@@ -129,18 +144,20 @@ export class Model<T extends Document> {
     let deletedCount = 0;
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
     for (const connectionId of activeConnectionIds) {
-      const connection = getConnection(connectionId);
+      const clientEntry = getConnection(connectionId);
+      const connection = clientEntry.client;
+      const dbType = clientEntry.type;
       let processedFilter = { ...filter };
 
-      if (connection instanceof Pool) {
+      if (dbType === 'sql') {
         if (processedFilter._id) {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-        const count = await sqlAdapter.delete(connection, this.tableName, processedFilter);
+        const count = await sqlAdapter.delete(connection as Pool, this.tableName, processedFilter);
         deletedCount += count;
-      } else if (connection instanceof MongoClient) {
-        const count = await nosqlAdapter.delete(connection, this.tableName, processedFilter);
+      } else if (dbType === 'nosql') {
+        const count = await nosqlAdapter.delete(connection as MongoClient, this.tableName, processedFilter);
         deletedCount += count;
       }
     }
