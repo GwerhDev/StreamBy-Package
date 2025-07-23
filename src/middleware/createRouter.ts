@@ -115,18 +115,32 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      const archived = req.query.archived ? String(req.query.archived).toLowerCase() === 'true' : undefined;
+      const archivedQuery = req.query.archived;
+      const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
+
+      const allProjects = await Project.find({}); // Fetch all projects
       
-      const projects = (await Project.find({ members: { $elemMatch: { userId: auth.userId } }, archived })).map(project => {
-        const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
-        return {
-          id: project._id || project.id,
-          dbType: project.dbType,
-          name: project.name,
-          image: project.image || '',
-          archived: currentUserMember ? currentUserMember.archived || false : false,
-        };
-      });
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          if (!isMember) return false;
+
+          if (filterArchived !== undefined) {
+            const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+            return currentUserMember ? (currentUserMember.archived || false) === filterArchived : false;
+          }
+          return true;
+        })
+        .map(project => {
+          const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+          return {
+            id: project._id || project.id,
+            dbType: project.dbType,
+            name: project.name,
+            image: project.image || '',
+            archived: currentUserMember ? currentUserMember.archived || false : false,
+          };
+        });
       res.json({ projects });
     } catch (err) {
       res.status(500).json({ error: 'Failed to list projects', details: err });
@@ -243,9 +257,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
+      const updatedMembers = project.members?.map((member: any) => {
+        if (member.userId === auth.userId) {
+          return { ...member, archived: true, archivedBy: auth.userId, archivedAt: new Date() };
+        }
+        return member;
+      });
+
       await Project.update(
-        { _id: projectId, "members.userId": auth.userId },
-        { "members.$.archived": true, "members.$.archivedBy": auth.userId, "members.$.archivedAt": new Date() }
+        { _id: projectId },
+        { members: updatedMembers }
       );
 
       const updatedProject = await Project.findOne({ _id: projectId }); // Fetch the updated project
@@ -280,9 +301,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
+      const updatedMembers = project.members?.map((member: any) => {
+        if (member.userId === auth.userId) {
+          return { ...member, archived: false, archivedBy: null, archivedAt: null };
+        }
+        return member;
+      });
+
       await Project.update(
-        { _id: projectId, "members.userId": auth.userId },
-        { "members.$.archived": false, "members.$.archivedBy": null, "members.$.archivedAt": null }
+        { _id: projectId },
+        { members: updatedMembers }
       );
 
       const updatedProject = await Project.findOne({ _id: projectId }); // Fetch the updated project
@@ -352,8 +380,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         collectionName,
         projectId
       });
-
-      await Project.update({ _id: projectId }, { $push: { exports: newExport._id } });
 
       res.status(201).json({ data: { ...newExport, id: newExport._id || newExport.id, _id: undefined } });
     } catch (err: any) {
