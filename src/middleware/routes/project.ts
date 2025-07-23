@@ -1,0 +1,290 @@
+import { Router, Request, Response } from 'express';
+import { StreamByConfig } from '../../types';
+
+import { getModel } from '../../models/manager';
+import { isProjectMember } from '../../utils/auth';
+
+export function projectRouter(config: StreamByConfig): Router {
+  const router = Router();
+
+  const Project = getModel('projects');
+
+  const mapProjectToResponseFormat = (project: any, userId: string) => {
+    const currentUserMember = project.members?.find((member: any) => member.userId === userId);
+    return {
+      id: project._id || project.id,
+      dbType: project.dbType,
+      name: project.name,
+      image: project.image || '',
+      archived: currentUserMember ? currentUserMember.archived || false : false,
+    };
+  };
+
+  router.get('/projects', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const archivedQuery = req.query.archived;
+      const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
+
+      const allProjects = await Project.find({}); // Fetch all projects
+      
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          if (!isMember) return false;
+
+          if (filterArchived !== undefined) {
+            const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+            return currentUserMember ? (currentUserMember.archived || false) === filterArchived : false;
+          }
+          return true;
+        })
+        .map(project => mapProjectToResponseFormat(project, auth.userId));
+      res.json({ projects });
+    } catch (err: any) {
+      console.error('Error in /projects endpoint:', err);
+      res.status(500).json({ error: 'Failed to list projects', details: err });
+    }
+  });
+
+  
+
+  router.post('/projects/create', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      const { name, description, dbType } = req.body;
+
+      const newProject = await Project.create({
+        dbType: dbType || 'nosql',
+        name,
+        description: description || '',
+        members: [{ userId: auth.userId, role: "admin", archived: false }]
+      });
+
+      res.status(201).json({ project: { ...newProject, id: newProject._id || newProject.id, _id: undefined } });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to create project', details: err.message });
+    }
+  });
+
+  router.get('/projects/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
+      const projectId = req.params.id;
+
+      const project = await Project.findOne({ _id: projectId });
+
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      res.json({ project: { ...project, id: project._id || project.id, _id: undefined } });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch project', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+      const updates = req.body;
+
+      const project = await Project.findOne({ _id: projectId });
+
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!updates || typeof updates !== 'object') {
+        return res.status(400).json({ error: 'Missing updates payload' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      const updated = await Project.update({ _id: projectId }, updates);
+      if (!updated) {
+        return res.status(404).json({ error: 'Project not found or not updated' });
+      }
+      res.status(200).json({ success: true, project: { ...updated, id: updated._id || updated.id, _id: undefined } });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update project', details: err.message });
+    }
+  });
+
+  router.delete('/projects/:id', async (req, res) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const projectId = req.params.id;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      await Project.delete({ _id: projectId });
+
+      res.status(200).json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to delete project', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/archive', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const projectId = req.params.id;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project || !isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      await Project.update(
+        { _id: projectId, "members.userId": auth.userId },
+        { "members.$.archived": true, "members.$.archivedBy": auth.userId, "members.$.archivedAt": new Date() }
+      );
+
+      // Re-fetch all projects for the user to ensure the list is up-to-date
+      const allProjects = await Project.find({});
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          return isMember; // Only include projects where the user is a member
+        })
+        .map(project => mapProjectToResponseFormat(project, auth.userId));
+
+      res.status(200).json({ success: true, projects: projects });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to archive project', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/unarchive', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const projectId = req.params.id;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project || !isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      await Project.update(
+        { _id: projectId, "members.userId": auth.userId },
+        { "members.$.archived": false, "members.$.archivedBy": null, "members.$.archivedAt": null }
+      );
+
+      // Re-fetch all projects for the user to ensure the list is up-to-date
+      const allProjects = await Project.find({});
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          return isMember; // Only include projects where the user is a member
+        })
+        .map(project => mapProjectToResponseFormat(project, auth.userId));
+
+      res.status(200).json({ success: true, projects: projects });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
+    }
+  });
+
+  router.get('/projects/:id/members', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const projectId = req.params.id;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      res.json({ members: project.members });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to fetch project members', details: err.message });
+    }
+  });
+
+  return router;
+}
