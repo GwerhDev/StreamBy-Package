@@ -5,7 +5,6 @@ import { getPresignedProjectImageUrl } from '../services/presign';
 import { getModel, registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
 import { getConnectedIds, initConnections } from '../adapters/database/connectionManager';
-import { resolveAuth } from '../services/auth';
 
 function isProjectMember(project: any, userId: string) {
   return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
@@ -29,17 +28,28 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   router.get('/auth', async (req: Request, res: Response) => {
     try {
-      const auth = await resolveAuth(config, req);
-      res.status(200).json({ logged: true, ...auth });
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        throw new Error('Invalid or missing authentication context');
+      }
+      return res.status(200).json({ logged: true, ...auth });
     } catch (err) {
-      res.status(401).json({ logged: false });
+      return res.status(401).json({ logged: false });
     }
   });
 
   router.get('/databases', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      if (!auth) {
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
@@ -56,6 +66,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/upload-project-image-url/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
@@ -75,6 +92,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.delete('/delete-project-image-url/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
@@ -96,6 +120,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/files', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
 
       if (!projectId) {
@@ -112,6 +143,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const archivedQuery = req.query.archived;
       const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
 
@@ -148,6 +186,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.post('/projects/create', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
@@ -171,6 +216,14 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -192,6 +245,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.patch('/projects/:id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
@@ -226,6 +286,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.delete('/projects/:id', async (req, res) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -248,6 +315,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.patch('/projects/:id/archive', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -285,6 +359,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.patch('/projects/:id/unarchive', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -322,6 +403,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects/:id/exports/:export_id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = req.params.id;
       const exportId = req.params.export_id;
 
@@ -346,6 +434,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.post('/projects/:id/exports', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = req.params.id;
       const { name, description, collectionName } = req.body;
 
@@ -374,6 +469,13 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects/:id/members', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
