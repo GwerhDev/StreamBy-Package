@@ -112,22 +112,18 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      console.log('Auth object in /projects:', auth);
       const archivedQuery = req.query.archived;
       const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
 
       const allProjects = await Project.find({}); // Fetch all projects
-      console.log('All projects fetched:', allProjects);
       
       const projects = allProjects
         .filter(project => {
           const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
-          console.log(`Project ${project.name}: isMember=${isMember}, auth.userId=${auth.userId}, project.members=`, project.members);
           if (!isMember) return false;
 
           if (filterArchived !== undefined) {
             const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
-            console.log(`Project ${project.name}: currentUserMember=`, currentUserMember, `filterArchived=${filterArchived}`);
             return currentUserMember ? (currentUserMember.archived || false) === filterArchived : false;
           }
           return true;
@@ -142,9 +138,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
             archived: currentUserMember ? currentUserMember.archived || false : false,
           };
         });
-      console.log('Filtered and mapped projects:', projects);
       res.json({ projects });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error in /projects endpoint:', err);
       res.status(500).json({ error: 'Failed to list projects', details: err });
     }
@@ -260,16 +255,9 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const updatedMembers = project.members?.map((member: any) => {
-        if (member.userId === auth.userId) {
-          return { ...member, archived: true, archivedBy: auth.userId, archivedAt: new Date() };
-        }
-        return member;
-      });
-
       await Project.update(
-        { _id: projectId },
-        { members: updatedMembers }
+        { _id: projectId, "members.userId": auth.userId },
+        { "members.$.archived": true, "members.$.archivedBy": auth.userId, "members.$.archivedAt": new Date() }
       );
 
       const updatedProject = await Project.findOne({ _id: projectId }); // Fetch the updated project
@@ -304,16 +292,9 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      const updatedMembers = project.members?.map((member: any) => {
-        if (member.userId === auth.userId) {
-          return { ...member, archived: false, archivedBy: null, archivedAt: null };
-        }
-        return member;
-      });
-
       await Project.update(
-        { _id: projectId },
-        { members: updatedMembers }
+        { _id: projectId, "members.userId": auth.userId },
+        { "members.$.archived": false, "members.$.archivedBy": null, "members.$.archivedAt": null }
       );
 
       const updatedProject = await Project.findOne({ _id: projectId }); // Fetch the updated project

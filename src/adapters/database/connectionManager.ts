@@ -85,6 +85,8 @@ const ensureTablesExist = async (pool: Pool) => {
         "projectId" UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
         "userId" VARCHAR(255) NOT NULL,
         archived BOOLEAN NOT NULL DEFAULT FALSE,
+        "archivedBy" VARCHAR(255),
+        "archivedAt" TIMESTAMP WITH TIME ZONE,
         "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         UNIQUE ("projectId", "userId")

@@ -28,11 +28,35 @@ export class Model<T extends Document> {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-        const sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter);
+
+        let sqlResults: any[] = [];
+        if (this.tableName === 'projects' && processedFilter.members && processedFilter.members.$elemMatch) {
+          // Handle members filter for SQL projects
+          const userId = processedFilter.members.$elemMatch.userId;
+          const query = `
+            SELECT p.*, pm."userId" as memberUserId, pm.archived as memberArchived
+            FROM "projects" p
+            JOIN "project_members" pm ON p.id = pm."projectId"
+            WHERE pm."userId" = $1
+          `;
+          const result = await (connection as Pool).query(query, [userId]);
+          sqlResults = result.rows.map(row => ({
+            ...row,
+            members: [{
+              userId: row.memberUserId,
+              archived: row.memberArchived,
+              // Add other member fields if necessary
+            }]
+          }));
+        } else {
+          // General SQL find
+          sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter);
+        }
+
         for (const item of sqlResults) {
           const transformedItem = this.transformResult(item);
-          if (this.tableName === 'projects') {
-            // For projects, fetch members from project_members table
+          if (this.tableName === 'projects' && !transformedItem.members) {
+            // For projects, if members not already populated by join, fetch from project_members table
             const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id });
             (transformedItem as any).members = projectMembers.map((member: any) => ({
               userId: member.userId,
@@ -43,9 +67,7 @@ export class Model<T extends Document> {
           allResults.push(transformedItem);
         }
       } else if (dbType === 'nosql') {
-        console.log(`NoSQL find: tableName=${this.tableName}, filter=`, processedFilter);
         const nosqlResults = await nosqlAdapter.find(connection as MongoClient, this.tableName, processedFilter);
-        console.log(`NoSQL find: results count=${nosqlResults.length}, results=`, nosqlResults);
         for (const item of nosqlResults) {
           allResults.push(this.transformResult(item));
         }
@@ -175,22 +197,8 @@ export class Model<T extends Document> {
         const archivedBy = data["members.$.archivedBy"];
         const archivedAt = data["members.$.archivedAt"];
 
-        // Fetch the project to modify its members array
-        const projectToUpdate = await this.findOne({ _id: projectId });
-        if (!projectToUpdate || !projectToUpdate.members) {
-          continue; // Project not found or has no members, try next connection
-        }
-
-        const updatedMembers = projectToUpdate.members.map((member: any) => {
-          if (member.userId === userIdToUpdate) {
-            return { ...member, archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt };
-          }
-          return member;
-        });
-
-        // Update the project with the modified members array
         if (dbType === 'sql') {
-          // For SQL, update the project_members table
+          // For SQL, directly update the project_members table
           const memberUpdateResult = await sqlAdapter.update(
             connection as Pool,
             'project_members',
@@ -203,8 +211,30 @@ export class Model<T extends Document> {
             return updatedProject as T;
           }
         } else if (dbType === 'nosql') {
-          // For NoSQL, update the embedded members array
-          const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: new ObjectId(projectId) }, { members: updatedMembers });
+          // For NoSQL, fetch the project to modify its members array
+          const projectToUpdate = await this.findOne({ _id: projectId });
+          if (!projectToUpdate || !(projectToUpdate as any).members) {
+            continue; // Project not found or has no members, try next connection
+          }
+
+          const updatedMembers = (projectToUpdate as any).members.map((member: any) => {
+            if (member.userId === userIdToUpdate) {
+              return { ...member, archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt };
+            }
+            return member;
+          });
+
+          let objectIdProjectId: ObjectId;
+          try {
+            objectIdProjectId = new ObjectId(projectId);
+          } catch (e) {
+            // If it's not a valid ObjectId string, it might be a UUID from a SQL project.
+            // In this case, this NoSQL connection won't find it, so we can just continue.
+            continue;
+          }
+
+          // Update the project with the modified members array
+          const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: objectIdProjectId }, { members: updatedMembers });
           if (result) return result as T;
         }
       } else {
