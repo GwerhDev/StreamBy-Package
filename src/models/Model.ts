@@ -270,9 +270,20 @@ export class Model<T extends Document> {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
+        console.log(`SQL: Deleting from ${this.tableName} with filter:`, processedFilter);
         const count = await sqlAdapter.delete(connection as Pool, this.tableName, processedFilter);
+        console.log(`SQL: Deleted ${count} rows from ${this.tableName}`);
         deletedCount += count;
       } else if (dbType === 'nosql') {
+        if (processedFilter._id && typeof processedFilter._id === 'string') {
+          try {
+            processedFilter._id = new ObjectId(processedFilter._id);
+          } catch (e) {
+            // If it's not a valid ObjectId string, it might be a UUID from a SQL project.
+            // In this case, this NoSQL connection won't find it, so we can just continue.
+            continue;
+          }
+        }
         const count = await nosqlAdapter.delete(connection as MongoClient, this.tableName, processedFilter);
         deletedCount += count;
       }
