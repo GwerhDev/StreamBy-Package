@@ -4,8 +4,12 @@ export const sqlAdapter = {
   find: async (connection: Pool, tableName: string, filter: any): Promise<any[]> => {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
-    const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
-    const result = await connection.query(`SELECT * FROM "${tableName}" WHERE ${where}`, values);
+    let query = `SELECT * FROM "${tableName}"`;
+    if (keys.length > 0) {
+      const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND ');
+      query += ` WHERE ${where}`;
+    }
+    const result = await connection.query(query, values);
     return result.rows;
   },
 
@@ -18,7 +22,7 @@ export const sqlAdapter = {
   },
 
   create: async (connection: Pool, tableName: string, data: any): Promise<any> => {
-    const keys = Object.keys(data as any).join(', ');
+    const keys = Object.keys(data as any).map(key => `"${key}"`).join(', ');
     const values = Object.values(data as any);
     const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
     const result = await connection.query(`INSERT INTO "${tableName}" (${keys}) VALUES (${placeholders}) RETURNING *`, values);

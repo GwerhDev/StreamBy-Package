@@ -19,12 +19,9 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
   if (config.databases) {
-    for (const db of config.databases) {
-      if (db.type === 'sql') {
-        registerModel('projects', [db.id], 'projects');
-        registerModel('exports', [db.id], 'exports');
-      }
-    }
+    const allDbIds = config.databases.map(db => db.id);
+    registerModel('projects', allDbIds, 'projects');
+    registerModel('exports', allDbIds, 'exports');
   }
 
   const Project = getModel('projects');
@@ -115,18 +112,22 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
+      console.log('Auth object in /projects:', auth);
       const archivedQuery = req.query.archived;
       const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
 
       const allProjects = await Project.find({}); // Fetch all projects
+      console.log('All projects fetched:', allProjects);
       
       const projects = allProjects
         .filter(project => {
           const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          console.log(`Project ${project.name}: isMember=${isMember}, auth.userId=${auth.userId}, project.members=`, project.members);
           if (!isMember) return false;
 
           if (filterArchived !== undefined) {
             const currentUserMember = project.members?.find((member: any) => member.userId === auth.userId);
+            console.log(`Project ${project.name}: currentUserMember=`, currentUserMember, `filterArchived=${filterArchived}`);
             return currentUserMember ? (currentUserMember.archived || false) === filterArchived : false;
           }
           return true;
@@ -141,8 +142,10 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
             archived: currentUserMember ? currentUserMember.archived || false : false,
           };
         });
+      console.log('Filtered and mapped projects:', projects);
       res.json({ projects });
     } catch (err) {
+      console.error('Error in /projects endpoint:', err);
       res.status(500).json({ error: 'Failed to list projects', details: err });
     }
   });

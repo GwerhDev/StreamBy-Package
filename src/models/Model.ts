@@ -33,7 +33,9 @@ export class Model<T extends Document> {
           allResults.push(this.transformResult(item));
         }
       } else if (dbType === 'nosql') {
+        console.log(`NoSQL find: tableName=${this.tableName}, filter=`, processedFilter);
         const nosqlResults = await nosqlAdapter.find(connection as MongoClient, this.tableName, processedFilter);
+        console.log(`NoSQL find: results count=${nosqlResults.length}, results=`, nosqlResults);
         for (const item of nosqlResults) {
           allResults.push(this.transformResult(item));
         }
@@ -75,12 +77,49 @@ export class Model<T extends Document> {
 
   async create(data: T): Promise<T> {
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
-    const clientEntry = getConnection(activeConnectionIds[0]); // Use the first active connection for creation
+    
+    // Determine the target database type from the data payload
+    const targetDbType = (data as any).dbType || 'nosql'; // Default to nosql if not specified
+
+    const allClientEntries = activeConnectionIds.map(id => getConnection(id));
+
+    // Find the connection that matches the targetDbType
+    const clientEntry = allClientEntries.find(entry => entry.type === targetDbType);
+
+    if (!clientEntry) {
+      throw new Error(`No active connection found for database type: ${targetDbType}`);
+    }
+
     const connection = clientEntry.client;
     const dbType = clientEntry.type;
 
     if (dbType === 'sql') {
-      const created = await sqlAdapter.create(connection as Pool, this.tableName, data);
+      const dataToInsert: any = {};
+      let membersToInsert: any[] = [];
+
+      // Iterate over the keys of the incoming data
+      for (const key in data) {
+        if (this.tableName === 'projects' && key === 'members') {
+          membersToInsert = (data as any)[key];
+        } else if (this.tableName === 'projects' && key.toLowerCase() === 'dbtype') {
+          dataToInsert["dbType"] = (data as any)[key];
+        } else {
+          dataToInsert[key] = (data as any)[key];
+        }
+      }
+
+      const created = await sqlAdapter.create(connection as Pool, this.tableName, dataToInsert);
+
+      // Insert members into project_members table for SQL
+      if (this.tableName === 'projects' && membersToInsert.length > 0) {
+        for (const member of membersToInsert) {
+          await sqlAdapter.create(connection as Pool, 'project_members', {
+            projectId: created.id,
+            userId: member.userId,
+            archived: member.archived || false,
+          });
+        }
+      }
       return created as T;
     } else if (dbType === 'nosql') {
       const created = await nosqlAdapter.create(connection as MongoClient, this.tableName, data);

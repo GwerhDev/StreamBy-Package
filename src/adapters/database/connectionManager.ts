@@ -47,12 +47,25 @@ const ensureTablesExist = async (pool: Pool) => {
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         name VARCHAR(255) NOT NULL,
         description TEXT,
-        "dbType" VARCHAR(50) NOT NULL DEFAULT 'nosql',
         "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
     console.log('✅ "projects" table ensured to exist.');
+
+    // Ensure dbType column exists and is correctly configured
+    await pool.query(`
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS "dbType" VARCHAR(50);
+    `);
+    await pool.query(`
+      UPDATE projects SET "dbType" = 'nosql' WHERE "dbType" IS NULL;
+    `);
+    await pool.query(`
+      ALTER TABLE projects ALTER COLUMN "dbType" SET NOT NULL;
+    `);
+    await pool.query(`
+      ALTER TABLE projects ALTER COLUMN "dbType" SET DEFAULT 'nosql';
+    `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS exports (
