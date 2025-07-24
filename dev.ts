@@ -60,8 +60,8 @@ async function main() {
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 
-  devApp.listen(4000, () => {
-    console.log('🟢 StreamBy-core dev server listening on http://localhost:4000/streamby');
+  devApp.listen(8080, () => {
+    console.log('🟢 StreamBy-core dev server listening on http://localhost:8080/streamby');
   });
 }
 
