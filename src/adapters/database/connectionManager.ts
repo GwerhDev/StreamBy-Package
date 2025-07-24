@@ -85,6 +85,7 @@ const ensureTablesExist = async (pool: Pool) => {
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         "projectId" UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
         "userId" VARCHAR(255) NOT NULL,
+        role VARCHAR(255) NOT NULL DEFAULT 'member',
         archived BOOLEAN NOT NULL DEFAULT FALSE,
         "archivedBy" VARCHAR(255),
         "archivedAt" TIMESTAMP WITH TIME ZONE,
