@@ -191,75 +191,94 @@ export class Model<T extends Document> {
   }
 
   async update(filter: any, data: Partial<T>): Promise<T | null> {
-    const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
-    for (const connectionId of activeConnectionIds) {
-      const clientEntry = getConnection(connectionId);
-      const connection = clientEntry.client;
-      const dbType = clientEntry.type;
-      let processedFilter = { ...filter };
+    const existingProject = await this.findOne(filter); // Find the project first
+    if (!existingProject) {
+      return null; // Project not found
+    }
 
-      // Handle specific member archiving/unarchiving
-      if (data["members.$.archived"] !== undefined && processedFilter["_id"] && processedFilter["members.userId"]) {
-        const projectId = processedFilter["_id"];
-        const userIdToUpdate = processedFilter["members.userId"];
-        const newArchivedStatus = data["members.$.archived"];
-        const archivedBy = data["members.$.archivedBy"];
-        const archivedAt = data["members.$.archivedAt"];
+    const targetDbType = (existingProject as any).dbType; // Get the actual dbType of the project
 
-        if (dbType === 'sql') {
-          // For SQL, directly update the project_members table
-          const memberUpdateResult = await sqlAdapter.update(
-            connection as Pool,
-            'project_members',
-            { projectId: projectId, userId: userIdToUpdate },
-            { archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt }
-          );
-          // After updating the member, fetch the full project to return
-          if (memberUpdateResult) {
-            const updatedProject = await this.findOne({ _id: projectId });
-            return updatedProject as T;
-          }
-        } else if (dbType === 'nosql') {
-          // For NoSQL, fetch the project to modify its members array
-          const projectToUpdate = await this.findOne({ _id: projectId });
-          if (!projectToUpdate || !(projectToUpdate as any).members) {
-            continue; // Project not found or has no members, try next connection
-          }
+    // Find the connection that matches the targetDbType
+    const clientEntry = this.connectionIds
+      .map(id => getConnection(id))
+      .find(entry => entry.type === targetDbType);
 
-          const updatedMembers = (projectToUpdate as any).members.map((member: any) => {
-            if (member.userId === userIdToUpdate) {
-              return { ...member, archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt };
-            }
-            return member;
-          });
+    if (!clientEntry) {
+      throw new Error(`No active connection found for database type: ${targetDbType}`);
+    }
 
-          let objectIdProjectId: ObjectId;
-          try {
-            objectIdProjectId = new ObjectId(projectId);
-          } catch (e) {
-            // If it's not a valid ObjectId string, it might be a UUID from a SQL project.
-            // In this case, this NoSQL connection won't find it, so we can just continue.
-            continue;
-          }
+    const connection = clientEntry.client;
+    const dbType = clientEntry.type; // This will be the targetDbType
 
-          // Update the project with the modified members array
-          const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: objectIdProjectId }, { members: updatedMembers });
-          if (result) return result as T;
+    let updateFilter: any = {}; // Initialize updateFilter here
+
+    // Construct the updateFilter based on the actual dbType of the project
+    if (dbType === 'sql') {
+      updateFilter.id = existingProject.id; // Use the 'id' from the existingProject
+    } else if (dbType === 'nosql') {
+      // Ensure _id is an ObjectId for NoSQL updates
+      if (existingProject._id && typeof existingProject._id === 'string') {
+        try {
+          updateFilter._id = new ObjectId(existingProject._id);
+        } catch (e) {
+          // If existingProject._id is not a valid ObjectId string, it's an error for NoSQL
+          return null; // Or throw a more specific error
         }
       } else {
-        // General update logic
-        if (dbType === 'sql') {
-          if (processedFilter._id) {
-            processedFilter.id = processedFilter._id;
-            delete processedFilter._id;
+        updateFilter._id = existingProject._id; // Already an ObjectId or other valid type
+      }
+    }
+
+    // Handle specific member archiving/unarchiving
+    if (data["members.$.archived"] !== undefined && filter["_id"] && filter["members.userId"]) { // Use original filter for projectId and userIdToUpdate
+      const originalProjectId = filter["_id"]; // Use the original projectId from the request filter
+      const userIdToUpdate = filter["members.userId"];
+      const newArchivedStatus = data["members.$.archived"];
+      const archivedBy = data["members.$.archivedBy"];
+      const archivedAt = data["members.$.archivedAt"];
+
+      if (dbType === 'sql') {
+        // For SQL, directly update the project_members table
+        const memberUpdateResult = await sqlAdapter.update(
+          connection as Pool,
+          'project_members',
+          { projectId: originalProjectId, userId: userIdToUpdate }, // originalProjectId is fine for SQL
+          { archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt }
+        );
+        // After updating the member, fetch the full project to return
+        if (memberUpdateResult) {
+          const updatedProject = await this.findOne({ _id: originalProjectId });
+          return updatedProject as T;
+        }
+      } else if (dbType === 'nosql') {
+        const projectToUpdate = existingProject; // Already fetched
+
+        const updatedMembers = (projectToUpdate as any).members.map((member: any) => {
+          if (member.userId === userIdToUpdate) {
+            return { ...member, archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt };
           }
-          const result = await sqlAdapter.update(connection as Pool, this.tableName, processedFilter, data);
-          if (result) return result as T;
+          return member;
+        });
+
+        let objectIdOriginalProjectId: ObjectId;
+        try {
+          objectIdOriginalProjectId = new ObjectId(originalProjectId); // Convert originalProjectId to ObjectId for NoSQL
+        } catch (e) {
+          return null;
         }
-         else if (dbType === 'nosql') {
-          const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, processedFilter, data);
-          if (result) return result as T;
-        }
+
+        const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, { _id: objectIdOriginalProjectId }, { members: updatedMembers });
+        if (result) return result as T;
+      }
+    } else {
+      // General update logic
+      // Use the correctly constructed updateFilter
+      if (dbType === 'sql') {
+        const result = await sqlAdapter.update(connection as Pool, this.tableName, updateFilter, data);
+        if (result) return result as T;
+      } else if (dbType === 'nosql') {
+        const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, updateFilter, data);
+        if (result) return result as T;
       }
     }
     return null;

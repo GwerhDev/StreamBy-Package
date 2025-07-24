@@ -30,8 +30,9 @@ export function fileRouter(config: StreamByConfig & { adapter?: StorageAdapter }
         return res.status(400).json({ error: 'Missing projectId' });
       }
 
-      const url = await getPresignedProjectImageUrl(adapter, projectId);
-      res.json(url);
+      const response = await getPresignedProjectImageUrl(adapter, projectId);
+
+      res.status(200).json(response);
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
     }

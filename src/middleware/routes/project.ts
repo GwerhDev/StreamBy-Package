@@ -71,7 +71,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ error: 'Permission denied' });
       }
 
-      const { name, description, dbType } = req.body;
+      const { name, description, dbType, image } = req.body;
 
       const mainDb = config.databases?.find(db => db.main);
       if (!mainDb) {
@@ -89,6 +89,7 @@ export function projectRouter(config: StreamByConfig): Router {
         dbType: dbType || 'nosql',
         name,
         description: description || '',
+        image: image || '',
         members: [{ userId: auth.userId, username: user.username, role: "admin", archived: false }]
       });
 
@@ -314,6 +315,48 @@ export function projectRouter(config: StreamByConfig): Router {
       res.json({ members: membersWithUsernames });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to fetch project members', details: err.message });
+    }
+  });
+
+  router.post('/projects/:id/image', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (
+        !auth ||
+        !auth.userId ||
+        !auth.role
+      ) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+      const { imageUrl } = req.body;
+
+      if (!projectId || !imageUrl) {
+        return res.status(400).json({ error: 'Missing projectId or imageUrl' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ error: 'Unauthorized project access' });
+      }
+
+      const updatedProject = await Project.update({ _id: projectId }, { image: imageUrl });
+
+      if (!updatedProject) {
+        return res.status(404).json({ error: 'Project not found or not updated' });
+      }
+
+      res.status(200).json({ success: true, project: { ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined } });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to update project image', details: err.message });
     }
   });
 

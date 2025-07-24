@@ -63,11 +63,14 @@ export class S3Adapter implements StorageAdapter {
   }
 
   async getPresignedProjectImageUrl(projectId: string): Promise<any> {
+    const key = `${projectId}/project-image`;
     const command = new PutObjectCommand({
       Bucket: this.bucket,
-      Key: `${projectId}/project-image`,
+      Key: key,
       ContentType: 'image/jpeg',
     });
-    return await getSignedUrl(this.s3, command, { expiresIn: 3600 });
+    const url = await getSignedUrl(this.s3, command, { expiresIn: 3600 });
+    const publicUrl = `https://${this.bucket}.s3.amazonaws.com/${key}`;
+    return { url, publicUrl };
   }
 }
