@@ -3,6 +3,8 @@ import { StreamByConfig } from '../../types';
 
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
+import { getConnection } from '../../adapters/database/connectionManager';
+import { sqlAdapter } from '../../adapters/database/sql';
 
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -215,10 +217,30 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await Project.update(
-        { _id: projectId, "members.userId": auth.userId },
-        { "members.$.archived": true, "members.$.archivedBy": auth.userId, "members.$.archivedAt": new Date() }
-      );
+      if (project.dbType === 'sql') {
+        const connection = getConnection(config.databases?.find(db => db.main)?.id || '').client;
+        await sqlAdapter.update(
+          connection as any,
+          'project_members',
+          { projectId: projectId, userId: auth.userId },
+          { archived: true, archivedBy: auth.userId, archivedAt: new Date() }
+        );
+      } else {
+        const memberIndex = project.members.findIndex((member: any) => member.userId === auth.userId);
+
+        if (memberIndex === -1) {
+          return res.status(403).json({ error: 'Unauthorized project access' });
+        }
+
+        project.members[memberIndex].archived = true;
+        project.members[memberIndex].archivedBy = auth.userId;
+        project.members[memberIndex].archivedAt = new Date();
+
+        await Project.update(
+          { _id: projectId },
+          { members: project.members }
+        );
+      }
 
       // Re-fetch all projects for the user to ensure the list is up-to-date
       const allProjects = await Project.find({});
@@ -252,10 +274,30 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      await Project.update(
-        { _id: projectId, "members.userId": auth.userId },
-        { "members.$.archived": false, "members.$.archivedBy": null, "members.$.archivedAt": null }
-      );
+      if (project.dbType === 'sql') {
+        const connection = getConnection(config.databases?.find(db => db.main)?.id || '').client;
+        await sqlAdapter.update(
+          connection as any,
+          'project_members',
+          { projectId: projectId, userId: auth.userId },
+          { archived: false, archivedBy: null, archivedAt: null }
+        );
+      } else {
+        const memberIndex = project.members.findIndex((member: any) => member.userId === auth.userId);
+
+        if (memberIndex === -1) {
+          return res.status(403).json({ error: 'Unauthorized project access' });
+        }
+
+        project.members[memberIndex].archived = false;
+        project.members[memberIndex].archivedBy = null;
+        project.members[memberIndex].archivedAt = null;
+
+        await Project.update(
+          { _id: projectId },
+          { members: project.members }
+        );
+      }
 
       // Re-fetch all projects for the user to ensure the list is up-to-date
       const allProjects = await Project.find({});
