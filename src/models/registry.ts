@@ -7,10 +7,13 @@ export const defineModel = (name: string, connectionIds: string[], tableName: st
   models[name] = new Model(connectionIds, tableName);
 };
 
-export const getModel = (name: string): Model<any> => {
+export const getModel = (name: string, dbType?: string): Model<any> => {
   const model = models[name];
   if (!model) {
     throw new Error(`Model ${name} not defined.`);
+  }
+  if (dbType) {
+    return model.useDbType(dbType);
   }
   return model;
 };

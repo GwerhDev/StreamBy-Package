@@ -13,6 +13,14 @@ export class Model<T extends Document> {
     this.tableName = tableName;
   }
 
+  useDbType(dbType: string): Model<T> {
+    const filteredConnectionIds = this.connectionIds.filter(id => {
+      const connection = getConnection(id);
+      return connection.type === dbType;
+    });
+    return new Model<T>(filteredConnectionIds, this.tableName);
+  }
+
   async find(filter: any): Promise<T[]> {
     const allResults: T[] = [];
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
@@ -169,6 +177,7 @@ export class Model<T extends Document> {
           await sqlAdapter.create(connection as Pool, 'project_members', {
             projectId: created.id,
             userId: member.userId,
+            role: member.role,
             archived: member.archived || false,
           });
         }

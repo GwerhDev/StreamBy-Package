@@ -73,11 +73,23 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const { name, description, dbType } = req.body;
 
+      const mainDb = config.databases?.find(db => db.main);
+      if (!mainDb) {
+        return res.status(500).json({ error: 'Main database not configured' });
+      }
+      const userDbType = mainDb.type;
+      const User = getModel('users', userDbType);
+      const user = await User.findOne({ _id: auth.userId });
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
       const newProject = await Project.create({
         dbType: dbType || 'nosql',
         name,
         description: description || '',
-        members: [{ userId: auth.userId, role: "admin", archived: false }]
+        members: [{ userId: auth.userId, username: user.username, role: "admin", archived: false }]
       });
 
       res.status(201).json({ project: { ...newProject, id: newProject._id || newProject.id, _id: undefined } });
@@ -280,7 +292,26 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ error: 'Unauthorized project access' });
       }
 
-      res.json({ members: project.members });
+      const mainDb = config.databases?.find(db => db.main);
+      if (!mainDb) {
+        return res.status(500).json({ error: 'Main database not configured' });
+      }
+      const userDbType = mainDb.type;
+
+      const User = getModel('users', userDbType);
+      const membersWithUsernames = await Promise.all(
+        project.members.map(async (member: any) => {
+          const user = await User.findOne({ _id: member.userId });
+          return {
+            userId: member.userId,
+            username: user ? user.username : 'Unknown',
+            role: member.role,
+            profilePic: user ? user.profilePic : ''
+          };
+        })
+      );
+
+      res.json({ members: membersWithUsernames });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to fetch project members', details: err.message });
     }

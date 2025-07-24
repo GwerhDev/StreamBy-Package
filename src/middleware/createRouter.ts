@@ -21,6 +21,11 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     const allDbIds = config.databases.map(db => db.id);
     registerModel('projects', allDbIds, 'projects');
     registerModel('exports', allDbIds, 'exports');
+
+    const mainDb = config.databases.find(db => db.main);
+    if (mainDb) {
+      registerModel('users', [mainDb.id], 'users');
+    }
   }
 
   router.use(authRouter(config));

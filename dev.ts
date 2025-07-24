@@ -42,6 +42,7 @@ async function main() {
         id: 'postgres',
         type: 'sql',
         connectionString: config.postgresUri!,
+        main: true,
       }
     ],
     storageProviders: [

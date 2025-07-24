@@ -58,6 +58,7 @@ export interface DatabaseCredential {
   id: string;
   type: DatabaseType;
   connectionString?: string;
+  main?: boolean;
 }
 
 export interface StreamByConfig {
