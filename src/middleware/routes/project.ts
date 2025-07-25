@@ -31,7 +31,7 @@ export function projectRouter(config: StreamByConfig): Router {
       const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
 
       const allProjects = await Project.find({}); // Fetch all projects
-      
+
       const projects = allProjects
         .filter(project => {
           const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
@@ -80,7 +80,15 @@ export function projectRouter(config: StreamByConfig): Router {
         members: [{ userId: auth.userId, username: user.username, role: "admin", archived: false }]
       });
 
-      res.status(201).json({ project: { ...newProject, id: newProject._id || newProject.id, _id: undefined } });
+      const allProjects = await Project.find({});
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          return isMember; // Only include projects where the user is a member
+        })
+        .map(project => mapProjectToResponseFormat(project, auth.userId));
+
+      res.status(200).json({ success: true, projects: projects, projectId: newProject._id || newProject.id });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to create project', details: err.message });
     }
@@ -135,7 +143,15 @@ export function projectRouter(config: StreamByConfig): Router {
       if (!updated) {
         return res.status(404).json({ error: 'Project not found or not updated' });
       }
-      res.status(200).json({ success: true, project: { ...updated, id: updated._id || updated.id, _id: undefined } });
+      const allProjects = await Project.find({});
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          return isMember; // Only include projects where the user is a member
+        })
+        .map(project => mapProjectToResponseFormat(project, auth.userId));
+
+      res.status(200).json({ success: true, projects: projects, projectId: updated._id || updated.id });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to update project', details: err.message });
     }
@@ -157,7 +173,15 @@ export function projectRouter(config: StreamByConfig): Router {
 
       await Project.delete({ _id: projectId });
 
-      res.status(200).json({ success: true });
+      const allProjects = await Project.find({});
+      const projects = allProjects
+        .filter(project => {
+          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+          return isMember; // Only include projects where the user is a member
+        })
+        .map(project => mapProjectToResponseFormat(project, auth.userId));
+
+      res.status(200).json({ success: true, projects: projects });
     } catch (err: any) {
       res.status(500).json({ error: 'Failed to delete project', details: err.message });
     }
