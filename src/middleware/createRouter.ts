@@ -6,7 +6,7 @@ import { initConnections } from '../adapters/database/connectionManager';
 
 import { authRouter } from './routes/auth';
 import { databaseRouter } from './routes/database';
-import { fileRouter } from './routes/file';
+import { storageRouter } from './routes/storage';
 import { projectRouter } from './routes/project';
 import { exportRouter } from './routes/export';
 
@@ -30,7 +30,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   router.use(authRouter(config));
   router.use(databaseRouter(config));
-  router.use(fileRouter(config));
+  router.use(storageRouter(config));
   router.use(projectRouter(config));
   router.use(exportRouter(config));
 

@@ -5,7 +5,7 @@ import { getPresignedProjectImageUrl } from '../../services/presign';
 import { createStorageProvider } from '../../providers/storage';
 import { getModel } from '../../models/manager';
 
-export function fileRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
+export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = Router();
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
@@ -66,7 +66,7 @@ export function fileRouter(config: StreamByConfig & { adapter?: StorageAdapter }
     }
   });
 
-  router.get('/files', async (req: Request, res: Response) => {
+  router.get('/storages', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       if (
