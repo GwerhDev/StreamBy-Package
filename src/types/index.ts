@@ -71,14 +71,14 @@ export interface StreamByConfig {
   adapter?: StorageAdapter;
 }
 
-export interface AuthContext {
+export interface Auth {
   userId: string;
   username: string;
   
   role: 'viewer' | 'editor' | 'admin';
 }
 
-export type AuthProvider = (req: Request) => Promise<AuthContext>;
+export type AuthProvider = (req: Request) => Promise<Auth>;
 
 export interface Export {
   _id?: string;

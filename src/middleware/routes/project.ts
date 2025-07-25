@@ -1,13 +1,15 @@
 import { Router, Request, Response } from 'express';
-import { StreamByConfig } from '../../types';
+import { StreamByConfig, Auth } from '../../types';
 
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
+import { authenticate } from '../../services/auth';
 
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
+  router.use(authenticate(config));
 
   const Project = getModel('projects');
 
@@ -24,14 +26,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.get('/projects', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       const archivedQuery = req.query.archived;
       const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
 
@@ -56,19 +51,9 @@ export function projectRouter(config: StreamByConfig): Router {
     }
   });
 
-  
-
   router.post('/projects/create', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
+      const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
@@ -103,15 +88,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.get('/projects/:id', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
-
+      const auth = (req as any).auth as Auth;
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -132,14 +109,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.patch('/projects/:id', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
@@ -173,14 +143,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.delete('/projects/:id', async (req, res) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -202,14 +165,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.patch('/projects/:id/archive', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -259,14 +215,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.patch('/projects/:id/unarchive', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -316,14 +265,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.get('/projects/:id/members', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       const projectId = req.params.id;
 
       const project = await Project.findOne({ _id: projectId });
@@ -362,14 +304,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
   router.post('/projects/:id/image', async (req: Request, res: Response) => {
     try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ error: 'Permission denied' });
       }
