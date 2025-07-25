@@ -19,22 +19,22 @@ export function fileRouter(config: StreamByConfig & { adapter?: StorageAdapter }
         !auth.userId ||
         !auth.role
       ) {
-        return res.status(401).json({ error: 'Unauthorized' });
+        return res.status(401).json({ message: 'Unauthorized' });
       }
       if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
+        return res.status(403).json({ message: 'Permission denied' });
       }
 
       const projectId = req.params.id;
       if (!projectId) {
-        return res.status(400).json({ error: 'Missing projectId' });
+        return res.status(400).json({ message: 'Missing projectId' });
       }
 
       const response = await getPresignedProjectImageUrl(adapter, projectId);
 
-      res.status(200).json(response);
+      res.status(200).json({ ...response, message: 'Presigned URL generated successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to generate presigned URL', details: err.message });
+      res.status(500).json({ message: 'Failed to generate presigned URL', details: err.message });
     }
   });
 
@@ -46,23 +46,23 @@ export function fileRouter(config: StreamByConfig & { adapter?: StorageAdapter }
         !auth.userId ||
         !auth.role
       ) {
-        return res.status(401).json({ error: 'Unauthorized' });
+        return res.status(401).json({ message: 'Unauthorized' });
       }
       if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
+        return res.status(403).json({ message: 'Permission denied' });
       }
 
       const projectId = req.params.id;
       if (!projectId) {
-        return res.status(400).json({ error: 'Missing projectId' });
+        return res.status(400).json({ message: 'Missing projectId' });
       }
 
       await deleteProjectImage(adapter, projectId);
       const updated = await Project.update({ _id: projectId }, { image: '' });
 
-      res.status(201).json(updated);
+      res.status(201).json({ ...updated, message: 'Image deleted successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to delete image', details: err.message });
+      res.status(500).json({ message: 'Failed to delete image', details: err.message });
     }
   });
 
@@ -74,18 +74,18 @@ export function fileRouter(config: StreamByConfig & { adapter?: StorageAdapter }
         !auth.userId ||
         !auth.role
       ) {
-        return res.status(401).json({ error: 'Unauthorized' });
+        return res.status(401).json({ message: 'Unauthorized' });
       }
       const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
 
       if (!projectId) {
-        return res.status(403).json({ error: 'Unauthorized or missing projectId' });
+        return res.status(403).json({ message: 'Unauthorized or missing projectId' });
       }
 
       const files = await listFilesService(adapter, req, projectId);
-      res.json(files);
+      res.json({ files, message: 'Files listed successfully' });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to list files', details: err });
+      res.status(500).json({ message: 'Failed to list files', details: err });
     }
   });
 

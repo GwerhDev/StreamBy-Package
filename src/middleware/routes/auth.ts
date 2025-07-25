@@ -14,9 +14,9 @@ export function authRouter(config: StreamByConfig): Router {
       ) {
         throw new Error('Invalid or missing authentication context');
       }
-      return res.status(200).json({ logged: true, ...auth });
-    } catch (err) {
-      return res.status(401).json({ logged: false });
+      return res.status(200).json({ logged: true, message: 'Authentication successful', ...auth });
+    } catch (err: any) {
+      return res.status(401).json({ logged: false, message: err.message });
     }
   });
 

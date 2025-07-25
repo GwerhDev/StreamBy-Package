@@ -44,10 +44,10 @@ export function projectRouter(config: StreamByConfig): Router {
           return true;
         })
         .map(project => mapProjectToResponseFormat(project, auth.userId));
-      res.json({ projects });
+      res.json({ projects, message: 'Projects listed successfully' });
     } catch (err: any) {
       console.error('Error in /projects endpoint:', err);
-      res.status(500).json({ error: 'Failed to list projects', details: err });
+      res.status(500).json({ message: 'Failed to list projects', details: err });
     }
   });
 
@@ -55,21 +55,21 @@ export function projectRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
+        return res.status(403).json({ message: 'Permission denied' });
       }
 
       const { name, description, dbType, image } = req.body;
 
       const mainDb = config.databases?.find(db => db.main);
       if (!mainDb) {
-        return res.status(500).json({ error: 'Main database not configured' });
+        return res.status(500).json({ message: 'Main database not configured' });
       }
       const userDbType = mainDb.type;
       const User = getModel('users', userDbType);
       const user = await User.findOne({ _id: auth.userId });
 
       if (!user) {
-        return res.status(404).json({ error: 'User not found' });
+        return res.status(404).json({ message: 'User not found' });
       }
 
       const newProject = await Project.create({
@@ -88,9 +88,9 @@ export function projectRouter(config: StreamByConfig): Router {
         })
         .map(project => mapProjectToResponseFormat(project, auth.userId));
 
-      res.status(200).json({ success: true, projects: projects, projectId: newProject._id || newProject.id });
+      res.status(200).json({ success: true, projects: projects, projectId: newProject._id || newProject.id, message: 'Project created successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to create project', details: err.message });
+      res.status(500).json({ message: 'Failed to create project', details: err.message });
     }
   });
 
@@ -102,16 +102,16 @@ export function projectRouter(config: StreamByConfig): Router {
       const project = await Project.findOne({ _id: projectId });
 
       if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
+        return res.status(404).json({ message: 'Project not found' });
       }
 
       if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      res.json({ project: { ...project, id: project._id || project.id, _id: undefined } });
+      res.json({ project: { ...project, id: project._id || project.id, _id: undefined }, message: 'Project fetched successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to fetch project', details: err.message });
+      res.status(500).json({ message: 'Failed to fetch project', details: err.message });
     }
   });
 
@@ -119,7 +119,7 @@ export function projectRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
+        return res.status(403).json({ message: 'Permission denied' });
       }
 
       const projectId = req.params.id;
@@ -128,20 +128,20 @@ export function projectRouter(config: StreamByConfig): Router {
       const project = await Project.findOne({ _id: projectId });
 
       if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
+        return res.status(404).json({ message: 'Project not found' });
       }
 
       if (!updates || typeof updates !== 'object') {
-        return res.status(400).json({ error: 'Missing updates payload' });
+        return res.status(400).json({ message: 'Missing updates payload' });
       }
 
       if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
       const updated = await Project.update({ _id: projectId }, updates);
       if (!updated) {
-        return res.status(404).json({ error: 'Project not found or not updated' });
+        return res.status(404).json({ message: 'Project not found or not updated' });
       }
       const allProjects = await Project.find({});
       const projects = allProjects
@@ -151,9 +151,9 @@ export function projectRouter(config: StreamByConfig): Router {
         })
         .map(project => mapProjectToResponseFormat(project, auth.userId));
 
-      res.status(200).json({ success: true, projects: projects, projectId: updated._id || updated.id });
+      res.status(200).json({ success: true, projects: projects, projectId: updated._id || updated.id, message: 'Project updated successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to update project', details: err.message });
+      res.status(500).json({ message: 'Failed to update project', details: err.message });
     }
   });
 
@@ -164,11 +164,11 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
+        return res.status(404).json({ message: 'Project not found' });
       }
 
       if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
       await Project.delete({ _id: projectId });
@@ -181,9 +181,9 @@ export function projectRouter(config: StreamByConfig): Router {
         })
         .map(project => mapProjectToResponseFormat(project, auth.userId));
 
-      res.status(200).json({ success: true, projects: projects });
+      res.status(200).json({ success: true, projects: projects, message: 'Project deleted successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to delete project', details: err.message });
+      res.status(500).json({ message: 'Failed to delete project', details: err.message });
     }
   });
 
@@ -194,7 +194,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
       if (project.dbType === 'sql') {
@@ -209,7 +209,7 @@ export function projectRouter(config: StreamByConfig): Router {
         const memberIndex = project.members.findIndex((member: any) => member.userId === auth.userId);
 
         if (memberIndex === -1) {
-          return res.status(403).json({ error: 'Unauthorized project access' });
+          return res.status(403).json({ message: 'Unauthorized project access' });
         }
 
         project.members[memberIndex].archived = true;
@@ -231,9 +231,9 @@ export function projectRouter(config: StreamByConfig): Router {
         })
         .map(project => mapProjectToResponseFormat(project, auth.userId));
 
-      res.status(200).json({ success: true, projects: projects });
+      res.status(200).json({ success: true, projects: projects, message: 'Project archived successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to archive project', details: err.message });
+      res.status(500).json({ message: 'Failed to archive project', details: err.message });
     }
   });
 
@@ -244,7 +244,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
       if (project.dbType === 'sql') {
@@ -259,7 +259,7 @@ export function projectRouter(config: StreamByConfig): Router {
         const memberIndex = project.members.findIndex((member: any) => member.userId === auth.userId);
 
         if (memberIndex === -1) {
-          return res.status(403).json({ error: 'Unauthorized project access' });
+          return res.status(403).json({ message: 'Unauthorized project access' });
         }
 
         project.members[memberIndex].archived = false;
@@ -281,9 +281,9 @@ export function projectRouter(config: StreamByConfig): Router {
         })
         .map(project => mapProjectToResponseFormat(project, auth.userId));
 
-      res.status(200).json({ success: true, projects: projects });
+      res.status(200).json({ success: true, projects: projects, message: 'Project unarchived successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to unarchive project', details: err.message });
+      res.status(500).json({ message: 'Failed to unarchive project', details: err.message });
     }
   });
 
@@ -294,16 +294,16 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
+        return res.status(404).json({ message: 'Project not found' });
       }
 
       if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
       const mainDb = config.databases?.find(db => db.main);
       if (!mainDb) {
-        return res.status(500).json({ error: 'Main database not configured' });
+        return res.status(500).json({ message: 'Main database not configured' });
       }
       const userDbType = mainDb.type;
 
@@ -320,9 +320,9 @@ export function projectRouter(config: StreamByConfig): Router {
         })
       );
 
-      res.json({ members: membersWithUsernames });
+      res.json({ members: membersWithUsernames, message: 'Project members fetched successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to fetch project members', details: err.message });
+      res.status(500).json({ message: 'Failed to fetch project members', details: err.message });
     }
   });
 
@@ -330,34 +330,34 @@ export function projectRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ error: 'Permission denied' });
+        return res.status(403).json({ message: 'Permission denied' });
       }
 
       const projectId = req.params.id;
       const { imageUrl } = req.body;
 
       if (!projectId || !imageUrl) {
-        return res.status(400).json({ error: 'Missing projectId or imageUrl' });
+        return res.status(400).json({ message: 'Missing projectId or imageUrl' });
       }
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
+        return res.status(404).json({ message: 'Project not found' });
       }
 
       if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ error: 'Unauthorized project access' });
+        return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
       const updatedProject = await Project.update({ _id: projectId }, { image: imageUrl });
 
       if (!updatedProject) {
-        return res.status(404).json({ error: 'Project not found or not updated' });
+        return res.status(404).json({ message: 'Project not found or not updated' });
       }
 
-      res.status(200).json({ success: true, project: { ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined } });
+      res.status(200).json({ success: true, project: { ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }, message: 'Project image updated successfully' });
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to update project image', details: err.message });
+      res.status(500).json({ message: 'Failed to update project image', details: err.message });
     }
   });
 
