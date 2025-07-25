@@ -58,6 +58,11 @@ async function main() {
     ]
   };
 
+  devApp.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+    next();
+  });
+
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 
   devApp.listen(8080, () => {
