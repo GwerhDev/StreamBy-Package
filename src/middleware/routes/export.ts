@@ -131,5 +131,50 @@ export function exportRouter(config: StreamByConfig): Router {
     }
   });
 
+  router.get('/:projectId/public-export/:exportName', async (req: Request, res: Response) => {
+    try {
+      const { projectId, exportName } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const exportMetadata = project.exports.find((e: any) => e.name === exportName);
+      if (!exportMetadata) {
+        return res.status(404).json({ message: 'Export not found in this project' });
+      }
+
+      const targetDb = config.databases?.find(db => db.type === project.dbType);
+      if (!targetDb) {
+        return res.status(500).json({ message: `Database connection not found for type ${project.dbType}` });
+      }
+
+      const connection = getConnection(targetDb.id);
+      let data;
+
+      if (project.dbType === 'nosql') {
+        const db = (connection.client as MongoClient).db();
+        if (exportMetadata.type === 'raw') {
+          const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportMetadata.id) });
+          data = rawData ? rawData.json : null;
+        } else {
+          data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
+        }
+      } else if (project.dbType === 'sql') {
+        // SQL implementation for public exports will go here
+        return res.status(501).json({ message: 'SQL public exports not yet implemented' });
+      }
+
+      if (!data) {
+        return res.status(404).json({ message: 'Export data not found' });
+      }
+
+      res.json(data); // Return the raw data directly
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch public export data', details: err.message });
+    }
+  });
+
   return router;
 }
