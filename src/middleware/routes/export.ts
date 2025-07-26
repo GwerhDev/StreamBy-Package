@@ -3,6 +3,8 @@ import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { createExport, createRawExport } from '../../services/export';
+import { getConnection } from '../../adapters/database/connectionManager';
+import { MongoClient, ObjectId } from 'mongodb';
 
 export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -31,10 +33,39 @@ export function exportRouter(config: StreamByConfig): Router {
       if (!isProjectMember(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized access' });
       }
-      const Export = getModel('exports', project.dbType);
-      const data = await Export.findOne({ _id: exportId });
 
-      res.json({ data: { ...data, id: data._id || data.id, _id: undefined }, message: 'Export data fetched successfully' });
+      const exportMetadata = project.exports.find((e: any) => e.id.toString() === exportId);
+
+      if (!exportMetadata) {
+        return res.status(404).json({ message: 'Export not found in this project' });
+      }
+
+      const targetDb = config.databases?.find(db => db.type === project.dbType);
+
+      if (!targetDb) {
+        return res.status(500).json({ message: `Database connection not found for type ${project.dbType}` });
+      }
+
+      const connection = getConnection(targetDb.id);
+      let data;
+
+      if (project.dbType === 'nosql') {
+        const db = (connection.client as MongoClient).db();
+        if (exportMetadata.type === 'raw') {
+          const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
+          data = rawData ? rawData.json : null;
+        } else {
+          data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
+        }
+      } else if (project.dbType === 'sql') {
+        // ... SQL implementation needed
+      }
+
+      if (!data) {
+        return res.status(404).json({ message: 'Export data not found' });
+      }
+
+      res.json({ data, message: 'Export data fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch export data', details: err.message });
     }

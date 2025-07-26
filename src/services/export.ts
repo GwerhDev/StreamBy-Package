@@ -1,4 +1,5 @@
 import { getModel } from '../models/manager';
+import { ObjectId } from 'mongodb';
 import { FieldDefinition, DatabaseType } from '../types';
 import { MongoClient } from 'mongodb';
 import { Pool } from 'pg';
@@ -90,7 +91,7 @@ export async function createRawExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw' } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw' } } }
   );
 
   return { ...result, message: 'Raw export created successfully' };
