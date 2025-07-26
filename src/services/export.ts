@@ -90,7 +90,7 @@ export async function createRawExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: result.exportId, collectionName: result.collectionName, type: 'raw', jsonData } } }
+    { $push: { exports: { id: result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw' } } }
   );
 
   return { ...result, message: 'Raw export created successfully' };

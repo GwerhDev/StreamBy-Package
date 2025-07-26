@@ -53,10 +53,10 @@ export const createNoSQLRawExportCollection = async (
   const collectionName = `raw_export_${projectId}_${slug}`;
 
   // Insert the raw JSON data directly into the new collection
-  await db.collection(collectionName).insertOne(jsonData);
+  const result = await db.collection(collectionName).insertOne({ json: jsonData });
   console.log(`✅ Raw collection '${collectionName}' created with provided JSON data.`);
 
-  return { collectionName, exportId: collectionName };
+  return { collectionName, exportId: result.insertedId.toHexString() };
 };
 
 export const nosqlAdapter = {
