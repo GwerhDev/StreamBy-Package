@@ -1,6 +1,6 @@
 import { getConnection, getConnectedIds } from '../adapters/database/connectionManager';
 import { Pool } from 'pg';
-import { MongoClient, Document, ObjectId } from 'mongodb';
+import { MongoClient, Document, ObjectId, UpdateFilter } from 'mongodb';
 import { sqlAdapter } from '../adapters/database/sql';
 import { nosqlAdapter } from '../adapters/database/nosql';
 
@@ -277,7 +277,7 @@ export class Model<T extends Document> {
         const result = await sqlAdapter.update(connection as Pool, this.tableName, updateFilter, data);
         if (result) return result as T;
       } else if (dbType === 'nosql') {
-        const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, updateFilter, data);
+        const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, updateFilter, data as UpdateFilter<T>);
         if (result) return result as T;
       }
     }

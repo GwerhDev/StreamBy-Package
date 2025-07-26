@@ -22,6 +22,14 @@ export interface StorageAdapter {
   getPresignedProjectImageUrl?: (projectId: string) => Promise<any>;
 }
 
+export interface FieldDefinition {
+  name: string;
+  type: string;
+  label: string;
+  required?: boolean;
+  // Add any other properties that a field definition might have
+}
+
 export interface ProjectInfo {
   _id?: string;
   id: string;
@@ -87,4 +95,7 @@ export interface Export {
   projectId: string;
   createdAt: Date;
   updatedAt: Date;
+  type: 'structured' | 'raw';
+  fields?: FieldDefinition[];
+  jsonData?: any;
 }
