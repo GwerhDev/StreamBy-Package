@@ -53,7 +53,7 @@ export async function createExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: result.exportId, collectionName: result.collectionName, type: 'structured', fields } } }
+    { $push: { exports: { id: result.exportId, collectionName: result.collectionName, type: 'structured', fields, method: 'GET' } } }
   );
 
   return { ...result, message: 'Export created successfully' };
@@ -79,7 +79,7 @@ export async function createRawExport(
   let result: { collectionName: string; exportId: string };
 
   if (dbType === 'nosql') {
-    result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, jsonData);
+    result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, jsonData, 'GET');
   } else if (dbType === 'sql') {
     result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, jsonData);
   } else {
@@ -91,7 +91,7 @@ export async function createRawExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw' } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw', method: 'GET' } } }
   );
 
   return { ...result, message: 'Raw export created successfully' };

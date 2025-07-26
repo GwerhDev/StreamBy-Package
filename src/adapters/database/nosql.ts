@@ -46,14 +46,15 @@ export const createNoSQLRawExportCollection = async (
   connection: MongoClient,
   projectId: string,
   exportName: string,
-  jsonData: any
+  jsonData: any,
+  method: string
 ): Promise<{ collectionName: string; exportId: string }> => {
   const db = connection.db();
   const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const collectionName = `raw_export_${projectId}_${slug}`;
 
   // Insert the raw JSON data directly into the new collection
-  const result = await db.collection(collectionName).insertOne({ json: jsonData });
+  const result = await db.collection(collectionName).insertOne({ json: jsonData, name: exportName, method, collectionName, createdAt: new Date(), updatedAt: new Date() });
   console.log(`✅ Raw collection '${collectionName}' created with provided JSON data.`);
 
   return { collectionName, exportId: result.insertedId.toHexString() };

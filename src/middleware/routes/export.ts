@@ -53,7 +53,7 @@ export function exportRouter(config: StreamByConfig): Router {
         const db = (connection.client as MongoClient).db();
         if (exportMetadata.type === 'raw') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
-          data = rawData ? rawData.json : null;
+          data = rawData ? { json: rawData.json, name: rawData.name, method: rawData.method, collectionName: rawData.collectionName, createdAt: rawData.createdAt, updatedAt: rawData.updatedAt, type: exportMetadata.type } : null;
         } else {
           data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
         }
