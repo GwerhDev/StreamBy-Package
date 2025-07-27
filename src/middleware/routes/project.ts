@@ -171,15 +171,15 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      await Project.delete({ _id: projectId });
+      await Project.useDbType(project.dbType).delete({ _id: projectId });
 
       const allProjects = await Project.find({});
       const projects = allProjects
-        .filter(project => {
-          const isMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+        .filter(p => {
+          const isMember = p.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
           return isMember; // Only include projects where the user is a member
         })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+        .map(p => mapProjectToResponseFormat(p, auth.userId));
 
       res.status(200).json({ success: true, projects: projects, message: 'Project deleted successfully' });
     } catch (err: any) {
