@@ -1,3 +1,9 @@
-export function isProjectMember(project: any, userId: string) {
-  return project.members?.some((m: any) => m.userId?.toString() === userId?.toString());
+import { ProjectInfo, Auth } from '../types';
+
+export function isProjectMember(project: ProjectInfo, userId: string): boolean {
+  if (!project || !project.members) {
+    return false;
+  }
+  return project.members.some(member => member.userId === userId);
 }
+

@@ -10,6 +10,8 @@ import { storageRouter } from './routes/storage';
 import { projectRouter } from './routes/project';
 import { exportRouter } from './routes/export';
 
+import { authenticate } from '../services/auth';
+
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
@@ -28,6 +30,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     }
   }
 
+  router.use(authenticate(config));
   router.use(authRouter(config));
   router.use(databaseRouter(config));
   router.use(storageRouter(config));

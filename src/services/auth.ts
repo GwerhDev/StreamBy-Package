@@ -3,6 +3,10 @@ import { Request, Response, NextFunction } from 'express';
 import { StreamByConfig } from '../types';
 
 export const authenticate = (config: StreamByConfig) => async (req: Request, res: Response, next: NextFunction) => {
+  if (req.path.includes('/public-export/')) {
+    return next();
+  }
+
   try {
     const auth = await config.authProvider(req);
     if (!auth || !auth.userId || !auth.role) {
@@ -15,6 +19,7 @@ export const authenticate = (config: StreamByConfig) => async (req: Request, res
     return res.status(401).json({ error: 'Unauthorized' });
   }
 };
+
 
 export function checkRole(auth: Auth, required: 'viewer' | 'editor' | 'admin') {
   const roles = ['viewer', 'editor', 'admin'];
