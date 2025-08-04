@@ -96,3 +96,48 @@ export async function createRawExport(
 
   return { ...result, message: 'Raw export created successfully' };
 }
+
+export async function updateRawExport(
+  config: StreamByConfig,
+  projectId: string,
+  exportId: string,
+  exportName: string,
+  collectionName: string,
+  jsonData: any,
+  dbType: DatabaseType
+): Promise<CreateExportResult> {
+  const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
+                   config.databases?.find(db => db.type === dbType);
+
+  if (!targetDb) {
+    throw new Error(`Database connection not found for type ${dbType}`);
+  }
+  const connection = getConnection(targetDb.id);
+
+  let result: { collectionName: string; exportId: string };
+
+  if (dbType === 'nosql') {
+    const db = (connection.client as MongoClient).db();
+    const updateData = {
+      json: jsonData,
+      name: exportName,
+      updatedAt: new Date()
+    };
+
+    
+    await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
+    result = { collectionName, exportId };
+  } else {
+    throw new Error('Unsupported database type for update');
+  }
+  
+  const NoSQLProject = getModel('projects', 'nosql');
+    
+  await NoSQLProject.update(
+    { _id: new ObjectId(projectId), 'exports.id': { $in: [new ObjectId(exportId), exportId] } },
+    { $set: { 'exports.$.name': exportName } }
+  );
+  console.log(result);
+
+  return { ...result, message: 'Raw export updated successfully' };
+}

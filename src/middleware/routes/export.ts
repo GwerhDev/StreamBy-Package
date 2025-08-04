@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
-import { createExport, createRawExport } from '../../services/export';
+import { createExport, createRawExport, updateRawExport } from '../../services/export';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 
@@ -128,6 +128,33 @@ export function exportRouter(config: StreamByConfig): Router {
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to create raw export', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/exports/raw/:export_id', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (!auth || !auth.userId) {
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
+
+      const { id: projectId, export_id: exportId } = req.params;
+      const { name, collectionName, description, jsonData } = req.body;
+
+      if (!name || !collectionName || !jsonData) {
+        return res.status(400).json({ message: 'Missing name, collectionName, or jsonData' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project || !isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ message: 'Unauthorized project access' });
+      }
+
+      const result = await updateRawExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType);
+
+      res.status(200).json({ data: result, message: result.message });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to update raw export', details: err.message });
     }
   });
 
