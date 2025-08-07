@@ -277,7 +277,7 @@ export class Model<T extends Document> {
         const result = await sqlAdapter.update(connection as Pool, this.tableName, updateFilter, data);
         if (result) return result as T;
       } else if (dbType === 'nosql') {
-        const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, updateFilter, data as UpdateFilter<T>);
+        const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, filter, data as UpdateFilter<T>);
         if (result) return result as T;
       }
     }

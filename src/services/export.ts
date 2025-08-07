@@ -53,7 +53,7 @@ export async function createExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: result.exportId, collectionName: result.collectionName, type: 'structured', fields, method: 'GET' } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'structured', fields, method: 'GET' } } }
   );
 
   return { ...result, message: 'Export created successfully' };
@@ -134,8 +134,11 @@ export async function updateRawExport(
   const NoSQLProject = getModel('projects', 'nosql');
     
   await NoSQLProject.update(
-    { _id: new ObjectId(projectId), 'exports.id': { $in: [new ObjectId(exportId), exportId] } },
-    { $set: { 'exports.$.name': exportName } }
+    { 
+      _id: new ObjectId(projectId), 
+      'exports.id': { $in: [new ObjectId(exportId), exportId] } 
+    },
+    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName } }
   );
   console.log(result);
 
