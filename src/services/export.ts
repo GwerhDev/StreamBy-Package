@@ -144,3 +144,34 @@ export async function updateRawExport(
 
   return { ...result, message: 'Raw export updated successfully' };
 }
+
+export async function deleteExport(
+  config: StreamByConfig,
+  projectId: string,
+  exportId: string,
+  dbType: DatabaseType,
+  collectionName: string
+): Promise<{ message: string }> {
+  const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
+                   config.databases?.find(db => db.type === dbType);
+
+  if (!targetDb) {
+    throw new Error(`Database connection not found for type ${dbType}`);
+  }
+  const connection = getConnection(targetDb.id);
+
+  if (dbType === 'nosql') {
+    const db = (connection.client as MongoClient).db();
+    await db.collection(collectionName).deleteOne({ _id: new ObjectId(exportId) });
+  } else {
+    throw new Error('Unsupported database type for delete');
+  }
+
+  const NoSQLProject = getModel('projects', 'nosql');
+  await NoSQLProject.update(
+    { _id: new ObjectId(projectId) },
+    { $pull: { exports: { id: new ObjectId(exportId) } } }
+  );
+
+  return { message: 'Export deleted successfully' };
+}
