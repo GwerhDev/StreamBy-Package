@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
-import { createExport, createRawExport, updateRawExport, deleteExport } from '../../services/export';
+import { createExport, updateExport, deleteExport } from '../../services/export';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 
@@ -82,36 +82,6 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(401).json({ message: 'Unauthorized' });
       }
       const projectId = req.params.id;
-      const { name, description, collectionName, fields } = req.body;
-
-      if (!name || !collectionName || !fields) {
-        return res.status(400).json({ message: 'Missing export name, collectionName, or fields' });
-      }
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project || !isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ message: 'Unauthorized project access' });
-      }
-
-      const result = await createExport(config, projectId, name, collectionName, fields, project.dbType);
-
-      res.status(201).json({ data: result, message: result.message });
-    } catch (err: any) {
-      res.status(500).json({ message: 'Failed to create export', details: err.message });
-    }
-  });
-
-  router.post('/projects/:id/exports/raw', async (req: Request, res: Response) => {
-    try {
-      const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
-        return res.status(401).json({ message: 'Unauthorized' });
-      }
-      const projectId = req.params.id;
       const { name, description, collectionName, jsonData } = req.body;
 
       if (!name || !collectionName || !jsonData) {
@@ -123,7 +93,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
       
-      const result = await createRawExport(config, projectId, name, collectionName, jsonData, project.dbType);
+      const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -131,7 +101,7 @@ export function exportRouter(config: StreamByConfig): Router {
     }
   });
 
-  router.patch('/projects/:id/exports/raw/:export_id', async (req: Request, res: Response) => {
+  router.patch('/projects/:id/exports/:export_id', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
       if (!auth || !auth.userId) {
@@ -150,7 +120,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await updateRawExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType);
+      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {
