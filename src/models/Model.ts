@@ -7,10 +7,21 @@ import { nosqlAdapter } from '../adapters/database/nosql';
 export class Model<T extends Document> {
   private connectionIds: string[];
   private tableName: string;
+  private schema?: string; // Add schema property
 
-  constructor(connectionIds: string[], tableName: string) {
+  constructor(connectionIds: string[], tableName: string, schema?: string) {
     this.connectionIds = connectionIds;
     this.tableName = tableName;
+    this.schema = schema;
+  }
+
+  // Add these getter methods
+  public getConnectionIds(): string[] {
+    return this.connectionIds;
+  }
+
+  public getTableName(): string {
+    return this.tableName;
   }
 
   useDbType(dbType: string): Model<T> {
@@ -105,7 +116,17 @@ export class Model<T extends Document> {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-        const result = await sqlAdapter.findOne(connection as Pool, this.tableName, processedFilter);
+        console.log('Model findOne (SQL): processedFilter=', processedFilter);
+
+        // Special handling for 'users' table with raw query
+        if (this.tableName === 'users' && processedFilter.id) {
+          const schema = this.schema || 'public'; // Default to 'public' if schema not provided
+          const query = `SELECT * FROM "${schema}"."${this.tableName}" WHERE "id" = $1::uuid LIMIT 1`;
+          const result = await (connection as Pool).query(query, [processedFilter.id]);
+          return result.rows[0] || null;
+        }
+
+        const result = await sqlAdapter.findOne(connection as Pool, this.tableName, processedFilter, this.schema); // Pass this.schema
         if (result) {
           const transformedResult = this.transformResult(result);
           if (this.tableName === 'projects') {

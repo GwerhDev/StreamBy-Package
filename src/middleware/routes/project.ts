@@ -65,7 +65,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(500).json({ message: 'Main database not configured' });
       }
       const userDbType = mainDb.type;
-      const User = getModel('users', userDbType);
+      const User = getModel('users', userDbType, 'accounts');
       const user = await User.findOne({ _id: auth.userId });
 
       if (!user) {
@@ -90,6 +90,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
       res.status(200).json({ success: true, projects: projects, projectId: newProject._id || newProject.id, message: 'Project created successfully' });
     } catch (err: any) {
+      console.error('Error creating project:', err);
       res.status(500).json({ message: 'Failed to create project', details: err.message });
     }
   });
@@ -307,7 +308,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
       const userDbType = mainDb.type;
 
-      const User = getModel('users', userDbType);
+      const User = getModel('users', userDbType, 'accounts');
       const membersWithUsernames = await Promise.all(
         project.members.map(async (member: any) => {
           const user = await User.findOne({ _id: member.userId });

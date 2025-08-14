@@ -76,11 +76,18 @@ export const sqlAdapter = {
     return result.rows;
   },
 
-  findOne: async (connection: Pool, tableName: string, filter: any): Promise<any | null> => {
+  findOne: async (connection: Pool, tableName: string, filter: any, schema?: string): Promise<any | null> => {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
-    const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
-    const result = await connection.query(`SELECT * FROM "${tableName}" WHERE ${where} LIMIT 1`, values);
+    console.log(`SQL findOne: tableName=${tableName}, filter=`, filter, `values=`, values, `schema=`, schema);
+
+    // Construct parameterized values (no explicit type hinting here, let pg infer)
+    // We will cast in the SQL query
+    const typedValues = values; // Revert to simple values array
+
+    const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND '); // Revert to original
+    const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
+    const result = await connection.query(`SELECT * FROM ${fullTableName} WHERE ${where} LIMIT 1`, values);
     return result.rows[0] || null;
   },
 

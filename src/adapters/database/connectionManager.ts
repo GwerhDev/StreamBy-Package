@@ -42,8 +42,9 @@ export const getConnection = (id: string) => {
 const ensureTablesExist = async (pool: Pool) => {
   try {
     await pool.query(`
+      CREATE SCHEMA IF NOT EXISTS streamby;
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-      CREATE TABLE IF NOT EXISTS projects (
+      CREATE TABLE IF NOT EXISTS streamby.projects (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         name VARCHAR(255) NOT NULL,
         description TEXT,
@@ -56,22 +57,22 @@ const ensureTablesExist = async (pool: Pool) => {
 
     // Ensure dbType column exists and is correctly configured
     await pool.query(`
-      ALTER TABLE projects ADD COLUMN IF NOT EXISTS "dbType" VARCHAR(50);
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbType" VARCHAR(50);
     `);
     await pool.query(`
-      UPDATE projects SET "dbType" = 'nosql' WHERE "dbType" IS NULL;
+      UPDATE streamby.projects SET "dbType" = 'nosql' WHERE "dbType" IS NULL;
     `);
     await pool.query(`
-      ALTER TABLE projects ALTER COLUMN "dbType" SET NOT NULL;
+      ALTER TABLE streamby.projects ALTER COLUMN "dbType" SET NOT NULL;
     `);
     await pool.query(`
-      ALTER TABLE projects ALTER COLUMN "dbType" SET DEFAULT 'nosql';
+      ALTER TABLE streamby.projects ALTER COLUMN "dbType" SET DEFAULT 'nosql';
     `);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS exports (
+      CREATE TABLE IF NOT EXISTS streamby.exports (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        "projectId" UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        "projectId" UUID NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
         status VARCHAR(50) NOT NULL DEFAULT 'pending',
         "filePath" TEXT,
         "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -81,9 +82,9 @@ const ensureTablesExist = async (pool: Pool) => {
     console.log('✅ "exports" table ensured to exist.');
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS project_members (
+      CREATE TABLE IF NOT EXISTS streamby.project_members (
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        "projectId" UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        "projectId" UUID NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
         "userId" VARCHAR(255) NOT NULL,
         role VARCHAR(255) NOT NULL DEFAULT 'member',
         archived BOOLEAN NOT NULL DEFAULT FALSE,
