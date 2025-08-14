@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { StreamByConfig } from './src/types';
 import { createStreamByRouter } from './src/middleware/createRouter';
-import { initConnections } from './src/adapters/database/connectionManager';
 
 dotenv.config();
 
@@ -58,8 +57,6 @@ async function main() {
       }
     ]
   };
-
-  await initConnections(streambyConfig.databases || []);
 
   devApp.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
