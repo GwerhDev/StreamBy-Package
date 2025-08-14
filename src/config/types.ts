@@ -17,5 +17,5 @@ export interface SetupResult {
     didCreateSchema: boolean;
     didCreateTables: boolean;
     didReset: boolean;
-    errors?: string[];
+    errors: string[];
 }
