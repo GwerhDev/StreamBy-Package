@@ -116,7 +116,6 @@ export class Model<T extends Document> {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-        console.log('Model findOne (SQL): processedFilter=', processedFilter);
 
         // Special handling for 'users' table with raw query
         if (this.tableName === 'users' && processedFilter.id) {
