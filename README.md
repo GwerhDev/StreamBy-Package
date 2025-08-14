@@ -28,6 +28,42 @@ npm install @streamby/core
 
 ## 🧱 Basic usage
 
+---
+
+## 🗄️ Database Schema Setup
+
+`@streamby/core` requires a pre-configured database schema for its internal operations. It does not manage database connections directly; instead, it expects the host application to provide initialized connection instances. This ensures full control and flexibility for the host environment.
+
+The library will only interact with the specified schema and will not touch other schemas in your database. The `reset` option is opt-in and will only drop and recreate the specified `streamby` schema if explicitly set to `true`.
+
+### PostgreSQL Example
+
+```ts
+import { Pool } from "pg";
+import { setupStreambyPg } from "@streamby/core/pg/setup"; // Adjust path as per your package structure
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Call setupStreambyPg to ensure the schema and tables are created
+// reset: false (default) ensures idempotency and no data loss
+await setupStreambyPg({ pool, schema: "streamby", reset: false });
+```
+
+### MongoDB Example
+
+```ts
+import { MongoClient } from "mongodb";
+import { setupStreambyMongo } from "@streamby/core/mongo/setup"; // Adjust path as per your package structure
+
+const client = new MongoClient(process.env.MONGO_URL!);
+
+// Connect the MongoDB client
+await client.connect();
+
+// Call setupStreambyMongo to ensure collections and indexes are created
+await setupStreambyMongo({ client, dbName: "streamby" });
+```
+
 ```ts
 import express from 'express';
 import { createStreamByRouter } from '@streamby/core';
