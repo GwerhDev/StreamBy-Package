@@ -21,12 +21,15 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   if (config.databases) {
     const allDbIds = config.databases.map(db => db.id);
-    registerModel('projects', allDbIds, 'projects');
-    registerModel('exports', allDbIds, 'exports');
+    const sqlDbs = config.databases.filter(db => db.type === 'sql');
+    const streambySchema = sqlDbs.length > 0 ? 'streamby' : undefined;
+
+    registerModel('projects', allDbIds, 'projects', streambySchema);
+    registerModel('exports', allDbIds, 'exports', streambySchema);
 
     const mainDb = config.databases.find(db => db.main);
     if (mainDb) {
-      registerModel('users', [mainDb.id], 'users');
+      registerModel('users', [mainDb.id], 'users', streambySchema);
     }
   }
 

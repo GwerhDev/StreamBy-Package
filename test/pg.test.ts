@@ -4,7 +4,7 @@ import { afterEach, beforeAll, afterAll, describe, it, expect } from 'vitest';
 
 describe('setupStreambyPg', () => {
     let pool: Pool;
-    const connectionString = 'postgresql://postgres:mysecretpassword@localhost:5432/postgres';
+    const connectionString = 'postgresql://postgres:postgres@localhost:5432/postgres';
 
     beforeAll(async () => {
         pool = new Pool({ connectionString });

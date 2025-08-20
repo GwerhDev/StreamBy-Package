@@ -41,7 +41,7 @@ export async function setupStreambyPg({
         // Read and append reset SQL if reset is true
         if (reset) {
             console.log(`[StreamByPgSetup] Resetting schema "${schema}"...`);
-            const resetSqlPath = join(__dirname, '../../sql/reset.sql');
+            const resetSqlPath = join(process.cwd(), 'src/sql/reset.sql');
             const resetSql = await fs.readFile(resetSqlPath, 'utf8');
             fullSql += resetSql;
             result.didReset = true;
@@ -55,7 +55,7 @@ export async function setupStreambyPg({
 
         // Read and append setup SQL
         console.log(`[StreamByPgSetup] Creating/updating tables and indexes in schema "${schema}"...`);
-        const setupSqlPath = join(__dirname, '../../sql/setup.sql');
+        const setupSqlPath = join(process.cwd(), 'src/sql/setup.sql');
         const setupSql = await fs.readFile(setupSqlPath, 'utf8');
         fullSql += setupSql;
         result.didCreateTables = true; // Assuming if setup.sql runs, tables are handled

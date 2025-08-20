@@ -52,10 +52,11 @@ export class Model<T extends Document> {
         if (this.tableName === 'projects' && processedFilter.members && processedFilter.members.$elemMatch) {
           // Handle members filter for SQL projects
           const userId = processedFilter.members.$elemMatch.userId;
+          const schema = this.schema || 'streamby'; // Default to 'streamby' if schema not provided
           const query = `
             SELECT p.*, pm."userId" as memberUserId, pm.archived as memberArchived
-            FROM "projects" p
-            JOIN "project_members" pm ON p.id = pm."projectId"
+            FROM "${schema}"."projects" p
+            JOIN "${schema}"."project_members" pm ON p.id = pm."projectId"
             WHERE pm."userId" = $1
           `;
           const result = await (connection as Pool).query(query, [userId]);
@@ -69,14 +70,14 @@ export class Model<T extends Document> {
           }));
         } else {
           // General SQL find
-          sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter);
+          sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter, this.schema);
         }
 
         for (const item of sqlResults) {
           const transformedItem = this.transformResult(item);
           if (this.tableName === 'projects' && !transformedItem.members) {
             // For projects, if members not already populated by join, fetch from project_members table
-            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id });
+            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id }, this.schema);
             (transformedItem as any).members = projectMembers.map((member: any) => ({
               userId: member.userId,
               role: member.role, // Assuming role is also stored in project_members
@@ -119,7 +120,7 @@ export class Model<T extends Document> {
 
         // Special handling for 'users' table with raw query
         if (this.tableName === 'users' && processedFilter.id) {
-          const schema = this.schema || 'public'; // Default to 'public' if schema not provided
+          const schema = this.schema || 'streamby'; // Default to 'streamby' if schema not provided
           const query = `SELECT * FROM "${schema}"."${this.tableName}" WHERE "id" = $1::uuid LIMIT 1`;
           const result = await (connection as Pool).query(query, [processedFilter.id]);
           return result.rows[0] || null;
@@ -130,7 +131,7 @@ export class Model<T extends Document> {
           const transformedResult = this.transformResult(result);
           if (this.tableName === 'projects') {
             // For projects, fetch members from project_members table
-            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedResult.id });
+            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedResult.id }, this.schema);
             (transformedResult as any).members = projectMembers.map((member: any) => ({
               userId: member.userId,
               role: member.role, // Assuming role is also stored in project_members
@@ -189,7 +190,7 @@ export class Model<T extends Document> {
         }
       }
 
-      const created = await sqlAdapter.create(connection as Pool, this.tableName, dataToInsert);
+      const created = await sqlAdapter.create(connection as Pool, this.tableName, dataToInsert, this.schema);
 
       // Insert members into project_members table for SQL
       if (this.tableName === 'projects' && membersToInsert.length > 0) {
@@ -199,7 +200,7 @@ export class Model<T extends Document> {
             userId: member.userId,
             role: member.role,
             archived: member.archived || false,
-          });
+          }, this.schema);
         }
       }
       return created as T;
@@ -263,7 +264,8 @@ export class Model<T extends Document> {
           connection as Pool,
           'project_members',
           { projectId: originalProjectId, userId: userIdToUpdate }, // originalProjectId is fine for SQL
-          { archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt }
+          { archived: newArchivedStatus, archivedBy: archivedBy, archivedAt: archivedAt },
+          this.schema
         );
         // After updating the member, fetch the full project to return
         if (memberUpdateResult) {
@@ -294,7 +296,7 @@ export class Model<T extends Document> {
       // General update logic
       // Use the correctly constructed updateFilter
       if (dbType === 'sql') {
-        const result = await sqlAdapter.update(connection as Pool, this.tableName, updateFilter, data);
+        const result = await sqlAdapter.update(connection as Pool, this.tableName, updateFilter, data, this.schema);
         if (result) return result as T;
       } else if (dbType === 'nosql') {
         const result = await nosqlAdapter.update(connection as MongoClient, this.tableName, filter, data as UpdateFilter<T>);
@@ -319,7 +321,7 @@ export class Model<T extends Document> {
           delete processedFilter._id;
         }
         console.log(`SQL: Deleting from ${this.tableName} with filter:`, processedFilter);
-        const count = await sqlAdapter.delete(connection as Pool, this.tableName, processedFilter);
+        const count = await sqlAdapter.delete(connection as Pool, this.tableName, processedFilter, this.schema);
         console.log(`SQL: Deleted ${count} rows from ${this.tableName}`);
         deletedCount += count;
       } else if (dbType === 'nosql') {

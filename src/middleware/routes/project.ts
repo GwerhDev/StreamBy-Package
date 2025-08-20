@@ -65,7 +65,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(500).json({ message: 'Main database not configured' });
       }
       const userDbType = mainDb.type;
-      const User = getModel('users', userDbType, 'accounts');
+      const User = getModel('users', userDbType);
       const user = await User.findOne({ _id: auth.userId });
 
       if (!user) {
@@ -308,7 +308,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
       const userDbType = mainDb.type;
 
-      const User = getModel('users', userDbType, 'accounts');
+      const User = getModel('users', userDbType);
       const membersWithUsernames = await Promise.all(
         project.members.map(async (member: any) => {
           const user = await User.findOne({ _id: member.userId });
