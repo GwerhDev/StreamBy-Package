@@ -308,7 +308,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
       const userDbType = mainDb.type;
 
-      const User = getModel('users', userDbType);
+            const User = getModel('users', userDbType);
       const membersWithUsernames = await Promise.all(
         project.members.map(async (member: any) => {
           const user = await User.findOne({ _id: member.userId });

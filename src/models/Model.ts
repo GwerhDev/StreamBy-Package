@@ -29,7 +29,7 @@ export class Model<T extends Document> {
       const connection = getConnection(id);
       return connection.type === dbType;
     });
-    return new Model<T>(filteredConnectionIds, this.tableName);
+        return new Model<T>(filteredConnectionIds, this.tableName, this.schema);
   }
 
   async find(filter: any): Promise<T[]> {

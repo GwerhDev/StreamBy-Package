@@ -29,7 +29,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
     const mainDb = config.databases.find(db => db.main);
     if (mainDb) {
-      registerModel('users', [mainDb.id], 'users', streambySchema);
+            registerModel('users', [mainDb.id], 'users', 'accounts');
     }
   }
 
