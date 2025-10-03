@@ -58,7 +58,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, description, dbType, image } = req.body;
+      const { name, description, dbType, image, allowedOrigin } = req.body;
 
       const mainDb = config.databases?.find(db => db.main);
       if (!mainDb) {
@@ -77,6 +77,7 @@ export function projectRouter(config: StreamByConfig): Router {
         name,
         description: description || '',
         image: image || '',
+        allowedOrigin: allowedOrigin || [],
         members: [{ userId: auth.userId, username: user.username, role: "admin", archived: false }]
       });
 
@@ -359,6 +360,37 @@ export function projectRouter(config: StreamByConfig): Router {
       res.status(200).json({ success: true, project: { ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }, message: 'Project image updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project image', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/origins', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ message: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+      const { origins } = req.body;
+
+      const project = await Project.findOne({ _id: projectId });
+
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ message: 'Unauthorized project access' });
+      }
+
+      const updated = await Project.update({ _id: projectId }, { allowedOrigin: origins });
+      if (!updated) {
+        return res.status(404).json({ message: 'Project not found or not updated' });
+      }
+
+      res.status(200).json({ success: true, project: updated, message: 'Project origins updated successfully' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to update project origins', details: err.message });
     }
   });
 

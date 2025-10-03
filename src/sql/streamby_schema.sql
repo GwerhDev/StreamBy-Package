@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS __schema__.projects (
     user_id UUID NOT NULL REFERENCES __schema__.users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
+    "allowedOrigin" TEXT[],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
