@@ -65,7 +65,26 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Export data not found' });
       }
 
-      res.json({ data, message: 'Export data fetched successfully' });
+      let responseData: any;
+
+      if (Array.isArray(data)) {
+        responseData = {
+          content: data,
+          allowedOrigin: exportMetadata.allowedOrigin,
+          private: exportMetadata.private,
+        };
+      } else {
+        responseData = {
+          ...data,
+          allowedOrigin: exportMetadata.allowedOrigin,
+          private: exportMetadata.private,
+        };
+      }
+
+      res.json({
+        data: responseData,
+        message: 'Export data fetched successfully',
+      });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch export data', details: err.message });
     }
@@ -92,7 +111,7 @@ export function exportRouter(config: StreamByConfig): Router {
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
-      
+
       const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType, isPrivate, allowedOrigin);
 
       res.status(201).json({ data: result, message: result.message });
@@ -175,7 +194,7 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (allowedOrigins && allowedOrigins.length > 0) {
         if (!origin || !allowedOrigins.includes(origin)) {
-          return res.status(403).json({ message: 'Forbidden' });
+          return res.status(403).json({ message: 'Unauthorized' });
         }
       }
 

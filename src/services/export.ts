@@ -100,7 +100,6 @@ export async function updateExport(
     },
     { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin } }
   );
-  console.log(result);
 
   return { ...result, message: 'Raw export updated successfully' };
 }
