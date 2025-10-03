@@ -192,10 +192,8 @@ export function exportRouter(config: StreamByConfig): Router {
       const origin = req.headers.origin;
       const allowedOrigins = exportMetadata.allowedOrigin || project.allowedOrigin;
 
-      if (allowedOrigins && allowedOrigins.length > 0) {
-        if (!origin || !allowedOrigins.includes(origin)) {
-          return res.status(403).json({ message: 'Unauthorized' });
-        }
+      if (!allowedOrigins.includes(origin)) {
+        return res.status(403).json({ message: 'Unauthorized' });
       }
 
       const targetDb = config.databases?.find(db => db.type === project.dbType);
