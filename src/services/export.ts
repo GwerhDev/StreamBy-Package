@@ -21,7 +21,9 @@ export async function createExport(
   exportName: string,
   collectionName: string,
   jsonData: any,
-  dbType: DatabaseType
+  dbType: DatabaseType,
+  isPrivate?: boolean,
+  allowedOrigin?: string[]
 ): Promise<CreateExportResult> {
 
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
@@ -47,7 +49,7 @@ export async function createExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw', method: 'GET' } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw', method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin } } }
   );
 
   return { ...result, message: 'Raw export created successfully' };
@@ -60,7 +62,9 @@ export async function updateExport(
   exportName: string,
   collectionName: string,
   jsonData: any,
-  dbType: DatabaseType
+  dbType: DatabaseType,
+  isPrivate?: boolean,
+  allowedOrigin?: string[]
 ): Promise<CreateExportResult> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
                    config.databases?.find(db => db.type === dbType);
@@ -94,7 +98,7 @@ export async function updateExport(
       _id: new ObjectId(projectId), 
       'exports.id': { $in: [new ObjectId(exportId), exportId] } 
     },
-    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName } }
+    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin } }
   );
   console.log(result);
 

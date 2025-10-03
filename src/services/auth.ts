@@ -3,7 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 import { StreamByConfig } from '../types';
 
 export const authenticate = (config: StreamByConfig) => async (req: Request, res: Response, next: NextFunction) => {
-  if (req.path.includes('/public-export/')) {
+  if (req.path.includes('/get-export/')) {
     return next();
   }
 

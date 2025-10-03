@@ -98,4 +98,6 @@ export interface Export {
   type: 'structured' | 'raw';
   fields?: FieldDefinition[];
   jsonData?: any;
+  private?: boolean;
+  allowedOrigin?: string[]; // Changed to singular
 }
