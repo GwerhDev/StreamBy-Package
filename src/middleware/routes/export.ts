@@ -190,9 +190,22 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const origin = req.headers.origin;
-      const allowedOrigins = exportMetadata.allowedOrigin || project.allowedOrigin;
+      let effectiveAllowedOrigins = exportMetadata.allowedOrigin;
 
-      if (!allowedOrigins.includes(origin)) {
+      // If export's allowedOrigin is ['*'] or it's not set, use the project's settings.
+      if (!effectiveAllowedOrigins || (effectiveAllowedOrigins.length === 1 && effectiveAllowedOrigins[0] === '*')) {
+        effectiveAllowedOrigins = project.allowedOrigin;
+      }
+
+      // If there's no origin, deny access unless it's public.
+      if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
+          return res.status(403).json({ message: 'Origin header required' });
+      }
+
+      // Check for public access ('*') or if the origin is in the list.
+      const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
+
+      if (!isAllowed) {
         return res.status(403).json({ message: 'Unauthorized' });
       }
 

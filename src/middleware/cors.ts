@@ -23,17 +23,18 @@ export const projectOriginMiddleware = async (req: Request, res: Response, next:
         }
 
         if (project.allowedOrigin && project.allowedOrigin.length > 0) {
-            if (project.allowedOrigin.includes(origin)) {
+            // Allow if public ('*') or origin is in the list
+            if (project.allowedOrigin.includes('*') || project.allowedOrigin.includes(origin)) {
                 res.header('Access-Control-Allow-Origin', origin);
                 res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
                 res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-                next();
+                return next();
             } else {
                 return res.status(403).json({ message: 'Origin not allowed' });
             }
         } else {
-            // If no origins are configured, allow the request
-            next();
+            // If allowedOrigin is empty, deny access for security.
+            return res.status(403).json({ message: 'Origin not allowed' });
         }
     } catch (error) {
         console.error('Error in projectOriginMiddleware:', error);

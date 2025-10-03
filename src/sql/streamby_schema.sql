@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS __schema__.projects (
     user_id UUID NOT NULL REFERENCES __schema__.users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    "allowedOrigin" TEXT[],
+    "allowedOrigin" TEXT[] DEFAULT ARRAY['*']::TEXT[],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS __schema__.exports (
     collection_name VARCHAR(255) NOT NULL,
     type VARCHAR(50) NOT NULL,
     private BOOLEAN DEFAULT FALSE,
-    "allowedOrigin" TEXT[],
+    "allowedOrigin" TEXT[] DEFAULT ARRAY['*']::TEXT[],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
