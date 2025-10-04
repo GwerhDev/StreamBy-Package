@@ -17,7 +17,7 @@ import { setEncryptionKey } from '../utils/encryption';
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
-  setEncryptionKey(config.encrypt || "");
+  if (config.encrypt) setEncryptionKey(config.encrypt);
 
   initConnections(config.databases || []);
 

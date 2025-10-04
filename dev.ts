@@ -58,7 +58,7 @@ async function main() {
         },
       }
     ],
-    encrypt: config.encryptionKey || "",
+    encrypt: config.encryptionKey,
   };
 
   devApp.use((req, res, next) => {
