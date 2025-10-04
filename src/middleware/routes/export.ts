@@ -191,18 +191,27 @@ export function exportRouter(config: StreamByConfig): Router {
 
       const origin = req.headers.origin;
       let effectiveAllowedOrigins = exportMetadata.allowedOrigin;
+      const projectOrigins = project.allowedOrigin;
 
-      // If export's allowedOrigin is ['*'] or it's not set, use the project's settings.
+      // If export's allowedOrigin is ['*'] or it's not set, it inherits from the project.
       if (!effectiveAllowedOrigins || (effectiveAllowedOrigins.length === 1 && effectiveAllowedOrigins[0] === '*')) {
-        effectiveAllowedOrigins = project.allowedOrigin;
+        effectiveAllowedOrigins = projectOrigins;
+      } else {
+        // If the export has its own list, ensure it's a subset of the project's list (if project is not public).
+        if (projectOrigins && !projectOrigins.includes('*')) {
+          const isSubset = effectiveAllowedOrigins.every((o: string) => projectOrigins.includes(o));
+          if (!isSubset) {
+            return res.status(403).json({ message: 'Unauthorized: Export origins are not allowed by the parent project.' });
+          }
+        }
       }
 
-      // If there's no origin, deny access unless it's public.
+      // If there's no origin header, deny access unless the effective scope is public.
       if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
           return res.status(403).json({ message: 'Origin header required' });
       }
 
-      // Check for public access ('*') or if the origin is in the list.
+      // Check for public access ('*') or if the request's origin is in the effective list.
       const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
 
       if (!isAllowed) {
