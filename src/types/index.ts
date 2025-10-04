@@ -84,6 +84,7 @@ export interface StreamByConfig {
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
   adapter?: StorageAdapter;
+  encrypt?: string;
 }
 
 export interface Auth {

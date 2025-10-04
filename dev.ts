@@ -3,11 +3,11 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { StreamByConfig } from './src/types';
 import { createStreamByRouter } from './src/middleware/createRouter';
-import { setEncryptionKey } from './src/utils/encryption';
 
 dotenv.config();
 
 const config = {
+  dummyId: process.env.DUMMY_ID,
   awsSecret: process.env.AWS_SECRET,
   awsBucket: process.env.AWS_BUCKET,
   awsAccessKey: process.env.AWS_ACCESS_KEY,
@@ -17,12 +17,6 @@ const config = {
   postgresUri: process.env.POSTGRES_URI,
   encryptionKey: process.env.STREAMBY_ENCRYPTION_KEY,
 };
-
-if (config.encryptionKey) {
-  setEncryptionKey(config.encryptionKey);
-} else {
-  console.warn('STREAMBY_ENCRYPTION_KEY is not set. API credential encryption/decryption will be disabled.');
-}
 
 async function main() {
   const devApp = express();
@@ -35,7 +29,7 @@ async function main() {
   const streambyConfig: StreamByConfig = {
     authProvider: async (req) => {
       return {
-        userId: process.env.DUMMY_ID || 'dummy-user-id',
+        userId: config.dummyId || 'dummy-user-id',
         username: 'dev-user',
         role: 'admin'
       };
@@ -63,7 +57,8 @@ async function main() {
           secretAccessKey: config.awsSecretKey!,
         },
       }
-    ]
+    ],
+    encrypt: config.encryptionKey || "",
   };
 
   devApp.use((req, res, next) => {

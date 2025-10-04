@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16; // For AES, this is always 16
 
-let ENCRYPTION_KEY: string | undefined = process.env.STREAMBY_ENCRYPTION_KEY;
+let ENCRYPTION_KEY: string | undefined = undefined;
 
 export const setEncryptionKey = (key: string) => {
   if (key.length !== 64) { // 32 bytes * 2 hex characters per byte

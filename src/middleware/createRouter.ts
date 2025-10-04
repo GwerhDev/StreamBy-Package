@@ -12,9 +12,12 @@ import { exportRouter } from './routes/export';
 import { credentialRouter } from './routes/credential';
 
 import { authenticate } from '../services/auth';
+import { setEncryptionKey } from '../utils/encryption';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
+
+  setEncryptionKey(config.encrypt || "");
 
   initConnections(config.databases || []);
 
