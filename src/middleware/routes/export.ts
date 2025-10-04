@@ -63,11 +63,12 @@ export function exportRouter(config: StreamByConfig): Router {
           if (!currentProject) {
             return res.status(404).json({ message: 'Project not found.' });
           }
-          
+
           data = { name: exportMetadata.name, createdAt: exportMetadata.createdAt, updatedAt: exportMetadata.updatedAt, type: exportMetadata.type, collectionName: exportMetadata.collectionName };
 
         } else {
-          data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
+          const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
+          data = rawData ? { json: rawData.json, name: rawData.name, method: rawData.method, collectionName: rawData.collectionName, createdAt: rawData.createdAt, updatedAt: rawData.updatedAt, type: exportMetadata.type } : null;
         }
       } else if (project.dbType === 'sql') {
         // ... SQL implementation needed
@@ -78,20 +79,11 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       let responseData: any;
-
-      if (Array.isArray(data)) {
-        responseData = {
-          content: data,
-          allowedOrigin: exportMetadata.allowedOrigin,
-          private: exportMetadata.private,
-        };
-      } else {
-        responseData = {
-          ...data,
-          allowedOrigin: exportMetadata.allowedOrigin,
-          private: exportMetadata.private,
-        };
-      }
+      responseData = {
+        ...data,
+        allowedOrigin: exportMetadata.allowedOrigin,
+        private: exportMetadata.private,
+      };
 
       res.json({
         data: responseData,
