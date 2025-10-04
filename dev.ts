@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { StreamByConfig } from './src/types';
 import { createStreamByRouter } from './src/middleware/createRouter';
+import { setEncryptionKey } from './src/utils/encryption';
 
 dotenv.config();
 
@@ -14,7 +15,15 @@ const config = {
   awsBucketRegion: process.env.AWS_BUCKET_REGION,
   mongoUri: process.env.MONGO_URI,
   postgresUri: process.env.POSTGRES_URI,
+  // For API credential encryption. Must be a 32-byte (64 hex characters) string.
+  encryptionKey: process.env.STREAMBY_ENCRYPTION_KEY,
 };
+
+if (config.encryptionKey) {
+  setEncryptionKey(config.encryptionKey);
+} else {
+  console.warn('STREAMBY_ENCRYPTION_KEY is not set. API credential encryption/decryption will be disabled.');
+}
 
 async function main() {
   const devApp = express();

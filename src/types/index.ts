@@ -50,6 +50,14 @@ export interface ProjectInfo {
     allowUpload?: boolean;
     allowSharing?: boolean;
   };
+  apiCredentials?: ApiCredential[];
+}
+
+export interface ApiCredential {
+  id: string;
+  name: string;
+  encryptedValue: string;
+  prefix?: string;
 }
 
 export interface ProjectListInfo {
@@ -95,9 +103,11 @@ export interface Export {
   projectId: string;
   createdAt: Date;
   updatedAt: Date;
-  type: 'structured' | 'raw';
+  type: 'structured' | 'raw' | 'externalApi';
   fields?: FieldDefinition[];
   jsonData?: any;
   private?: boolean;
   allowedOrigin?: string[]; // Changed to singular
+  apiUrl?: string;
+  credentialId?: string;
 }

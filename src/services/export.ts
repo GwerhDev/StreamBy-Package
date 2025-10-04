@@ -1,19 +1,19 @@
 import { getModel } from '../models/manager';
 import { ObjectId } from 'mongodb';
-import { FieldDefinition, DatabaseType } from '../types';
+import { FieldDefinition, DatabaseType, StreamByConfig, ProjectInfo } from '../types';
 import { MongoClient } from 'mongodb';
 import { Pool } from 'pg';
 import { getConnection } from '../adapters/database/connectionManager';
 import { createNoSQLExportCollection, createNoSQLRawExportCollection } from '../adapters/database/nosql';
 import { createSQLExportTable, createSQLRawExportTable } from '../adapters/database/sql';
+import fetch from 'node-fetch';
+import { decrypt, isEncryptionKeySet } from '../utils/encryption';
 
 interface CreateExportResult {
   exportId: string;
   collectionName: string;
   message: string;
 }
-
-import { StreamByConfig } from '../types';
 
 export async function createExport(
   config: StreamByConfig,
@@ -22,8 +22,11 @@ export async function createExport(
   collectionName: string,
   jsonData: any,
   dbType: DatabaseType,
+  exportType: 'structured' | 'raw' | 'externalApi',
   isPrivate?: boolean,
-  allowedOrigin?: string[]
+  allowedOrigin?: string[],
+  apiUrl?: string,
+  credentialId?: string,
 ): Promise<CreateExportResult> {
 
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
@@ -36,7 +39,55 @@ export async function createExport(
 
   let result: { collectionName: string; exportId: string };
 
-  if (dbType === 'nosql') {
+  if (exportType === 'externalApi') {
+    if (!apiUrl) {
+      throw new Error('API URL is required for externalApi export type.');
+    }
+
+    const ProjectModel = getModel('projects', 'nosql');
+    const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
+
+    if (!project) {
+      throw new Error('Project not found.');
+    }
+
+    let headers: Record<string, string> = {};
+    if (credentialId) {
+      if (!isEncryptionKeySet()) {
+        throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
+      }
+      const credential = project.apiCredentials?.find(cred => cred.id === credentialId);
+      if (!credential) {
+        throw new Error(`Credential with ID ${credentialId} not found.`);
+      }
+      const decryptedValue = decrypt(credential.encryptedValue);
+      const authPrefix = credential.prefix ? `${credential.prefix} ` : 'Bearer ';
+      headers = {
+        'Authorization': `${authPrefix}${decryptedValue}`,
+        'Content-Type': 'application/json',
+      };
+    }
+
+    try {
+      const response = await fetch(apiUrl, { headers });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch from external API: ${response.statusText}`);
+      }
+      jsonData = await response.json();
+    } catch (error: any) {
+      throw new Error(`Error fetching from external API: ${error.message}`);
+    }
+
+    // For externalApi, we store the fetched data as a raw export
+    if (dbType === 'nosql') {
+      result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, jsonData, 'GET');
+    } else if (dbType === 'sql') {
+      result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, jsonData);
+    } else {
+      throw new Error('Unsupported database type for externalApi export');
+    }
+
+  } else if (dbType === 'nosql') {
     result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, jsonData, 'GET');
   } else if (dbType === 'sql') {
     result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, jsonData);
@@ -49,10 +100,10 @@ export async function createExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: 'raw', method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin, apiUrl: apiUrl, credentialId: credentialId } } }
   );
 
-  return { ...result, message: 'Raw export created successfully' };
+  return { ...result, message: `${exportType} export created successfully` };
 }
 
 export async function updateExport(
@@ -63,8 +114,11 @@ export async function updateExport(
   collectionName: string,
   jsonData: any,
   dbType: DatabaseType,
+  exportType: 'structured' | 'raw' | 'externalApi',
   isPrivate?: boolean,
-  allowedOrigin?: string[]
+  allowedOrigin?: string[],
+  apiUrl?: string,
+  credentialId?: string,
 ): Promise<CreateExportResult> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
                    config.databases?.find(db => db.type === dbType);
@@ -76,7 +130,62 @@ export async function updateExport(
 
   let result: { collectionName: string; exportId: string };
 
-  if (dbType === 'nosql') {
+  if (exportType === 'externalApi') {
+    if (!apiUrl) {
+      throw new Error('API URL is required for externalApi export type.');
+    }
+
+    const ProjectModel = getModel('projects', 'nosql');
+    const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
+
+    if (!project) {
+      throw new Error('Project not found.');
+    }
+
+    let headers: Record<string, string> = {};
+    if (credentialId) {
+      if (!isEncryptionKeySet()) {
+        throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
+      }
+      const credential = project.apiCredentials?.find(cred => cred.id === credentialId);
+      if (!credential) {
+        throw new Error(`Credential with ID ${credentialId} not found.`);
+      }
+      const decryptedValue = decrypt(credential.encryptedValue);
+      const authPrefix = credential.prefix ? `${credential.prefix} ` : 'Bearer ';
+      headers = {
+        'Authorization': `${authPrefix}${decryptedValue}`,
+        'Content-Type': 'application/json',
+      };
+    }
+
+    try {
+      const response = await fetch(apiUrl, { headers });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch from external API: ${response.statusText}`);
+      }
+      jsonData = await response.json();
+    } catch (error: any) {
+      throw new Error(`Error fetching from external API: ${error.message}`);
+    }
+
+    // For externalApi, we update the fetched data as a raw export
+    if (dbType === 'nosql') {
+      const db = (connection.client as MongoClient).db();
+      const updateData = {
+        json: jsonData,
+        name: exportName,
+        updatedAt: new Date(),
+        apiUrl: apiUrl,
+        credentialId: credentialId,
+      };
+      await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
+      result = { collectionName, exportId };
+    } else {
+      throw new Error('Unsupported database type for externalApi export update');
+    }
+
+  } else if (dbType === 'nosql') {
     const db = (connection.client as MongoClient).db();
     const updateData = {
       json: jsonData,
@@ -98,10 +207,10 @@ export async function updateExport(
       _id: new ObjectId(projectId), 
       'exports.id': { $in: [new ObjectId(exportId), exportId] } 
     },
-    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin } }
+    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId } }
   );
 
-  return { ...result, message: 'Raw export updated successfully' };
+  return { ...result, message: `${exportType} export updated successfully` };
 }
 
 export async function deleteExport(

@@ -5,6 +5,7 @@ import { isProjectMember } from '../../utils/auth';
 import { createExport, updateExport, deleteExport } from '../../services/export';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
+import { decrypt } from '../../utils/encryption';
 
 export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -54,6 +55,37 @@ export function exportRouter(config: StreamByConfig): Router {
         if (exportMetadata.type === 'raw') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
           data = rawData ? { json: rawData.json, name: rawData.name, method: rawData.method, collectionName: rawData.collectionName, createdAt: rawData.createdAt, updatedAt: rawData.updatedAt, type: exportMetadata.type } : null;
+        } else if (exportMetadata.type === 'externalApi') {
+          const ProjectModel = getModel('projects', 'nosql');
+          const currentProject = await ProjectModel.findOne({ _id: projectId });
+
+          if (!currentProject) {
+            return res.status(404).json({ message: 'Project not found.' });
+          }
+
+          let headers: Record<string, string> = {};
+          if (exportMetadata.credentialId) {
+            const credential = currentProject.apiCredentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
+            if (!credential) {
+              return res.status(404).json({ message: `Credential with ID ${exportMetadata.credentialId} not found.` });
+            }
+            const decryptedValue = decrypt(credential.encryptedValue);
+            const authPrefix = credential.prefix ? `${credential.prefix} ` : 'Bearer ';
+            headers = {
+              'Authorization': `${authPrefix}${decryptedValue}`,
+              'Content-Type': 'application/json',
+            };
+          }
+
+          try {
+            const response = await fetch(exportMetadata.apiUrl, { headers });
+            if (!response.ok) {
+              throw new Error(`Failed to fetch from external API: ${response.statusText}`);
+            }
+            data = await response.json();
+          } catch (error: any) {
+            return res.status(500).json({ message: 'Failed to fetch from external API', details: error.message });
+          }
         } else {
           data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
         }
@@ -101,10 +133,18 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(401).json({ message: 'Unauthorized' });
       }
       const projectId = req.params.id;
-      const { name, description, collectionName, jsonData, isPrivate, allowedOrigin } = req.body;
+      const { name, description, collectionName, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId } = req.body;
 
-      if (!name || !collectionName || !jsonData) {
-        return res.status(400).json({ message: 'Missing export name, collectionName, or jsonData' });
+      if (!name || !collectionName) {
+        return res.status(400).json({ message: 'Missing export name or collectionName' });
+      }
+
+      if (exportType === 'externalApi') {
+        if (!apiUrl) {
+          return res.status(400).json({ message: 'API URL is required for externalApi export type' });
+        }
+      } else if (!jsonData) {
+        return res.status(400).json({ message: 'Missing jsonData for non-externalApi export types' });
       }
 
       const project = await Project.findOne({ _id: projectId });
@@ -112,7 +152,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType, isPrivate, allowedOrigin);
+      const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -128,10 +168,18 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const { id: projectId, export_id: exportId } = req.params;
-      const { name, collectionName, description, jsonData, isPrivate, allowedOrigin } = req.body;
+      const { name, collectionName, description, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId } = req.body;
 
-      if (!name || !collectionName || !jsonData) {
-        return res.status(400).json({ message: 'Missing name, collectionName, or jsonData' });
+      if (!name || !collectionName) {
+        return res.status(400).json({ message: 'Missing name or collectionName' });
+      }
+
+      if (exportType === 'externalApi') {
+        if (!apiUrl) {
+          return res.status(400).json({ message: 'API URL is required for externalApi export type' });
+        }
+      } else if (!jsonData) {
+        return res.status(400).json({ message: 'Missing jsonData for non-externalApi export types' });
       }
 
       const project = await Project.findOne({ _id: projectId });
@@ -139,7 +187,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, isPrivate, allowedOrigin);
+      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {
