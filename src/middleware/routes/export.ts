@@ -83,7 +83,10 @@ export function exportRouter(config: StreamByConfig): Router {
             if (!response.ok) {
               throw new Error(`Failed to fetch from external API: ${response.statusText}`);
             }
-            data = await response.json();
+
+            const responseData = await response.json();
+            data = { responseData, name: exportMetadata.name, createdAt: exportMetadata.createdAt, updatedAt: exportMetadata.updatedAt, type: exportMetadata.type, collectionName: exportMetadata.collectionName };
+
           } catch (error: any) {
             return res.status(500).json({ message: 'Failed to fetch from external API', details: error.message });
           }
@@ -257,7 +260,7 @@ export function exportRouter(config: StreamByConfig): Router {
 
       // If there's no origin header, deny access unless the effective scope is public.
       if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
-          return res.status(403).json({ message: 'Origin header required' });
+        return res.status(403).json({ message: 'Origin header required' });
       }
 
       // Check for public access ('*') or if the request's origin is in the effective list.
