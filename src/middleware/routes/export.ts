@@ -53,7 +53,7 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
-        if (exportMetadata.type === 'raw') {
+        if (exportMetadata.type === 'raw' || exportMetadata.type === 'json') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
           data = rawData ? { json: rawData.json, name: rawData.name, method: rawData.method, collectionName: rawData.collectionName, createdAt: rawData.createdAt, updatedAt: rawData.updatedAt, type: exportMetadata.type } : null;
         } else if (exportMetadata.type === 'externalApi') {
@@ -248,7 +248,7 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
-        if (exportMetadata.type === 'raw') {
+        if (exportMetadata.type === 'raw' || exportMetadata.type === 'json') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportMetadata.id) });
           data = rawData ? rawData.json : null;
         } else if (exportMetadata.type === 'externalApi') {
