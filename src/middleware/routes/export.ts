@@ -63,33 +63,9 @@ export function exportRouter(config: StreamByConfig): Router {
           if (!currentProject) {
             return res.status(404).json({ message: 'Project not found.' });
           }
+          
+          data = { name: exportMetadata.name, createdAt: exportMetadata.createdAt, updatedAt: exportMetadata.updatedAt, type: exportMetadata.type, collectionName: exportMetadata.collectionName };
 
-          let headers: Record<string, string> = {};
-          if (exportMetadata.credentialId) {
-            const credential = currentProject.credentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
-            if (!credential) {
-              return res.status(404).json({ message: `Credential with ID ${exportMetadata.credentialId} not found.` });
-            }
-            const decryptedValue = decrypt(credential.encryptedValue);
-            const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : 'Bearer ';
-            headers = {
-              'Authorization': `${authPrefix}${decryptedValue}`,
-              'Content-Type': 'application/json',
-            };
-          }
-
-          try {
-            const response = await fetch(exportMetadata.apiUrl, { headers });
-            if (!response.ok) {
-              throw new Error(`Failed to fetch from external API: ${response.statusText}`);
-            }
-
-            const responseData = await response.json();
-            data = { responseData, name: exportMetadata.name, createdAt: exportMetadata.createdAt, updatedAt: exportMetadata.updatedAt, type: exportMetadata.type, collectionName: exportMetadata.collectionName };
-
-          } catch (error: any) {
-            return res.status(500).json({ message: 'Failed to fetch from external API', details: error.message });
-          }
         } else {
           data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
         }
