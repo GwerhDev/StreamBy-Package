@@ -6,6 +6,9 @@ const IV_LENGTH = 16; // For AES, this is always 16
 let ENCRYPTION_KEY: string | undefined = process.env.STREAMBY_ENCRYPTION_KEY;
 
 export const setEncryptionKey = (key: string) => {
+  if (key.length !== 64) { // 32 bytes * 2 hex characters per byte
+    throw new Error('Invalid encryption key length. Key must be 32 bytes (64 hexadecimal characters).');
+  }
   ENCRYPTION_KEY = key;
 };
 
