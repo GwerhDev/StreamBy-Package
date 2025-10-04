@@ -9,6 +9,7 @@ import { databaseRouter } from './routes/database';
 import { storageRouter } from './routes/storage';
 import { projectRouter } from './routes/project';
 import { exportRouter } from './routes/export';
+import { credentialRouter } from './routes/credential';
 
 import { authenticate } from '../services/auth';
 
@@ -39,6 +40,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(storageRouter(config));
   router.use(projectRouter(config));
   router.use(exportRouter(config));
+  router.use(credentialRouter(config));
 
   return router;
 }
