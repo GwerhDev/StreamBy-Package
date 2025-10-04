@@ -6,6 +6,7 @@ import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { authenticate } from '../../services/auth';
+import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
 
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -58,7 +59,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, description, dbType, image, allowedOrigin } = req.body;
+      const { name, description, dbType, image, allowedOrigin, credentials } = req.body;
 
       const mainDb = config.databases?.find(db => db.main);
       if (!mainDb) {
@@ -72,13 +73,26 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'User not found' });
       }
 
+      let encryptedCredentials = [];
+      if (credentials && credentials.length > 0) {
+        if (!isEncryptionKeySet()) {
+          return res.status(400).json({ message: 'Encryption key is not set. Cannot create credentials.' });
+        }
+        encryptedCredentials = credentials.map((cred: any) => ({
+          id: cred.id,
+          key: cred.key,
+          encryptedValue: encrypt(cred.encryptedValue),
+        }));
+      }
+
       const newProject = await Project.create({
         dbType: dbType || 'nosql',
         name,
         description: description || '',
         image: image || '',
         allowedOrigin: allowedOrigin || [],
-        members: [{ userId: auth.userId, username: user.username, role: "admin", archived: false }]
+        members: [{ userId: auth.userId, username: user.username, role: "admin", archived: false }],
+        credentials: encryptedCredentials,
       });
 
       const allProjects = await Project.find({});
@@ -125,7 +139,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       const projectId = req.params.id;
-      const updates = req.body;
+      const { credentials, ...otherUpdates } = req.body;
 
       const project = await Project.findOne({ _id: projectId });
 
@@ -133,7 +147,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!updates || typeof updates !== 'object') {
+      if (!otherUpdates && !credentials) {
         return res.status(400).json({ message: 'Missing updates payload' });
       }
 
@@ -141,7 +155,20 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const updated = await Project.update({ _id: projectId }, updates);
+      let updatedCredentials = project.credentials || [];
+      if (credentials) {
+        if (!isEncryptionKeySet()) {
+          return res.status(400).json({ message: 'Encryption key is not set. Cannot update credentials.' });
+        }
+        // For simplicity, this replaces all credentials. A more robust solution might merge or allow specific credential updates.
+        updatedCredentials = credentials.map((cred: any) => ({
+          id: cred.id,
+          key: cred.key,
+          encryptedValue: encrypt(cred.encryptedValue),
+        }));
+      }
+
+      const updated = await Project.update({ _id: projectId }, { ...otherUpdates, credentials: updatedCredentials });
       if (!updated) {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }

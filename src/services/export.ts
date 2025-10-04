@@ -27,10 +27,11 @@ export async function createExport(
   allowedOrigin?: string[],
   apiUrl?: string,
   credentialId?: string,
+  prefix?: string,
 ): Promise<CreateExportResult> {
 
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
-                   config.databases?.find(db => db.type === dbType);
+    config.databases?.find(db => db.type === dbType);
 
   if (!targetDb) {
     throw new Error(`Database connection not found for type ${dbType}`);
@@ -56,12 +57,12 @@ export async function createExport(
       if (!isEncryptionKeySet()) {
         throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
       }
-      const credential = project.apiCredentials?.find(cred => cred.id === credentialId);
+      const credential = project.credentials?.find(cred => cred.id === credentialId);
       if (!credential) {
         throw new Error(`Credential with ID ${credentialId} not found.`);
       }
       const decryptedValue = decrypt(credential.encryptedValue);
-      const authPrefix = credential.prefix ? `${credential.prefix} ` : 'Bearer ';
+      const authPrefix = prefix ? `${prefix} ` : 'Bearer ';
       headers = {
         'Authorization': `${authPrefix}${decryptedValue}`,
         'Content-Type': 'application/json',
@@ -100,7 +101,7 @@ export async function createExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin, apiUrl: apiUrl, credentialId: credentialId } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin, apiUrl: apiUrl, credentialId: credentialId, prefix: prefix } } }
   );
 
   return { ...result, message: `${exportType} export created successfully` };
@@ -119,9 +120,10 @@ export async function updateExport(
   allowedOrigin?: string[],
   apiUrl?: string,
   credentialId?: string,
+  prefix?: string,
 ): Promise<CreateExportResult> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
-                   config.databases?.find(db => db.type === dbType);
+    config.databases?.find(db => db.type === dbType);
 
   if (!targetDb) {
     throw new Error(`Database connection not found for type ${dbType}`);
@@ -147,12 +149,12 @@ export async function updateExport(
       if (!isEncryptionKeySet()) {
         throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
       }
-      const credential = project.apiCredentials?.find(cred => cred.id === credentialId);
+      const credential = project.credentials?.find(cred => cred.id === credentialId);
       if (!credential) {
         throw new Error(`Credential with ID ${credentialId} not found.`);
       }
       const decryptedValue = decrypt(credential.encryptedValue);
-      const authPrefix = credential.prefix ? `${credential.prefix} ` : 'Bearer ';
+      const authPrefix = prefix ? `${prefix} ` : 'Bearer ';
       headers = {
         'Authorization': `${authPrefix}${decryptedValue}`,
         'Content-Type': 'application/json',
@@ -178,6 +180,7 @@ export async function updateExport(
         updatedAt: new Date(),
         apiUrl: apiUrl,
         credentialId: credentialId,
+        prefix: prefix,
       };
       await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
       result = { collectionName, exportId };
@@ -193,21 +196,21 @@ export async function updateExport(
       updatedAt: new Date()
     };
 
-    
+
     await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
     result = { collectionName, exportId };
   } else {
     throw new Error('Unsupported database type for update');
   }
-  
+
   const NoSQLProject = getModel('projects', 'nosql');
-    
+
   await NoSQLProject.update(
-    { 
-      _id: new ObjectId(projectId), 
-      'exports.id': { $in: [new ObjectId(exportId), exportId] } 
+    {
+      _id: new ObjectId(projectId),
+      'exports.id': { $in: [new ObjectId(exportId), exportId] }
     },
-    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId } }
+    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId, 'exports.$.prefix': prefix } }
   );
 
   return { ...result, message: `${exportType} export updated successfully` };

@@ -6,6 +6,7 @@ import { createExport, updateExport, deleteExport } from '../../services/export'
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 import { decrypt } from '../../utils/encryption';
+import fetch from 'node-fetch'; // Import fetch here
 
 export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -65,12 +66,12 @@ export function exportRouter(config: StreamByConfig): Router {
 
           let headers: Record<string, string> = {};
           if (exportMetadata.credentialId) {
-            const credential = currentProject.apiCredentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
+            const credential = currentProject.credentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
             if (!credential) {
               return res.status(404).json({ message: `Credential with ID ${exportMetadata.credentialId} not found.` });
             }
             const decryptedValue = decrypt(credential.encryptedValue);
-            const authPrefix = credential.prefix ? `${credential.prefix} ` : 'Bearer ';
+            const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : 'Bearer ';
             headers = {
               'Authorization': `${authPrefix}${decryptedValue}`,
               'Content-Type': 'application/json',
@@ -133,7 +134,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(401).json({ message: 'Unauthorized' });
       }
       const projectId = req.params.id;
-      const { name, description, collectionName, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId } = req.body;
+      const { name, description, collectionName, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId, prefix } = req.body;
 
       if (!name || !collectionName) {
         return res.status(400).json({ message: 'Missing export name or collectionName' });
@@ -152,7 +153,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId);
+      const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -168,7 +169,7 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const { id: projectId, export_id: exportId } = req.params;
-      const { name, collectionName, description, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId } = req.body;
+      const { name, collectionName, description, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId, prefix } = req.body;
 
       if (!name || !collectionName) {
         return res.status(400).json({ message: 'Missing name or collectionName' });
@@ -187,7 +188,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId);
+      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {

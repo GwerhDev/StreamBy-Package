@@ -50,14 +50,13 @@ export interface ProjectInfo {
     allowUpload?: boolean;
     allowSharing?: boolean;
   };
-  apiCredentials?: ApiCredential[];
+  credentials?: Credential[];
 }
 
-export interface ApiCredential {
+export interface Credential {
   id: string;
-  name: string;
+  key: string;
   encryptedValue: string;
-  prefix?: string;
 }
 
 export interface ProjectListInfo {
@@ -110,4 +109,5 @@ export interface Export {
   allowedOrigin?: string[]; // Changed to singular
   apiUrl?: string;
   credentialId?: string;
+  prefix?: string;
 }
