@@ -46,8 +46,8 @@ export const createNoSQLRawExportCollection = async (
   connection: MongoClient,
   projectId: string,
   exportName: string,
-  jsonData: any,
-  method: string
+  method: string,
+  jsonData?: any,
 ): Promise<{ collectionName: string; exportId: string }> => {
   const db = connection.db();
   const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');

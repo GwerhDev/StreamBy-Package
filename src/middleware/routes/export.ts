@@ -5,7 +5,7 @@ import { isProjectMember } from '../../utils/auth';
 import { createExport, updateExport, deleteExport } from '../../services/export';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
-import { decrypt } from '../../utils/encryption';
+import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 import fetch from 'node-fetch'; // Import fetch here
 
 export function exportRouter(config: StreamByConfig): Router {
@@ -283,8 +283,34 @@ export function exportRouter(config: StreamByConfig): Router {
         if (exportMetadata.type === 'raw') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportMetadata.id) });
           data = rawData ? rawData.json : null;
-        } else {
-          data = await db.collection(exportMetadata.collectionName).find({ __metadata: { $exists: false } }).toArray();
+        } else if (exportMetadata.type === 'externalApi') {
+          let headers: Record<string, string> = {};
+          if (exportMetadata.credentialId) {
+            if (!isEncryptionKeySet()) {
+              throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
+            }
+            const credential = project.credentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
+            if (!credential) {
+              throw new Error(`Credential with ID ${exportMetadata.credentialId} not found.`);
+            }
+            const decryptedValue = decrypt(credential.encryptedValue);
+            const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : '';
+            headers = {
+              'Authorization': `${authPrefix}${decryptedValue}`,
+              'Content-Type': 'application/json',
+            };
+          }
+
+          try {
+            const response = await fetch(exportMetadata.apiUrl, { headers });
+            if (!response.ok) {
+              throw new Error(`Failed to fetch from external API: ${response.statusText}`);
+            }
+            data = await response.json();
+          } catch (error: any) {
+            throw new Error(`Error fetching from external API: ${error.message}`);
+          }
+
         }
       } else if (project.dbType === 'sql') {
         // SQL implementation for public exports will go here
@@ -294,7 +320,6 @@ export function exportRouter(config: StreamByConfig): Router {
       if (!data) {
         return res.status(404).json({ message: 'Export data not found' });
       }
-
       res.json(data); // Return the raw data directly
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch public export data', details: err.message });

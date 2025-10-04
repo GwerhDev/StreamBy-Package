@@ -41,7 +41,7 @@ export const createSQLRawExportTable = async (
   connection: Pool,
   projectId: string,
   exportName: string,
-  jsonData: any
+  jsonData?: any
 ): Promise<{ collectionName: string; exportId: string }> => {
   const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const tableName = `raw_export_${projectId}_${slug}`;

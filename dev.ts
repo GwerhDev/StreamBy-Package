@@ -15,7 +15,6 @@ const config = {
   awsBucketRegion: process.env.AWS_BUCKET_REGION,
   mongoUri: process.env.MONGO_URI,
   postgresUri: process.env.POSTGRES_URI,
-  // For API credential encryption. Must be a 32-byte (64 hex characters) string.
   encryptionKey: process.env.STREAMBY_ENCRYPTION_KEY,
 };
 
