@@ -6,7 +6,6 @@ import { createExport, updateExport, deleteExport } from '../../services/export'
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
-import fetch from 'node-fetch'; // Import fetch here
 
 export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -270,6 +269,7 @@ export function exportRouter(config: StreamByConfig): Router {
           }
 
           try {
+            const fetch = (await import('node-fetch')).default;
             const response = await fetch(exportMetadata.apiUrl, { headers });
             if (!response.ok) {
               throw new Error(`Failed to fetch from external API: ${response.statusText}`);
