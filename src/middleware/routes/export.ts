@@ -61,7 +61,8 @@ export function exportRouter(config: StreamByConfig): Router {
             collectionName: rawData?.collectionName,
             createdAt: rawData?.createdAt,
             updatedAt: rawData?.updatedAt,
-            type: exportMetadata.type
+            type: exportMetadata.type,
+            description: rawData?.description,
           };
         } else if (exportMetadata.type === 'externalApi') {
           const ProjectModel = getModel('projects', 'nosql');
@@ -96,7 +97,10 @@ export function exportRouter(config: StreamByConfig): Router {
             createdAt: exportMetadata.createdAt,
             updatedAt: exportMetadata.updatedAt,
             type: exportMetadata.type,
-            collectionName: exportMetadata.collectionName
+            apiUrl: exportMetadata.apiUrl,
+            prefix: exportMetadata.prefix,
+            collectionName: exportMetadata.collectionName,
+            description: exportMetadata?.description,
           };
 
         } else {
@@ -108,7 +112,9 @@ export function exportRouter(config: StreamByConfig): Router {
             createdAt: rawData?.createdAt,
             updatedAt: rawData?.updatedAt,
             collectionName: rawData?.collectionName,
-            type: exportMetadata.type
+            type: exportMetadata.type,
+            credentialId: exportMetadata.credentialId,
+            description: rawData?.description,
           };
         }
       } else if (project.dbType === 'sql') {
@@ -181,7 +187,7 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const { id: projectId, export_id: exportId } = req.params;
-      const { name, collectionName, description, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId, prefix } = req.body;
+      const { name, collectionName, description, fields, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId, prefix } = req.body;
 
       if (!name || !collectionName) {
         return res.status(400).json({ message: 'Missing name or collectionName' });
@@ -200,7 +206,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, exportType, isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
+      const result = await updateExport(config, projectId, exportId, description, fields, name, collectionName, jsonData, project.dbType, exportType, isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {

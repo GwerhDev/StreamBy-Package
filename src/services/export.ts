@@ -148,9 +148,12 @@ export async function updateExport(
   } else if (dbType === 'nosql') {
     const db = (connection.client as MongoClient).db();
     const updateData = {
-      json: jsonData,
-      name: exportName,
-      updatedAt: new Date()
+        json: jsonData,
+        description: description,
+        fields: fields,
+        apiUrl: apiUrl,
+        credentialId: credentialId,
+        prefix: prefix,
     };
 
     await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
@@ -165,7 +168,7 @@ export async function updateExport(
       _id: new ObjectId(projectId),
       'exports.id': { $in: [new ObjectId(exportId), exportId] }
     },
-    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId, 'exports.$.prefix': prefix } }
+    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId, 'exports.$.prefix': prefix, 'exports.$.description': description, 'exports.$.fields': fields } }
   );
   result = { collectionName, exportId };
 
