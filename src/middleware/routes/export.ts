@@ -52,7 +52,7 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
-        if (exportMetadata.type === 'raw' || exportMetadata.type === 'json') {
+        if (exportMetadata.type === 'json') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
           data = {
             json: rawData?.json,
@@ -146,7 +146,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(401).json({ message: 'Unauthorized' });
       }
       const projectId = req.params.id;
-      const { name, description, collectionName, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId, prefix } = req.body;
+      const { name, description, fields, collectionName, jsonData, isPrivate, allowedOrigin, exportType, apiUrl, credentialId, prefix } = req.body;
 
       if (!name || !collectionName) {
         return res.status(400).json({ message: 'Missing export name or collectionName' });
@@ -165,7 +165,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await createExport(config, projectId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
+      const result = await createExport(config, projectId, description, fields, name, collectionName, jsonData, project.dbType, exportType, isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -200,7 +200,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, exportType || 'raw', isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
+      const result = await updateExport(config, projectId, exportId, name, collectionName, jsonData, project.dbType, exportType, isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -285,11 +285,11 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const connection = getConnection(targetDb.id);
-      let data;
+      let data: any;
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
-        if (exportMetadata.type === 'raw' || exportMetadata.type === 'json') {
+        if (exportMetadata.type === 'json') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportMetadata.id) });
           data = rawData ? rawData.json : null;
         } else if (exportMetadata.type === 'externalApi') {
@@ -329,7 +329,17 @@ export function exportRouter(config: StreamByConfig): Router {
       if (!data) {
         return res.status(404).json({ message: 'Export data not found' });
       }
-      res.json(data); // Return the raw data directly
+
+      if (exportMetadata.fields && exportMetadata.fields.length > 0) {
+        data = exportMetadata.fields.reduce((filtered: any, field: any) => {
+          if (data?.hasOwnProperty(field.name)) {
+            filtered[field.name] = data?.[field.name];
+          }
+          return filtered;
+        }, {});
+      }
+
+      res.json(data);
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch public export data', details: err.message });
     }

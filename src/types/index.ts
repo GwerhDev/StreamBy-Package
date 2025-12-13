@@ -103,7 +103,7 @@ export interface Export {
   projectId: string;
   createdAt: Date;
   updatedAt: Date;
-  type: 'structured' | 'raw' | 'json' | 'externalApi';
+  type: 'json' | 'externalApi';
   fields?: FieldDefinition[];
   jsonData?: any;
   private?: boolean;

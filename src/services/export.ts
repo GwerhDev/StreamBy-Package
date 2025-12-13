@@ -17,11 +17,13 @@ interface CreateExportResult {
 export async function createExport(
   config: StreamByConfig,
   projectId: string,
+  description: string,
+  fields: FieldDefinition[],
   exportName: string,
   collectionName: string,
   jsonData: any,
   dbType: DatabaseType,
-  exportType: 'structured' | 'raw' | 'json' | 'externalApi',
+  exportType: 'json' | 'externalApi',
   isPrivate?: boolean,
   allowedOrigin?: string[],
   apiUrl?: string,
@@ -82,7 +84,7 @@ export async function createExport(
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin, apiUrl: apiUrl, credentialId: credentialId, prefix: prefix } } }
+    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin, apiUrl: apiUrl, credentialId: credentialId, prefix: prefix, description: description, fields: fields } } }
   );
 
   return { ...result, message: `${exportType} export created successfully` };
@@ -92,11 +94,13 @@ export async function updateExport(
   config: StreamByConfig,
   projectId: string,
   exportId: string,
+  description: string,
+  fields: FieldDefinition[],
   exportName: string,
   collectionName: string,
   jsonData: any,
   dbType: DatabaseType,
-  exportType: 'structured' | 'raw' | 'json' | 'externalApi',
+  exportType: 'json' | 'externalApi',
   isPrivate?: boolean,
   allowedOrigin?: string[],
   apiUrl?: string,
@@ -130,6 +134,8 @@ export async function updateExport(
       const updateData = {
         json: jsonData,
         name: exportName,
+        description: description,
+        fields: fields,
         updatedAt: new Date(),
         apiUrl: apiUrl,
         credentialId: credentialId,
