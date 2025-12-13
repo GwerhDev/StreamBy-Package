@@ -107,7 +107,7 @@ export interface Export {
   fields?: FieldDefinition[];
   jsonData?: any;
   private?: boolean;
-  allowedOrigin?: string[]; // Changed to singular
+  allowedOrigin?: string[];
   apiUrl?: string;
   credentialId?: string;
   prefix?: string;

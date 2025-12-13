@@ -54,7 +54,15 @@ export function exportRouter(config: StreamByConfig): Router {
         const db = (connection.client as MongoClient).db();
         if (exportMetadata.type === 'raw' || exportMetadata.type === 'json') {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
-          data = rawData ? { json: rawData.json, name: rawData.name, method: rawData.method, collectionName: rawData.collectionName, createdAt: rawData.createdAt, updatedAt: rawData.updatedAt, type: exportMetadata.type } : null;
+          data = {
+            json: rawData?.json,
+            name: rawData?.name,
+            method: rawData?.method,
+            collectionName: rawData?.collectionName,
+            createdAt: rawData?.createdAt,
+            updatedAt: rawData?.updatedAt,
+            type: exportMetadata.type
+          };
         } else if (exportMetadata.type === 'externalApi') {
           const ProjectModel = getModel('projects', 'nosql');
           const currentProject = await ProjectModel.findOne({ _id: projectId });
@@ -63,11 +71,45 @@ export function exportRouter(config: StreamByConfig): Router {
             return res.status(404).json({ message: 'Project not found.' });
           }
 
-          data = { name: exportMetadata.name, createdAt: exportMetadata.createdAt, updatedAt: exportMetadata.updatedAt, type: exportMetadata.type, collectionName: exportMetadata.collectionName };
+          let headers: Record<string, string> = {};
+          if (exportMetadata.credentialId) {
+            if (!isEncryptionKeySet()) {
+              throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
+            }
+            const credential = project.credentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
+            if (credential) {
+              const decryptedValue = decrypt(credential.encryptedValue);
+              const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : '';
+              headers = {
+                'Authorization': `${authPrefix}${decryptedValue}`,
+                'Content-Type': 'application/json',
+              };
+            }
+          }
+
+          const externalApiData = await fetch(exportMetadata.apiUrl, { headers });
+          const rawData = await externalApiData.json();
+
+          data = {
+            json: rawData || {},
+            name: exportMetadata.name,
+            createdAt: exportMetadata.createdAt,
+            updatedAt: exportMetadata.updatedAt,
+            type: exportMetadata.type,
+            collectionName: exportMetadata.collectionName
+          };
 
         } else {
           const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
-          data = rawData ? { json: rawData.json, name: rawData.name, method: rawData.method, collectionName: rawData.collectionName, createdAt: rawData.createdAt, updatedAt: rawData.updatedAt, type: exportMetadata.type } : null;
+          data = {
+            json: rawData?.json,
+            name: rawData?.name,
+            method: rawData?.method,
+            createdAt: rawData?.createdAt,
+            updatedAt: rawData?.updatedAt,
+            collectionName: rawData?.collectionName,
+            type: exportMetadata.type
+          };
         }
       } else if (project.dbType === 'sql') {
         // ... SQL implementation needed
@@ -269,7 +311,6 @@ export function exportRouter(config: StreamByConfig): Router {
           }
 
           try {
-            const fetch = (await import('node-fetch')).default;
             const response = await fetch(exportMetadata.apiUrl, { headers });
             if (!response.ok) {
               throw new Error(`Failed to fetch from external API: ${response.statusText}`);
