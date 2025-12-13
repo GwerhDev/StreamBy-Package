@@ -20,7 +20,6 @@ export async function createExport(
   description: string,
   fields: FieldDefinition[],
   exportName: string,
-  collectionName: string,
   jsonData: any,
   dbType: DatabaseType,
   exportType: 'json' | 'externalApi',
@@ -133,7 +132,6 @@ export async function updateExport(
       const db = (connection.client as MongoClient).db();
       const updateData = {
         json: jsonData,
-        name: exportName,
         description: description,
         fields: fields,
         updatedAt: new Date(),
@@ -141,8 +139,8 @@ export async function updateExport(
         credentialId: credentialId,
         prefix: prefix,
       };
+
       await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
-      result = { collectionName, exportId };
     } else {
       throw new Error('Unsupported database type for externalApi export update');
     }
@@ -155,9 +153,7 @@ export async function updateExport(
       updatedAt: new Date()
     };
 
-
     await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
-    result = { collectionName, exportId };
   } else {
     throw new Error('Unsupported database type for update');
   }
@@ -171,6 +167,7 @@ export async function updateExport(
     },
     { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId, 'exports.$.prefix': prefix } }
   );
+  result = { collectionName, exportId };
 
   return { ...result, message: `${exportType} export updated successfully` };
 }
@@ -183,7 +180,7 @@ export async function deleteExport(
   collectionName: string
 ): Promise<{ message: string }> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
-                   config.databases?.find(db => db.type === dbType);
+    config.databases?.find(db => db.type === dbType);
 
   if (!targetDb) {
     throw new Error(`Database connection not found for type ${dbType}`);

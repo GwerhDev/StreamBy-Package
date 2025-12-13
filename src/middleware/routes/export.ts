@@ -165,7 +165,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await createExport(config, projectId, description, fields, name, collectionName, jsonData, project.dbType, exportType, isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
+      const result = await createExport(config, projectId, description, fields, name, jsonData, project.dbType, exportType, isPrivate, allowedOrigin, apiUrl, credentialId, prefix);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -320,6 +320,14 @@ export function exportRouter(config: StreamByConfig): Router {
             throw new Error(`Error fetching from external API: ${error.message}`);
           }
 
+          if (exportMetadata.fields && exportMetadata.fields.length > 0) {
+            data = data.map((item: any) => {
+              return exportMetadata.fields.reduce((filtered: any, field: any) => {
+                filtered[field.name] = item[field.name];
+                return filtered;
+              }, {});
+            });
+          }
         }
       } else if (project.dbType === 'sql') {
         // SQL implementation for public exports will go here
@@ -328,15 +336,6 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (!data) {
         return res.status(404).json({ message: 'Export data not found' });
-      }
-
-      if (exportMetadata.fields && exportMetadata.fields.length > 0) {
-        data = exportMetadata.fields.reduce((filtered: any, field: any) => {
-          if (data?.hasOwnProperty(field.name)) {
-            filtered[field.name] = data?.[field.name];
-          }
-          return filtered;
-        }, {});
       }
 
       res.json(data);
