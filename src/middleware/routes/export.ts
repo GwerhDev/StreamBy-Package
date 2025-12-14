@@ -62,6 +62,7 @@ export function exportRouter(config: StreamByConfig): Router {
             createdAt: rawData?.createdAt,
             updatedAt: rawData?.updatedAt,
             type: exportMetadata.type,
+            fields: exportMetadata.fields,
             description: rawData?.description,
           };
         } else if (exportMetadata.type === 'externalApi') {
@@ -89,9 +90,20 @@ export function exportRouter(config: StreamByConfig): Router {
           }
 
           const externalApiData = await fetch(exportMetadata.apiUrl, { headers });
-          const rawData = await externalApiData.json();
+          const apiResponse = await externalApiData.json();
+          let rawData: any;
+
+          if (exportMetadata.fields && exportMetadata.fields.length > 0) {
+            rawData = apiResponse.map((item: any) => {
+              return exportMetadata.fields.reduce((filtered: any, field: any) => {
+                filtered[field.name] = item[field.name];
+                return filtered;
+              }, {});
+            });
+          }
 
           data = {
+            apiResponse: apiResponse,
             json: rawData || {},
             name: exportMetadata.name,
             createdAt: exportMetadata.createdAt,
@@ -100,6 +112,7 @@ export function exportRouter(config: StreamByConfig): Router {
             apiUrl: exportMetadata.apiUrl,
             prefix: exportMetadata.prefix,
             collectionName: exportMetadata.collectionName,
+            fields: exportMetadata.fields,
             description: exportMetadata?.description,
           };
 
@@ -115,6 +128,7 @@ export function exportRouter(config: StreamByConfig): Router {
             type: exportMetadata.type,
             credentialId: exportMetadata.credentialId,
             description: rawData?.description,
+            fields: exportMetadata.fields,
           };
         }
       } else if (project.dbType === 'sql') {
