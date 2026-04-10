@@ -14,12 +14,26 @@ export type StorageProvider = {
   config: S3Config;
 };
 
+export interface StorageFileInfo {
+  key: string;
+  name: string;
+  size: number;
+  url: string;
+  contentType: string;
+  lastModified: string;
+  category: string;
+}
+
 export interface StorageAdapter {
   listFiles(projectId: string): Promise<any[]>;
   deleteProjectImage: (projectId: string) => Promise<any>;
   deleteProjectDirectory: (projectId: string) => Promise<any>;
   getPresignedUrl?: (contentType: string, projectId: string) => Promise<any>;
   getPresignedProjectImageUrl?: (projectId: string) => Promise<any>;
+  getPresignedUploadUrl?: (key: string, contentType: string) => Promise<string>;
+  listFilesByCategory?: (projectId: string, category: string) => Promise<StorageFileInfo[]>;
+  deleteFile?: (key: string) => Promise<void>;
+  getPresignedGetUrl?: (key: string) => Promise<string>;
 }
 
 export interface FieldDefinition {
