@@ -112,7 +112,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      res.json({ project: { ...project, id: project._id || project.id, _id: undefined }, message: 'Project fetched successfully' });
+      res.json({ project: { ...project, id: project._id || project.id, _id: undefined, apiConnections: project.apiConnections || [] }, message: 'Project fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch project', details: err.message });
     }

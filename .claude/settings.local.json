@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(npx tsc *)",
+      "Bash(git stash *)",
+      "Bash(npx ts-node *)",
+      "Bash(kill %1)"
     ]
   }
 }

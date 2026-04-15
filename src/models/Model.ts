@@ -26,10 +26,11 @@ export class Model<T extends Document> {
 
   useDbType(dbType: string): Model<T> {
     const filteredConnectionIds = this.connectionIds.filter(id => {
+      if (!getConnectedIds().includes(id)) return false;
       const connection = getConnection(id);
       return connection.type === dbType;
     });
-        return new Model<T>(filteredConnectionIds, this.tableName, this.schema);
+    return new Model<T>(filteredConnectionIds, this.tableName, this.schema);
   }
 
   async find(filter: any): Promise<T[]> {
@@ -219,8 +220,9 @@ export class Model<T extends Document> {
 
     const targetDbType = (existingProject as any).dbType; // Get the actual dbType of the project
 
-    // Find the connection that matches the targetDbType
-    const clientEntry = this.connectionIds
+    // Find the connection that matches the targetDbType (only among active connections)
+    const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
+    const clientEntry = activeConnectionIds
       .map(id => getConnection(id))
       .find(entry => entry.type === targetDbType);
 

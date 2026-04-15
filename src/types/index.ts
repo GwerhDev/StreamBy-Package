@@ -57,7 +57,7 @@ export interface ProjectInfo {
   }[];
   description?: string;
   exports?: {
-    id: string; 
+    id: string;
     collectionName: string;
   }[];
   settings?: {
@@ -65,12 +65,27 @@ export interface ProjectInfo {
     allowSharing?: boolean;
   };
   credentials?: Credential[];
+  apiConnections?: ApiConnection[];
 }
 
 export interface Credential {
   id: string;
   key: string;
   encryptedValue: string;
+}
+
+export type ApiConnectionMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+
+export interface ApiConnection {
+  id: string;
+  name: string;
+  baseUrl: string;
+  method: ApiConnectionMethod;
+  projectId: string;
+  createdAt: Date;
+  prefix?: string;
+  description?: string;
+  credentialId?: string;
 }
 
 export interface ProjectListInfo {
@@ -104,7 +119,7 @@ export interface StreamByConfig {
 export interface Auth {
   userId: string;
   username: string;
-  
+
   role: 'viewer' | 'editor' | 'admin';
 }
 
