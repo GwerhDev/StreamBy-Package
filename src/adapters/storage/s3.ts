@@ -90,7 +90,7 @@ export class S3Adapter implements StorageAdapter {
   }
 
   async listFilesByCategory(projectId: string, category: string): Promise<StorageFileInfo[]> {
-    const prefix = `projects/${projectId}/${category}/`;
+    const prefix = `${projectId}/${category}/`;
     const command = new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix });
     const result = await this.s3.send(command);
 
