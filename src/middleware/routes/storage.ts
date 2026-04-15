@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../../types';
-import { deleteProjectImage, listFilesService } from '../../services/file';
+import { deleteProjectImage } from '../../services/file';
 import { getPresignedProjectImageUrl } from '../../services/presign';
 import { createStorageProvider } from '../../providers/storage';
 import { getModel } from '../../models/manager';
@@ -204,23 +204,25 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   router.get('/storages', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
-      if (
-        !auth ||
-        !auth.userId ||
-        !auth.role
-      ) {
+      if (!auth || !auth.userId || !auth.role) {
         return res.status(401).json({ message: 'Unauthorized' });
       }
-      const projectId = (req.query.projectId || req.headers['x-project-id']) as string;
 
-      if (!projectId) {
-        return res.status(403).json({ message: 'Unauthorized or missing projectId' });
-      }
+      const STORAGE_DISPLAY: Record<string, { value: string; name: string }> = {
+        s3:    { value: 'aws_s3',              name: 'AWS S3' },
+        gcs:   { value: 'google_cloud_storage', name: 'Google Cloud Storage' },
+        azure: { value: 'azure_blob',           name: 'Azure Blob Storage' },
+        r2:    { value: 'cloudflare_r2',        name: 'Cloudflare R2' },
+      };
 
-      const files = await listFilesService(adapter, req, projectId);
-      res.json({ files, message: 'Files listed successfully' });
-    } catch (err) {
-      res.status(500).json({ message: 'Failed to list files', details: err });
+      const storages = (config.storageProviders || []).map(provider => ({
+        ...STORAGE_DISPLAY[provider.type],
+        type: provider.type,
+      }));
+
+      res.status(200).json({ storages });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 
