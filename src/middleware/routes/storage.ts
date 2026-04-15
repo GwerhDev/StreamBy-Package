@@ -127,7 +127,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
       }
 
-      const key = `projects/${projectId}/${category}/${sanitizeFilename(fileName)}`;
+      const key = `${projectId}/${category}/${sanitizeFilename(fileName)}`;
       const url = await adapter.getPresignedUploadUrl(key, contentType);
 
       res.json({ url });
