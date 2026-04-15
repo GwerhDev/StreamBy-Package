@@ -6,16 +6,16 @@ import { createStorageProvider } from '../../providers/storage';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 
-type StorageCategory = 'images' | 'audios' | 'videos' | '3dmodels';
+type StorageCategory = 'images' | 'audios' | 'videos' | '3d-models';
 
-const VALID_CATEGORIES: StorageCategory[] = ['images', 'audios', 'videos', '3dmodels'];
+const VALID_CATEGORIES: StorageCategory[] = ['images', 'audios', 'videos', '3d-models'];
 const VALID_3D_EXTENSIONS = new Set(['.glb', '.gltf', '.obj', '.fbx', '.stl', '.ply']);
 
 function validateContentType(contentType: string, filename: string, category: StorageCategory): boolean {
   if (category === 'images') return contentType.startsWith('image/');
   if (category === 'audios') return contentType.startsWith('audio/');
   if (category === 'videos') return contentType.startsWith('video/');
-  if (category === '3dmodels') {
+  if (category === '3d-models') {
     const ext = filename.split('.').pop()?.toLowerCase();
     return ext ? VALID_3D_EXTENSIONS.has(`.${ext}`) : false;
   }
@@ -109,7 +109,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       }
 
       if (!validateContentType(contentType, fileName, category as StorageCategory)) {
-        const hint = category === '3dmodels'
+        const hint = category === '3d-models'
           ? '.glb, .gltf, .obj, .fbx, .stl, or .ply'
           : `${category.slice(0, -1)}/* content type`;
         return res.status(400).json({ message: `Files in the ${category} category must match ${hint}` });
@@ -209,10 +209,10 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       }
 
       const STORAGE_DISPLAY: Record<string, { value: string; name: string }> = {
-        s3:    { value: 'aws_s3',              name: 'AWS S3' },
-        gcs:   { value: 'google_cloud_storage', name: 'Google Cloud Storage' },
-        azure: { value: 'azure_blob',           name: 'Azure Blob Storage' },
-        r2:    { value: 'cloudflare_r2',        name: 'Cloudflare R2' },
+        s3:    { value: 'aws-s3',              name: 'AWS S3' },
+        gcs:   { value: 'google-cloud-storage', name: 'Google Cloud Storage' },
+        azure: { value: 'azure-blob',           name: 'Azure Blob Storage' },
+        r2:    { value: 'cloudflare-r2',        name: 'Cloudflare R2' },
       };
 
       const storages = (config.storageProviders || []).map(provider => ({
