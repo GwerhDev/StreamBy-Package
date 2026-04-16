@@ -290,45 +290,6 @@ export function projectRouter(config: StreamByConfig): Router {
     }
   });
 
-  router.get('/projects/:id/members', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const projectId = req.params.id;
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) {
-        return res.status(404).json({ message: 'Project not found' });
-      }
-
-      if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ message: 'Unauthorized project access' });
-      }
-
-      const mainDb = config.databases?.find(db => db.main);
-      if (!mainDb) {
-        return res.status(500).json({ message: 'Main database not configured' });
-      }
-      const userDbType = mainDb.type;
-
-            const User = getModel('users', userDbType);
-      const membersWithUsernames = await Promise.all(
-        project.members.map(async (member: any) => {
-          const user = await User.findOne({ _id: member.userId });
-          return {
-            userId: member.userId,
-            username: user ? user.username : 'Unknown',
-            role: member.role,
-            profilePic: user ? user.profilePic : ''
-          };
-        })
-      );
-
-      res.json({ members: membersWithUsernames, message: 'Project members fetched successfully' });
-    } catch (err: any) {
-      res.status(500).json({ message: 'Failed to fetch project members', details: err.message });
-    }
-  });
-
   router.post('/projects/:id/image', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;

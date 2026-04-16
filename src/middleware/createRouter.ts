@@ -11,6 +11,8 @@ import { projectRouter } from './routes/project';
 import { exportRouter } from './routes/export';
 import { credentialRouter } from './routes/credential';
 import { apiConnectionRouter } from './routes/apiConnection';
+import { memberRouter } from './routes/member';
+import { userRouter } from './routes/user';
 
 import { authenticate } from '../services/auth';
 import { setEncryptionKey } from '../utils/encryption';
@@ -46,6 +48,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(exportRouter(config));
   router.use(credentialRouter(config));
   router.use(apiConnectionRouter(config));
+  router.use(memberRouter(config));
+  router.use(userRouter(config));
 
   return router;
 }
