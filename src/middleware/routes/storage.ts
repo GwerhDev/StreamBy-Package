@@ -136,6 +136,45 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     }
   });
 
+  router.get('/projects/:projectId/storage/lasts', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (!auth || !auth.userId || !auth.role) {
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
+
+      const { projectId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ message: 'Unauthorized access' });
+      }
+
+      if (!adapter.listFilesByCategory) {
+        return res.status(501).json({ message: 'Storage adapter does not support listing files by category' });
+      }
+
+      const results = await Promise.allSettled(
+        VALID_CATEGORIES.map(category => adapter.listFilesByCategory!(projectId, category))
+      );
+
+      const allFiles = results.flatMap(result =>
+        result.status === 'fulfilled' ? result.value : []
+      );
+
+      const latest = allFiles
+        .sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime())
+        .slice(0, 12);
+
+      res.json({ data: latest });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch latest files', details: err.message });
+    }
+  });
+
   router.get('/projects/:projectId/storage/:category', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
