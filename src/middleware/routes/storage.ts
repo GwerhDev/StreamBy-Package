@@ -207,6 +207,51 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     }
   });
 
+  router.patch('/projects/:projectId/storage/:category/:key', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (!auth || !auth.userId || !auth.role) {
+        return res.status(401).json({ message: 'Unauthorized' });
+      }
+
+      const { projectId, category } = req.params;
+      const key = decodeURIComponent(req.params.key);
+      const { contentType } = req.body;
+
+      if (!VALID_CATEGORIES.includes(category as StorageCategory)) {
+        return res.status(400).json({ message: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
+      }
+
+      if (!contentType) {
+        return res.status(400).json({ message: 'contentType is required' });
+      }
+
+      if (!validateContentType(contentType, key, category as StorageCategory)) {
+        const hint = category === '3d-models'
+          ? '.glb, .gltf, .obj, .fbx, .stl, or .ply'
+          : `${category.slice(0, -1)}/* content type`;
+        return res.status(400).json({ message: `Files in the ${category} category must match ${hint}` });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ message: 'Unauthorized access' });
+      }
+
+      if (!adapter.getPresignedUploadUrl) {
+        return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
+      }
+
+      const url = await adapter.getPresignedUploadUrl(key, contentType);
+      res.json({ url });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to generate overwrite URL', details: err.message });
+    }
+  });
+
   router.delete('/projects/:projectId/storage/:category/:key', async (req: Request, res: Response) => {
     try {
       const auth = await config.authProvider(req);
