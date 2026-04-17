@@ -123,10 +123,13 @@ export interface StreamByConfig {
 export interface Notification {
   _id?: string;
   userId: string;
+  appId?: string;
   type: string;
   message: string;
   data?: any;
+  callback?: string;
   read: boolean;
+  readAt?: Date;
   createdAt: Date;
 }
 

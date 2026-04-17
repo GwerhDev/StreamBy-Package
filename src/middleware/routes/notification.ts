@@ -22,7 +22,7 @@ export function notificationRouter(config: StreamByConfig): Router {
       const auth = (req as any).auth as Auth;
       const model = (Notification as any);
       if (model.updateMany) {
-        await model.updateMany({ userId: auth.userId, read: false }, { $set: { read: true } });
+        await model.updateMany({ userId: auth.userId, read: false }, { $set: { read: true, readAt: new Date() } });
       }
       res.status(200).json({ message: 'All notifications marked as read' });
     } catch (err: any) {
@@ -34,7 +34,7 @@ export function notificationRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { id } = req.params;
-      await Notification.update({ _id: id, userId: auth.userId }, { read: true });
+      await Notification.update({ _id: id, userId: auth.userId }, { read: true, readAt: new Date() });
       res.status(200).json({ message: 'Notification marked as read' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update notification', details: err.message });
