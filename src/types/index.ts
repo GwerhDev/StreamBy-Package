@@ -79,7 +79,7 @@ export type ApiConnectionMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 export interface ApiConnection {
   id: string;
   name: string;
-  baseUrl: string;
+  apiUrl: string;
   method: ApiConnectionMethod;
   projectId: string;
   createdAt: Date;

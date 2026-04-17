@@ -5,7 +5,7 @@ import { StreamByConfig, ApiConnection, ApiConnectionMethod, ProjectInfo } from 
 export async function addApiConnection(
   config: StreamByConfig,
   projectId: string,
-  data: { name: string; baseUrl: string; method: ApiConnectionMethod; prefix?: string; description?: string; credentialId?: string }
+  data: { name: string; apiUrl: string; method: ApiConnectionMethod; prefix?: string; description?: string; credentialId?: string }
 ): Promise<ApiConnection> {
   const ProjectModel = getModel('projects');
   const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
@@ -18,7 +18,7 @@ export async function addApiConnection(
     id: new ObjectId().toHexString(),
     name: data.name,
     prefix: data.prefix,
-    baseUrl: data.baseUrl,
+    apiUrl: data.apiUrl,
     method: data.method,
     projectId,
     createdAt: new Date(),

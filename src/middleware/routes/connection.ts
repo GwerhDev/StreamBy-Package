@@ -40,10 +40,10 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
       }
 
       const projectId = req.params.id;
-      const { name, baseUrl, method, description, credentialId, prefix } = req.body;
+      const { name, apiUrl, method, description, credentialId, prefix } = req.body;
 
-      if (!name || !baseUrl) {
-        return res.status(400).json({ message: 'name and baseUrl are required' });
+      if (!name || !apiUrl) {
+        return res.status(400).json({ message: 'name and apiUrl are required' });
       }
 
       if (!VALID_METHODS.includes(method)) {
@@ -68,7 +68,7 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
 
       const connection = await addApiConnection(config, projectId, {
         name,
-        baseUrl,
+        apiUrl,
         method,
         prefix,
         ...(description !== undefined && { description }),
@@ -117,7 +117,7 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
         headers['Authorization'] = `${prefix}${decrypted}`;
       }
 
-      const response = await fetch(apiConnection.baseUrl, { method: apiConnection.method || 'GET', headers });
+      const response = await fetch(apiConnection.apiUrl, { method: apiConnection.method || 'GET', headers });
       if (!response.ok) {
         return res.status(response.status).json({ message: `External API error: ${response.statusText}` });
       }

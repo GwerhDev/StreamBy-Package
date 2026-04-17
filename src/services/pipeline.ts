@@ -66,7 +66,7 @@ export async function executePipeline(
         }
       }
 
-      const response = await fetch(apiConnection.baseUrl, { method: apiConnection.method || 'GET', headers });
+      const response = await fetch(apiConnection.apiUrl, { method: apiConnection.method || 'GET', headers });
       if (!response.ok) throw new Error(`API connection fetch failed: ${response.statusText}`);
       dataResults.push(await response.json());
     }
