@@ -81,6 +81,54 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
     }
   });
 
+  // Execute the request represented by an API connection
+  router.get('/projects/:id/get-connection/:connectionId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { id: projectId, connectionId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ message: 'Unauthorized project access' });
+      }
+
+      const apiConnection = project.apiConnections?.find((c: any) => c.id === connectionId);
+      if (!apiConnection) {
+        return res.status(404).json({ message: 'API connection not found' });
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+
+      if (apiConnection.credentialId) {
+        const { decrypt, isEncryptionKeySet } = await import('../../utils/encryption');
+        if (!isEncryptionKeySet()) {
+          return res.status(500).json({ message: 'Encryption key is not set' });
+        }
+        const credential = project.credentials?.find((c: any) => c.id === apiConnection.credentialId);
+        if (!credential) {
+          return res.status(400).json({ message: 'Credential not found in project' });
+        }
+        const decrypted = decrypt(credential.encryptedValue);
+        const prefix = apiConnection.prefix ? `${apiConnection.prefix} ` : '';
+        headers['Authorization'] = `${prefix}${decrypted}`;
+      }
+
+      const response = await fetch(apiConnection.baseUrl, { method: apiConnection.method || 'GET', headers });
+      if (!response.ok) {
+        return res.status(response.status).json({ message: `External API error: ${response.statusText}` });
+      }
+
+      const data = await response.json();
+      return res.status(200).json({ data });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch connection data', details: err.message });
+    }
+  });
+
   // Delete an API connection from a project
   router.delete('/projects/:id/connections/api/:connectionId', async (req: Request, res: Response) => {
     try {
