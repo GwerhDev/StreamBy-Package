@@ -7,6 +7,7 @@ import { createStreamByRouter } from './src/middleware/createRouter';
 dotenv.config();
 
 const config = {
+  port: process.env.PORT || 4000,
   dummyId: process.env.DUMMY_ID,
   awsSecret: process.env.AWS_SECRET,
   awsBucket: process.env.AWS_BUCKET,
@@ -68,8 +69,8 @@ async function main() {
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 
-  devApp.listen(4000, () => {
-    console.log('🟢 StreamBy-core dev server listening on http://localhost:8080/streamby');
+  devApp.listen(config.port, () => {
+    console.log('🟢 StreamBy-core dev server listening on http://localhost:' + config.port + '/streamby');
   });
 }
 
