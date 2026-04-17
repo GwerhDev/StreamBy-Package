@@ -5,7 +5,8 @@
       "Bash(npx tsc *)",
       "Bash(git stash *)",
       "Bash(npx ts-node *)",
-      "Bash(kill %1)"
+      "Bash(kill %1)",
+      "Bash(npm install *)"
     ]
   }
 }

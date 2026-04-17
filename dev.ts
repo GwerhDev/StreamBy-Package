@@ -1,3 +1,4 @@
+import http from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
@@ -21,6 +22,7 @@ const config = {
 
 async function main() {
   const devApp = express();
+  const server = http.createServer(devApp);
 
   devApp.use(cors({
     origin: 'http://localhost:5173',
@@ -60,6 +62,10 @@ async function main() {
       }
     ],
     encrypt: config.encryptionKey,
+    websocket: {
+      server,
+      path: '/streamby/ws',
+    },
   };
 
   devApp.use((req, res, next) => {
@@ -69,8 +75,9 @@ async function main() {
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 
-  devApp.listen(config.port, () => {
+  server.listen(config.port, () => {
     console.log('🟢 StreamBy-core dev server listening on http://localhost:' + config.port + '/streamby');
+    console.log('🔌 WebSocket available at ws://localhost:' + config.port + '/streamby/ws');
   });
 }
 

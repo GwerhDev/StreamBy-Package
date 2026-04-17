@@ -114,6 +114,20 @@ export interface StreamByConfig {
   databases?: DatabaseCredential[];
   adapter?: StorageAdapter;
   encrypt?: string;
+  websocket?: {
+    server: any;
+    path?: string;
+  };
+}
+
+export interface Notification {
+  _id?: string;
+  userId: string;
+  type: string;
+  message: string;
+  data?: any;
+  read: boolean;
+  createdAt: Date;
 }
 
 export interface Auth {
