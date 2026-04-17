@@ -36,10 +36,10 @@ export async function createExport(
   let exportId: string;
 
   if (dbType === 'nosql') {
-    const result = await createNoSQLRawExportCollection(connection.client as MongoClient, exportName, 'GET', nodeSchema);
+    const result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, 'GET', nodeSchema);
     exportId = result.exportId;
   } else if (dbType === 'sql') {
-    const result = await createSQLRawExportTable(connection.client as Pool, exportName, nodeSchema);
+    const result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, nodeSchema);
     exportId = result.exportId;
   } else {
     throw new Error('Unsupported database type');
@@ -60,7 +60,6 @@ export async function updateExport(
   exportId: string,
   description: string,
   exportName: string,
-  storedExportName: string,
   dbType: DatabaseType,
   exportType: 'json' | 'externalApi',
   isPrivate?: boolean,
@@ -77,11 +76,9 @@ export async function updateExport(
   }
   const connection = getConnection(targetDb.id);
 
-  const storedSlug = storedExportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
   if (dbType === 'nosql') {
     const db = (connection.client as MongoClient).db();
-    await db.collection(storedSlug).updateOne(
+    await db.collection(projectId).updateOne(
       { _id: new ObjectId(exportId) },
       { $set: { nodeSchema, description, updatedAt: new Date() } }
     );
@@ -116,11 +113,9 @@ export async function deleteExport(
   }
   const connection = getConnection(targetDb.id);
 
-  const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
   if (dbType === 'nosql') {
     const db = (connection.client as MongoClient).db();
-    await db.collection(slug).deleteOne({ _id: new ObjectId(exportId) });
+    await db.collection(projectId).deleteOne({ _id: new ObjectId(exportId) });
   } else {
     throw new Error('Unsupported database type for delete');
   }

@@ -40,11 +40,11 @@ export const createSQLExportTable = async (
 
 export const createSQLRawExportTable = async (
   connection: Pool,
+  projectId: string,
   exportName: string,
   nodeSchema?: any
 ): Promise<{ collectionName: string; exportId: string }> => {
-  const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const tableName = slug;
+  const tableName = projectId;
   const exportId = randomUUID();
 
   const createTableQuery = `

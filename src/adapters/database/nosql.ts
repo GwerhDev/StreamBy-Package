@@ -44,16 +44,15 @@ export const createNoSQLExportCollection = async (
 
 export const createNoSQLRawExportCollection = async (
   connection: MongoClient,
+  projectId: string,
   exportName: string,
   method: string,
   nodeSchema?: NodeSchema,
 ): Promise<{ collectionName: string; exportId: string }> => {
   const db = connection.db();
-  const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const collectionName = slug;
+  const collectionName = projectId;
 
   const result = await db.collection(collectionName).insertOne({ nodeSchema, name: exportName, method, createdAt: new Date(), updatedAt: new Date() });
-  console.log(`✅ Raw collection '${collectionName}' created.`);
 
   return { collectionName, exportId: result.insertedId.toHexString() };
 };

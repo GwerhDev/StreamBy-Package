@@ -232,7 +232,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Export not found' });
       }
 
-      const result = await updateExport(config, projectId, exportId, description, name, exportMetadata.name, project.dbType, exportType, isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials);
+      const result = await updateExport(config, projectId, exportId, description, name, project.dbType, exportType, isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {
