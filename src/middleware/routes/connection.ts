@@ -11,7 +11,7 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
   const Project = getModel('projects');
 
   // List API connections for a project
-  router.get('/projects/:id/api/connections', async (req: Request, res: Response) => {
+  router.get('/projects/:id/connections/api', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       const projectId = req.params.id;
@@ -32,7 +32,7 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
   });
 
   // Add a new API connection to a project
-  router.post('/projects/:id/api/connections', async (req: Request, res: Response) => {
+  router.post('/projects/:id/connections/api', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
@@ -82,7 +82,7 @@ export function apiConnectionRouter(config: StreamByConfig): Router {
   });
 
   // Delete an API connection from a project
-  router.delete('/projects/:id/api/connections/:connectionId', async (req: Request, res: Response) => {
+  router.delete('/projects/:id/connections/api/:connectionId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {

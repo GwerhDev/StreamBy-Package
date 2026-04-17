@@ -3,6 +3,7 @@ import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { createExport, updateExport, deleteExport } from '../../services/export';
+import { executePipeline } from '../../services/pipeline';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
@@ -310,13 +311,18 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized' });
       }
 
+      let data: any;
+
+      if (exportMetadata.nodeSchema) {
+        data = await executePipeline(exportMetadata.nodeSchema, project, config);
+      } else {
+
       const targetDb = config.databases?.find(db => db.type === project.dbType);
       if (!targetDb) {
         return res.status(500).json({ message: `Database connection not found for type ${project.dbType}` });
       }
 
       const connection = getConnection(targetDb.id);
-      let data: any;
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
@@ -361,9 +367,10 @@ export function exportRouter(config: StreamByConfig): Router {
           }
         }
       } else if (project.dbType === 'sql') {
-        // SQL implementation for public exports will go here
         return res.status(501).json({ message: 'SQL public exports not yet implemented' });
       }
+
+      } // end legacy else block
 
       if (!data) {
         return res.status(404).json({ message: 'Export data not found' });

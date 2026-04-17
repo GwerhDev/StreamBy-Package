@@ -10,7 +10,7 @@ import { storageRouter } from './routes/storage';
 import { projectRouter } from './routes/project';
 import { exportRouter } from './routes/export';
 import { credentialRouter } from './routes/credential';
-import { apiConnectionRouter } from './routes/apiConnection';
+import { apiConnectionRouter } from './routes/connection';
 import { memberRouter } from './routes/member';
 import { userRouter } from './routes/user';
 
