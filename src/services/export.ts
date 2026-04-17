@@ -1,16 +1,14 @@
 import { getModel } from '../models/manager';
 import { ObjectId } from 'mongodb';
-import { FieldDefinition, DatabaseType, StreamByConfig, ProjectInfo } from '../types';
+import { NodeSchema, DatabaseType, StreamByConfig } from '../types';
 import { MongoClient } from 'mongodb';
 import { Pool } from 'pg';
 import { getConnection } from '../adapters/database/connectionManager';
-import { createNoSQLExportCollection, createNoSQLRawExportCollection } from '../adapters/database/nosql';
-import { createSQLExportTable, createSQLRawExportTable } from '../adapters/database/sql';
-import { isEncryptionKeySet } from '../utils/encryption';
+import { createNoSQLRawExportCollection } from '../adapters/database/nosql';
+import { createSQLRawExportTable } from '../adapters/database/sql';
 
-interface CreateExportResult {
+interface ExportResult {
   exportId: string;
-  collectionName: string;
   message: string;
 }
 
@@ -18,18 +16,15 @@ export async function createExport(
   config: StreamByConfig,
   projectId: string,
   description: string,
-  fields: FieldDefinition[],
   exportName: string,
-  jsonData: any,
   dbType: DatabaseType,
   exportType: 'json' | 'externalApi',
   isPrivate?: boolean,
   allowedOrigin?: string[],
-  apiUrl?: string,
-  credentialId?: string,
-  prefix?: string,
-): Promise<CreateExportResult> {
-
+  nodeSchema?: NodeSchema,
+  useConnections?: boolean,
+  useCredentials?: boolean,
+): Promise<ExportResult> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
     config.databases?.find(db => db.type === dbType);
 
@@ -38,55 +33,25 @@ export async function createExport(
   }
   const connection = getConnection(targetDb.id);
 
-  let result: { collectionName: string; exportId: string };
+  let exportId: string;
 
-  if (exportType === 'externalApi') {
-    if (!apiUrl) {
-      throw new Error('API URL is required for externalApi export type.');
-    }
-
-    const ProjectModel = getModel('projects', 'nosql');
-    const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
-
-    if (!project) {
-      throw new Error('Project not found.');
-    }
-
-    if (credentialId) {
-      if (!isEncryptionKeySet()) {
-        throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
-      }
-      const credential = project.credentials?.find(cred => cred.id === credentialId);
-      if (!credential) {
-        throw new Error(`Credential with ID ${credentialId} not found.`);
-      }
-    }
-
-    if (dbType === 'nosql') {
-      result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, 'GET', null);
-    } else if (dbType === 'sql') {
-      result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, null);
-    } else {
-      throw new Error('Unsupported database type for externalApi export');
-    }
-
-  } else if (dbType === 'nosql') {
-    result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, 'GET', jsonData);
+  if (dbType === 'nosql') {
+    const result = await createNoSQLRawExportCollection(connection.client as MongoClient, exportName, 'GET', nodeSchema);
+    exportId = result.exportId;
   } else if (dbType === 'sql') {
-    result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, jsonData);
+    const result = await createSQLRawExportTable(connection.client as Pool, exportName, nodeSchema);
+    exportId = result.exportId;
   } else {
     throw new Error('Unsupported database type');
   }
 
-  // Update the project with the new export reference
-  // Assuming project metadata is always in NoSQL (MongoDB)
   const NoSQLProject = getModel('projects', 'nosql');
   await NoSQLProject.update(
     { _id: projectId },
-    { $push: { exports: { id: dbType === 'nosql' ? new ObjectId(result.exportId) : result.exportId, name: exportName, collectionName: result.collectionName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin: allowedOrigin, apiUrl: apiUrl, credentialId: credentialId, prefix: prefix, description: description, fields: fields } } }
+    { $push: { exports: { id: new ObjectId(exportId), name: exportName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials, description } } }
   );
 
-  return { ...result, message: `${exportType} export created successfully` };
+  return { exportId, message: `${exportType} export created successfully` };
 }
 
 export async function updateExport(
@@ -94,18 +59,16 @@ export async function updateExport(
   projectId: string,
   exportId: string,
   description: string,
-  fields: FieldDefinition[],
   exportName: string,
-  collectionName: string,
-  jsonData: any,
+  storedExportName: string,
   dbType: DatabaseType,
   exportType: 'json' | 'externalApi',
   isPrivate?: boolean,
   allowedOrigin?: string[],
-  apiUrl?: string,
-  credentialId?: string,
-  prefix?: string,
-): Promise<CreateExportResult> {
+  nodeSchema?: NodeSchema,
+  useConnections?: boolean,
+  useCredentials?: boolean,
+): Promise<ExportResult> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
     config.databases?.find(db => db.type === dbType);
 
@@ -114,65 +77,28 @@ export async function updateExport(
   }
   const connection = getConnection(targetDb.id);
 
-  let result: { collectionName: string; exportId: string };
+  const storedSlug = storedExportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-  if (exportType === 'externalApi') {
-    if (!apiUrl) {
-      throw new Error('API URL is required for externalApi export type.');
-    }
-
-    const ProjectModel = getModel('projects', 'nosql');
-    const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
-
-    if (!project) {
-      throw new Error('Project not found.');
-    }
-
-    if (dbType === 'nosql') {
-      const db = (connection.client as MongoClient).db();
-      const updateData = {
-        json: jsonData,
-        description: description,
-        fields: fields,
-        updatedAt: new Date(),
-        apiUrl: apiUrl,
-        credentialId: credentialId,
-        prefix: prefix,
-      };
-
-      await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
-    } else {
-      throw new Error('Unsupported database type for externalApi export update');
-    }
-
-  } else if (dbType === 'nosql') {
+  if (dbType === 'nosql') {
     const db = (connection.client as MongoClient).db();
-    const updateData = {
-        json: jsonData,
-        description: description,
-        fields: fields,
-        apiUrl: apiUrl,
-        credentialId: credentialId,
-        prefix: prefix,
-    };
-
-    await db.collection(collectionName).updateOne({ _id: new ObjectId(exportId) }, { $set: updateData });
+    await db.collection(storedSlug).updateOne(
+      { _id: new ObjectId(exportId) },
+      { $set: { nodeSchema, description, updatedAt: new Date() } }
+    );
   } else {
     throw new Error('Unsupported database type for update');
   }
 
   const NoSQLProject = getModel('projects', 'nosql');
-
   await NoSQLProject.update(
     {
       _id: new ObjectId(projectId),
       'exports.id': { $in: [new ObjectId(exportId), exportId] }
     },
-    { $set: { 'exports.$.name': exportName, 'exports.$.collectionName': collectionName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.apiUrl': apiUrl, 'exports.$.credentialId': credentialId, 'exports.$.prefix': prefix, 'exports.$.description': description, 'exports.$.fields': fields } }
+    { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description } }
   );
-  result = { collectionName, exportId };
 
-  return { ...result, message: `${exportType} export updated successfully` };
+  return { exportId, message: `${exportType} export updated successfully` };
 }
 
 export async function deleteExport(
@@ -180,7 +106,7 @@ export async function deleteExport(
   projectId: string,
   exportId: string,
   dbType: DatabaseType,
-  collectionName: string
+  exportName: string,
 ): Promise<{ message: string }> {
   const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
     config.databases?.find(db => db.type === dbType);
@@ -190,9 +116,11 @@ export async function deleteExport(
   }
   const connection = getConnection(targetDb.id);
 
+  const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
   if (dbType === 'nosql') {
     const db = (connection.client as MongoClient).db();
-    await db.collection(collectionName).deleteOne({ _id: new ObjectId(exportId) });
+    await db.collection(slug).deleteOne({ _id: new ObjectId(exportId) });
   } else {
     throw new Error('Unsupported database type for delete');
   }

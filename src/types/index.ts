@@ -125,19 +125,28 @@ export interface Auth {
 
 export type AuthProvider = (req: Request) => Promise<Auth>;
 
+export interface NodeSchema {
+  nodes: any[];
+  edges: any[];
+}
+
 export interface Export {
   _id?: string;
   id: string;
-  collectionName: string;
   projectId: string;
   createdAt: Date;
   updatedAt: Date;
-  type: 'json' | 'externalApi';
+  // legacy fields — kept for backward compatibility
+  type?: 'json' | 'externalApi';
   fields?: FieldDefinition[];
   jsonData?: any;
-  private?: boolean;
-  allowedOrigin?: string[];
   apiUrl?: string;
   credentialId?: string;
   prefix?: string;
+  // current fields
+  private?: boolean;
+  allowedOrigin?: string[];
+  nodeSchema?: NodeSchema;
+  useConnections?: boolean;
+  useCredentials?: boolean;
 }

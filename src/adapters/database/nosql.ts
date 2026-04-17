@@ -1,5 +1,5 @@
 import { MongoClient, Document, ObjectId, UpdateFilter } from 'mongodb';
-import { FieldDefinition } from '../../types';
+import { FieldDefinition, NodeSchema } from '../../types';
 
 export const ensureCollectionsExist = async (client: MongoClient) => {
   const db = client.db();
@@ -44,18 +44,16 @@ export const createNoSQLExportCollection = async (
 
 export const createNoSQLRawExportCollection = async (
   connection: MongoClient,
-  projectId: string,
   exportName: string,
   method: string,
-  jsonData?: any,
+  nodeSchema?: NodeSchema,
 ): Promise<{ collectionName: string; exportId: string }> => {
   const db = connection.db();
   const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const collectionName = `raw_export_${projectId}_${slug}`;
+  const collectionName = slug;
 
-  // Insert the raw JSON data directly into the new collection
-  const result = await db.collection(collectionName).insertOne({ json: jsonData, name: exportName, method, collectionName, createdAt: new Date(), updatedAt: new Date() });
-  console.log(`✅ Raw collection '${collectionName}' created with provided JSON data.`);
+  const result = await db.collection(collectionName).insertOne({ nodeSchema, name: exportName, method, createdAt: new Date(), updatedAt: new Date() });
+  console.log(`✅ Raw collection '${collectionName}' created.`);
 
   return { collectionName, exportId: result.insertedId.toHexString() };
 };

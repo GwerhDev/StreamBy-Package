@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { randomUUID } from 'crypto';
 import { FieldDefinition } from '../../types';
 
 export const createSQLExportTable = async (
@@ -39,28 +40,32 @@ export const createSQLExportTable = async (
 
 export const createSQLRawExportTable = async (
   connection: Pool,
-  projectId: string,
   exportName: string,
-  jsonData?: any
+  nodeSchema?: any
 ): Promise<{ collectionName: string; exportId: string }> => {
   const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const tableName = `raw_export_${projectId}_${slug}`;
+  const tableName = slug;
+  const exportId = randomUUID();
 
   const createTableQuery = `
     CREATE TABLE IF NOT EXISTS "${tableName}" (
       id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      data JSONB NOT NULL
+      node_schema JSONB,
+      name TEXT,
+      method TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `;
 
   await connection.query(createTableQuery);
+  await connection.query(
+    `INSERT INTO "${tableName}" (id, node_schema, name, method) VALUES ($1, $2, $3, $4)`,
+    [exportId, nodeSchema ? JSON.stringify(nodeSchema) : null, exportName, 'GET']
+  );
   console.log(`✅ Raw table '${tableName}' created.`);
 
-  // Insert the raw JSON data directly into the new table
-  await connection.query(`INSERT INTO "${tableName}" (data) VALUES ($1)`, [jsonData]);
-  console.log(`✅ Raw JSON data inserted into table '${tableName}'.`);
-
-  return { collectionName: tableName, exportId: tableName };
+  return { collectionName: tableName, exportId };
 };
 
 export const sqlAdapter = {
