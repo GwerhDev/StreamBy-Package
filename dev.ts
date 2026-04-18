@@ -64,7 +64,7 @@ async function main() {
     encrypt: config.encryptionKey,
     websocket: {
       server,
-      path: '/streamby/ws',
+      path: '/ws',
     },
   };
 

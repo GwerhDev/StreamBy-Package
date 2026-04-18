@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
-import { ObjectId } from 'mongodb';
 
 export function notificationRouter(config: StreamByConfig): Router {
   const router = Router();
