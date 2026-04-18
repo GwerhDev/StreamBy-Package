@@ -52,6 +52,22 @@ export function notificationRouter(config: StreamByConfig): Router {
     }
   });
 
+  router.get('/notifications/:id', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { id } = req.params;
+
+      const notifications = getModel('notifications', 'nosql');
+      const notification = await notifications.findOne({ _id: new ObjectId(id), userId: auth.userId.toString() });
+
+      res.status(200).json({
+        data: notification,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch notifications', details: err.message });
+    }
+  });
+
   router.patch('/notifications/read-all', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
