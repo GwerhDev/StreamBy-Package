@@ -8,6 +8,38 @@ import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 
+const DEFAULT_NODE_SCHEMA = {
+  nodes: [
+    {
+      id: 'client',
+      type: 'clientNode',
+      position: { x: 0, y: 100 },
+      data: { label: 'Client', subtitle: 'GET' },
+      width: 148,
+      height: 100,
+    },
+    {
+      id: 'streamby',
+      type: 'streambyNode',
+      position: { x: 240, y: 100 },
+      data: { label: 'StreamBy', subtitle: 'Middleware' },
+      width: 158,
+      height: 100,
+    },
+  ],
+  edges: [
+    {
+      id: 'e-client-streamby',
+      source: 'client',
+      sourceHandle: 'out-right',
+      target: 'streamby',
+      targetHandle: 'in-left',
+      animated: true,
+      style: { stroke: '#38B6FF', strokeWidth: 2 },
+    },
+  ],
+};
+
 export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -183,10 +215,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Missing export name' });
       }
 
-      if (!nodeSchema) {
-        return res.status(400).json({ message: 'Missing nodeSchema' });
-      }
-
+      const resolvedNodeSchema = nodeSchema ?? DEFAULT_NODE_SCHEMA;
       const exportType = useConnections ? 'externalApi' : 'json';
 
       const project = await Project.findOne({ _id: projectId });
@@ -194,7 +223,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await createExport(config, projectId, description, name, project.dbType, exportType, isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials);
+      const result = await createExport(config, projectId, description, name, project.dbType, exportType, isPrivate, allowedOrigin, resolvedNodeSchema, useConnections, useCredentials);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -212,16 +241,6 @@ export function exportRouter(config: StreamByConfig): Router {
       const { id: projectId, export_id: exportId } = req.params;
       const { name, description, isPrivate, allowedOrigin, useConnections, useCredentials, nodeSchema } = req.body;
 
-      if (!name) {
-        return res.status(400).json({ message: 'Missing name' });
-      }
-
-      if (!nodeSchema) {
-        return res.status(400).json({ message: 'Missing nodeSchema' });
-      }
-
-      const exportType = useConnections ? 'externalApi' : 'json';
-
       const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
@@ -232,7 +251,12 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Export not found' });
       }
 
-      const result = await updateExport(config, projectId, exportId, description, name, project.dbType, exportType, isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials);
+      const resolvedName = name ?? exportMetadata.name;
+      const resolvedNodeSchema = nodeSchema ?? exportMetadata.nodeSchema;
+      const resolvedUseConnections = useConnections ?? exportMetadata.useConnections;
+      const exportType = resolvedUseConnections ? 'externalApi' : 'json';
+
+      const result = await updateExport(config, projectId, exportId, description ?? exportMetadata.description, resolvedName, project.dbType, exportType, isPrivate ?? exportMetadata.private, allowedOrigin ?? exportMetadata.allowedOrigin, resolvedNodeSchema, resolvedUseConnections, useCredentials ?? exportMetadata.useCredentials);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {

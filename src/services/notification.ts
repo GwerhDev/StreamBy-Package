@@ -1,12 +1,18 @@
 import { getModel } from '../models/manager';
+import { getConnection, getConnectedIds } from '../adapters/database/connectionManager';
+import { MongoClient } from 'mongodb';
 import { emitToUser } from './wsHub';
 
 const MAX_NOTIFICATIONS = 20;
 
-function getCollections() {
-  const notifCollection = getModel('notifications', 'nosql') as any;
-  const usersCollection = getModel('users', 'sql') as any;
-  return { notifCollection, usersCollection };
+function getRawNotifCollection() {
+  const model = getModel('notifications', 'nosql') as any;
+  const connectionIds: string[] = model.getConnectionIds();
+  const activeId = connectionIds.find((id: string) =>
+    getConnectedIds().includes(id) && getConnection(id).type === 'nosql',
+  );
+  if (!activeId) return null;
+  return (getConnection(activeId).client as MongoClient).db().collection('notifications');
 }
 
 export async function createNotification(
@@ -30,15 +36,12 @@ export async function createNotification(
     createdAt: new Date(),
   });
 
-  const { notifCollection, usersCollection } = getCollections();
-
-  if (notifCollection && usersCollection) {
-    const userDoc = await usersCollection.findOne({ id: userId });
-    const currentIds: any[] = userDoc?.notifications || [];
-
-    if (currentIds.length >= MAX_NOTIFICATIONS) {
-      const oldestId = currentIds[0];
-      await notifCollection.deleteOne({ _id: oldestId });
+  const collection = getRawNotifCollection();
+  if (collection) {
+    const count = await collection.countDocuments({ userId });
+    if (count > MAX_NOTIFICATIONS) {
+      const oldest = await collection.find({ userId }).sort({ createdAt: 1 }).limit(1).toArray();
+      if (oldest.length > 0) await collection.deleteOne({ _id: oldest[0]._id });
     }
   }
 

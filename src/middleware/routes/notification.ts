@@ -1,13 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
+import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
+import { MongoClient, ObjectId } from 'mongodb';
 
 const MAX_NOTIFICATIONS = 20;
 
-function getCollections() {
-  const notifCollection = getModel('notifications', 'nosql') as any;
-  const usersCollection = getModel('users', 'sql') as any;
-  return { notifCollection, usersCollection };
+function getRawNotifCollection() {
+  const model = getModel('notifications', 'nosql') as any;
+  const connectionIds: string[] = model.getConnectionIds();
+  const activeId = connectionIds.find((id: string) =>
+    getConnectedIds().includes(id) && getConnection(id).type === 'nosql',
+  );
+  if (!activeId) return null;
+  return (getConnection(activeId).client as MongoClient).db().collection('notifications');
 }
 
 export function notificationRouter(config: StreamByConfig): Router {
@@ -21,23 +27,25 @@ export function notificationRouter(config: StreamByConfig): Router {
       const skip = (page - 1) * limit;
       const appIdQuery = req.query.appId as string | undefined;
 
-      const { notifCollection, usersCollection } = getCollections();
-      if (!notifCollection || !usersCollection) {
-        return res.status(500).json({ message: 'Database not available' });
+      const collection = getRawNotifCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const filter: any = { userId: auth.userId.toString() };
+      if (appIdQuery !== undefined) {
+        filter.appId = appIdQuery === '0' ? null : appIdQuery;
       }
 
-      const notifications = await notifCollection.find({ userId: auth.userId.toString() });
-
-      if (notifications.length === 0) {
-        return res.status(200).json({
-          data: [],
-          pagination: { page, limit, total: 0, pages: 0 },
-        });
-      }
+      const total = await collection.countDocuments(filter);
+      const notifications = await collection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .toArray();
 
       res.status(200).json({
         data: notifications,
-        pagination: { page, limit, total: notifications.length, pages: Math.ceil(notifications.length / limit) },
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch notifications', details: err.message });
@@ -48,20 +56,16 @@ export function notificationRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const appIdQuery = req.query.appId as string | undefined;
-      const { notifCollection, usersCollection } = getCollections();
 
-      if (notifCollection && usersCollection) {
-        const userDoc = await usersCollection.findOne({ id: auth.userId });
-        const notificationIds: any[] = userDoc?.notifications || [];
+      const collection = getRawNotifCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-        if (notificationIds.length > 0) {
-          const filter: any = { _id: { $in: notificationIds }, read: false };
-          if (appIdQuery !== undefined) {
-            filter.appId = appIdQuery === '0' ? null : appIdQuery;
-          }
-          await notifCollection.updateMany(filter, { $set: { read: true, readAt: new Date() } });
-        }
+      const filter: any = { userId: auth.userId.toString(), read: false };
+      if (appIdQuery !== undefined) {
+        filter.appId = appIdQuery === '0' ? null : appIdQuery;
       }
+
+      await collection.updateMany(filter, { $set: { read: true, readAt: new Date() } });
 
       res.status(200).json({ message: 'All notifications marked as read' });
     } catch (err: any) {
@@ -73,24 +77,14 @@ export function notificationRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { id } = req.params;
-      const { notifCollection, usersCollection } = getCollections();
 
-      if (notifCollection && usersCollection) {
-        const userDoc = await usersCollection.findOne({ userId: auth.userId });
-        const notificationIds: any[] = userDoc?.notifications || [];
+      const collection = getRawNotifCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-        const belongsToUser = notificationIds.some(
-          (nId: any) => nId.toString() === id.toString(),
-        );
-        if (!belongsToUser) {
-          return res.status(403).json({ message: 'Notification not found or access denied' });
-        }
-
-        await notifCollection.updateOne(
-          { _id: notificationIds.find((nId: any) => nId.toString() === id.toString()) },
-          { $set: { read: true, readAt: new Date() } },
-        );
-      }
+      await collection.updateOne(
+        { _id: new ObjectId(id), userId: auth.userId.toString() },
+        { $set: { read: true, readAt: new Date() } },
+      );
 
       res.status(200).json({ message: 'Notification marked as read' });
     } catch (err: any) {

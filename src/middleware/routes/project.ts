@@ -4,11 +4,8 @@ import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
-import { authenticate } from '../../services/auth';
-
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
-  router.use(authenticate(config));
 
   const Project = getModel('projects');
 

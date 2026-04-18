@@ -36,6 +36,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     const nosqlDbIds = config.databases.filter(db => db.type === 'nosql').map(db => db.id);
     if (nosqlDbIds.length > 0) {
       registerModel('notifications', nosqlDbIds, 'notifications', streambySchema);
+      registerModel('storage_files', nosqlDbIds, 'storage_files');
     }
 
     const mainDb = config.databases.find(db => db.main);
