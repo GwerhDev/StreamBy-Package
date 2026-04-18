@@ -4,6 +4,7 @@ import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnectedIds, getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
+import { createNotification } from '../../services/notification';
 
 const VALID_ROLES = ['viewer', 'editor', 'admin'] as const;
 type MemberRole = typeof VALID_ROLES[number];
@@ -91,7 +92,7 @@ export function memberRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'User not found' });
       }
 
-      const newMember = { userId, username: user.username, role, archived: false };
+      const newMember = { userId, username: user.username, role, archived: false, status: 'pending', invitedBy: auth.userId };
 
       if (project.dbType === 'sql') {
         const connection = getSqlConnection();
@@ -103,10 +104,19 @@ export function memberRouter(config: StreamByConfig): Router {
           userId,
           role,
           archived: false,
+          status: 'pending',
+          invitedBy: auth.userId,
         }, 'streamby');
       } else {
         await Project.update({ _id: projectId }, { $push: { members: newMember } });
       }
+
+      await createNotification(
+        userId,
+        'member_invited',
+        `Te invitaron al proyecto "${project.name}"`,
+        { projectId, role, invitedBy: auth.userId },
+      );
 
       res.status(201).json({ member: newMember, message: 'Member invited successfully' });
     } catch (err: any) {
@@ -158,6 +168,83 @@ export function memberRouter(config: StreamByConfig): Router {
       res.status(200).json({ message: 'Member role updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update member role', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/members/:userId/accept', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { id: projectId, userId: targetUserId } = req.params;
+
+      if (auth.userId !== targetUserId) {
+        return res.status(403).json({ message: 'You can only accept your own invitations' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const member = project.members?.find((m: any) => m.userId?.toString() === targetUserId);
+      if (!member) {
+        return res.status(404).json({ message: 'Invitation not found' });
+      }
+      if (member.status !== 'pending') {
+        return res.status(400).json({ message: 'Invitation is no longer pending' });
+      }
+
+      const updatedMembers = project.members.map((m: any) =>
+        m.userId?.toString() === targetUserId ? { ...m, status: 'active' } : m
+      );
+      await Project.update({ _id: projectId }, { members: updatedMembers });
+
+      await createNotification(
+        member.invitedBy,
+        'member_accepted',
+        `${member.username} aceptó la invitación al proyecto "${project.name}"`,
+        { projectId, userId: targetUserId },
+      );
+
+      res.status(200).json({ message: 'Invitation accepted' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to accept invitation', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/members/:userId/reject', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { id: projectId, userId: targetUserId } = req.params;
+
+      if (auth.userId !== targetUserId) {
+        return res.status(403).json({ message: 'You can only reject your own invitations' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const member = project.members?.find((m: any) => m.userId?.toString() === targetUserId);
+      if (!member) {
+        return res.status(404).json({ message: 'Invitation not found' });
+      }
+      if (member.status !== 'pending') {
+        return res.status(400).json({ message: 'Invitation is no longer pending' });
+      }
+
+      await Project.update({ _id: projectId }, { $pull: { members: { userId: targetUserId } } });
+
+      await createNotification(
+        member.invitedBy,
+        'member_rejected',
+        `${member.username} rechazó la invitación al proyecto "${project.name}"`,
+        { projectId, userId: targetUserId },
+      );
+
+      res.status(200).json({ message: 'Invitation rejected' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to reject invitation', details: err.message });
     }
   });
 
