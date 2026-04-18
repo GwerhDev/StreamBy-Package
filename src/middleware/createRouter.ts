@@ -3,21 +3,19 @@ import { StreamByConfig, StorageAdapter } from '../types';
 import { registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
 import { initConnections } from '../adapters/database/connectionManager';
-
-import { authRouter } from './routes/auth';
-import { databaseRouter } from './routes/database';
-import { storageRouter } from './routes/storage';
-import { projectRouter } from './routes/project';
-import { exportRouter } from './routes/export';
-import { credentialRouter } from './routes/credential';
-import { apiConnectionRouter } from './routes/connection';
-import { memberRouter } from './routes/member';
-import { userRouter } from './routes/user';
-import { notificationRouter } from './routes/notification';
-
+import { initWsHub } from '../services/wsHub';
 import { authenticate } from '../services/auth';
 import { setEncryptionKey } from '../utils/encryption';
-import { initWsHub } from '../services/wsHub';
+import { authRouter } from './routes/auth';
+import { userRouter } from './routes/user';
+import { exportRouter } from './routes/export';
+import { memberRouter } from './routes/member';
+import { storageRouter } from './routes/storage';
+import { projectRouter } from './routes/project';
+import { databaseRouter } from './routes/database';
+import { credentialRouter } from './routes/credential';
+import { connectionRouter } from './routes/connection';
+import { notificationRouter } from './routes/notification';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -30,15 +28,14 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   if (config.databases) {
     const allDbIds = config.databases.map(db => db.id);
-    const sqlDbs = config.databases.filter(db => db.type === 'sql');
-    const streambySchema = sqlDbs.length > 0 ? 'streamby' : undefined;
+    const streambySchema = 'streamby';
 
-    registerModel('projects', allDbIds, 'projects', streambySchema);
     registerModel('exports', allDbIds, 'exports', streambySchema);
+    registerModel('projects', allDbIds, 'projects', streambySchema);
 
     const nosqlDbIds = config.databases.filter(db => db.type === 'nosql').map(db => db.id);
     if (nosqlDbIds.length > 0) {
-      registerModel('notifications', nosqlDbIds, 'notifications');
+      registerModel('notifications', nosqlDbIds, 'notifications', streambySchema);
     }
 
     const mainDb = config.databases.find(db => db.main);
@@ -51,16 +48,16 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     initWsHub(config.websocket.server, config, config.websocket.path);
   }
 
-  router.use(authenticate(config));
+  router.use(userRouter(config));
   router.use(authRouter(config));
-  router.use(databaseRouter(config));
+  router.use(authenticate(config));
+  router.use(exportRouter(config));
+  router.use(memberRouter(config));
   router.use(storageRouter(config));
   router.use(projectRouter(config));
-  router.use(exportRouter(config));
+  router.use(databaseRouter(config));
   router.use(credentialRouter(config));
-  router.use(apiConnectionRouter(config));
-  router.use(memberRouter(config));
-  router.use(userRouter(config));
+  router.use(connectionRouter(config));
   router.use(notificationRouter(config));
 
   return router;

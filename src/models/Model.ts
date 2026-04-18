@@ -200,6 +200,7 @@ export class Model<T extends Document> {
             projectId: created.id,
             userId: member.userId,
             role: member.role,
+            status: member.status,
             archived: member.archived || false,
           }, this.schema);
         }

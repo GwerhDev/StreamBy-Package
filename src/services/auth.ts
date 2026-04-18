@@ -20,7 +20,6 @@ export const authenticate = (config: StreamByConfig) => async (req: Request, res
   }
 };
 
-
 export function checkRole(auth: Auth, required: 'viewer' | 'editor' | 'admin') {
   const roles = ['viewer', 'editor', 'admin'];
   const userIdx = roles.indexOf(auth.role);

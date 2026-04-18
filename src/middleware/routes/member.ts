@@ -37,15 +37,17 @@ export function memberRouter(config: StreamByConfig): Router {
         return res.status(500).json({ message: 'Main database not configured' });
       }
 
-      const User = getModel('users');
+      const User = getModel('users', mainDb.type);
       const membersWithUsernames = await Promise.all(
         project.members.map(async (member: any) => {
           const user = await User.findOne({ _id: member.userId });
+          
           return {
             userId: member.userId,
             username: user ? user.username : 'Unknown',
             role: member.role,
-            profilePic: user ? user.profilePic : '',
+            status: member.status,
+            profilePic: user ? user.profilePic : user.googlePic,
           };
         })
       );
@@ -88,6 +90,7 @@ export function memberRouter(config: StreamByConfig): Router {
 
       const User = getModel('users');
       const user = await User.findOne({ _id: userId });
+
       if (!user) {
         return res.status(404).json({ message: 'User not found' });
       }
@@ -114,7 +117,7 @@ export function memberRouter(config: StreamByConfig): Router {
       await createNotification(
         userId,
         'member_invited',
-        `Te invitaron al proyecto "${project.name}"`,
+        `You has been invited to join the project "${project.name}"`,
         { projectId, role, invitedBy: auth.userId },
       );
 

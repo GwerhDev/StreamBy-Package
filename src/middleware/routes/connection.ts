@@ -6,7 +6,7 @@ import { addApiConnection, deleteApiConnection } from '../../services/apiConnect
 
 const VALID_METHODS: ApiConnectionMethod[] = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'];
 
-export function apiConnectionRouter(config: StreamByConfig): Router {
+export function connectionRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
