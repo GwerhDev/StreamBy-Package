@@ -2,6 +2,7 @@ import http from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import { WebSocketServer } from 'ws';
 import { StreamByConfig } from './src/types';
 import { createStreamByRouter } from './src/middleware/createRouter';
 
@@ -23,6 +24,7 @@ const config = {
 async function main() {
   const devApp = express();
   const server = http.createServer(devApp);
+  const wss = new WebSocketServer({ server, path: '/streamby/ws' });
 
   devApp.use(cors({
     origin: 'http://localhost:5173',
@@ -62,10 +64,7 @@ async function main() {
       }
     ],
     encrypt: config.encryptionKey,
-    websocket: {
-      server,
-      path: '/ws',
-    },
+    websocket: { server: wss },
   };
 
   devApp.use((req, res, next) => {

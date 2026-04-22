@@ -1,11 +1,10 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { Server } from 'http';
 import { StreamByConfig } from '../types';
 
 const connections = new Map<string, Set<WebSocket>>();
 
-export function initWsHub(server: Server, config: StreamByConfig, path = '/streamby/ws'): void {
-  const wss = new WebSocketServer({ server, path });
+export function initWsHub(wss: WebSocketServer, config: StreamByConfig): void {
+  console.log('🟢 WebSocket hub connected');
 
   wss.on('connection', async (ws, req) => {
     let userId: string | null = null;

@@ -46,7 +46,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   }
 
   if (config.websocket?.server) {
-    initWsHub(config.websocket.server, config, config.websocket.path);
+    initWsHub(config.websocket.server, config);
   }
 
   router.use(userRouter(config));

@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import type { WebSocketServer } from 'ws';
 
 export interface S3Config {
   bucket: string;
@@ -115,8 +116,7 @@ export interface StreamByConfig {
   adapter?: StorageAdapter;
   encrypt?: string;
   websocket?: {
-    server: any;
-    path?: string;
+    server: WebSocketServer;
   };
 }
 

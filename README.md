@@ -21,12 +21,53 @@ It's designed to be installed inside your existing API as a library — **no nee
 ## 📦 Installation
 
 ```bash
-npm install @streamby/core
+npm install @streamby/core ws
+npm install -D @types/ws
 ```
 
 ---
 
 ## 🧱 Basic usage
+
+```ts
+import http from 'http';
+import express from 'express';
+import { WebSocketServer } from 'ws';
+import { createStreamByRouter } from '@streamby/core';
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server, path: '/streamby/ws' });
+
+app.use('/streamby', express.json(), createStreamByRouter({
+  authProvider: async (req) => {
+    // validate token/session and return user info
+    return { userId: 'user-id', username: 'username', role: 'admin' };
+  },
+  databases: [
+    { id: 'mongo', type: 'nosql', connectionString: process.env.MONGO_URI! },
+    { id: 'postgres', type: 'sql', connectionString: process.env.POSTGRES_URI!, main: true },
+  ],
+  storageProviders: [
+    {
+      type: 's3',
+      config: {
+        bucket: process.env.AWS_BUCKET!,
+        region: process.env.AWS_REGION!,
+        accessKeyId: process.env.AWS_ACCESS_KEY!,
+        secretAccessKey: process.env.AWS_SECRET_KEY!,
+      },
+    },
+  ],
+  encrypt: process.env.STREAMBY_ENCRYPTION_KEY,
+  websocket: { server: wss },
+}));
+
+server.listen(3000);
+```
+
+> **Important:** use `http.createServer(app)` and pass `server.listen()` instead of `app.listen()`.  
+> This is required so the `WebSocketServer` shares the same port as the HTTP server.
 
 ---
 
