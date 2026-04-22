@@ -11,10 +11,20 @@ export function initWsHub(wss: WebSocketServer, config: StreamByConfig): void {
 
     try {
       const auth = await config.authProvider(req as any);
-      if (!auth?.userId) { ws.close(1008, 'Unauthorized'); return; }
+      if (!auth?.userId) {
+        console.warn('⚠️  WS auth returned no userId — closing connection');
+        ws.close(1008, 'Unauthorized');
+        return;
+      }
       userId = auth.userId;
-    } catch {
+    } catch (err) {
+      console.error('❌ WS auth error:', err);
       ws.close(1008, 'Unauthorized');
+      return;
+    }
+
+    if (ws.readyState !== WebSocket.OPEN) {
+      console.warn(`⚠️  WS closed before setup completed for user ${userId}`);
       return;
     }
 
@@ -26,7 +36,11 @@ export function initWsHub(wss: WebSocketServer, config: StreamByConfig): void {
       if (connections.get(userId!)?.size === 0) connections.delete(userId!);
     });
 
-    ws.send(JSON.stringify({ type: 'connected', userId }));
+    try {
+      ws.send(JSON.stringify({ type: 'connected', userId }));
+    } catch (err) {
+      console.error(`❌ WS send error for user ${userId}:`, err);
+    }
   });
 }
 
