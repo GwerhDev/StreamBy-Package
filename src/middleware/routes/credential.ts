@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
+import { sanitizeProject } from '../../utils/sanitize';
 import { addCredential, updateCredential, deleteCredential } from '../../services/credential';
 
 export function credentialRouter(config: StreamByConfig): Router {
@@ -31,7 +32,7 @@ export function credentialRouter(config: StreamByConfig): Router {
 
       const updatedProject = await addCredential(config, projectId, { id, key, value });
 
-      res.status(201).json({ message: 'Credential added successfully', project: updatedProject });
+      res.status(201).json({ message: 'Credential added successfully', project: sanitizeProject(updatedProject) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to add credential', details: err.message });
     }
@@ -60,7 +61,7 @@ export function credentialRouter(config: StreamByConfig): Router {
 
       const updatedProject = await updateCredential(config, projectId, credentialId, { key, value });
 
-      res.status(200).json({ message: 'Credential updated successfully', project: updatedProject });
+      res.status(200).json({ message: 'Credential updated successfully', project: sanitizeProject(updatedProject) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update credential', details: err.message });
     }
@@ -84,7 +85,7 @@ export function credentialRouter(config: StreamByConfig): Router {
 
       const updatedProject = await deleteCredential(config, projectId, credentialId);
 
-      res.status(200).json({ message: 'Credential deleted successfully', project: updatedProject });
+      res.status(200).json({ message: 'Credential deleted successfully', project: sanitizeProject(updatedProject) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete credential', details: err.message });
     }

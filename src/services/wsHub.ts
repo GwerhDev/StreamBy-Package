@@ -37,7 +37,9 @@ export function initWsHub(wss: WebSocketServer, config: StreamByConfig): void {
     });
 
     try {
-      ws.send(JSON.stringify({ type: 'connected', userId }));
+      const payload = JSON.stringify({ type: 'connected', userId });
+      console.log(`📤 WS sending to ${userId}:`, payload);
+      ws.send(payload, { binary: false });
     } catch (err) {
       console.error(`❌ WS send error for user ${userId}:`, err);
     }
@@ -49,6 +51,6 @@ export function emitToUser(userId: string, event: object): void {
   if (!userConnections) return;
   const payload = JSON.stringify(event);
   for (const ws of userConnections) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    if (ws.readyState === WebSocket.OPEN) ws.send(payload, { binary: false });
   }
 }

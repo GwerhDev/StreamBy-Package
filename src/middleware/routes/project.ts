@@ -4,6 +4,7 @@ import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
+import { sanitizeProject } from '../../utils/sanitize';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -152,7 +153,8 @@ export function projectRouter(config: StreamByConfig): Router {
         useCredentials: e.useCredentials,
       }));
 
-      res.json({ project: { ...project, id: project._id || project.id, _id: undefined, apiConnections: project.apiConnections || [], exports }, message: 'Project fetched successfully' });
+      const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, apiConnections: project.apiConnections || [], exports });
+      res.json({ project: sanitized, message: 'Project fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch project', details: err.message });
     }
@@ -366,7 +368,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
 
-      res.status(200).json({ success: true, project: { ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }, message: 'Project image updated successfully' });
+      res.status(200).json({ success: true, project: sanitizeProject({ ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }), message: 'Project image updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project image', details: err.message });
     }
@@ -397,7 +399,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
 
-      res.status(200).json({ success: true, project: updated, message: 'Project origins updated successfully' });
+      res.status(200).json({ success: true, project: sanitizeProject(updated), message: 'Project origins updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project origins', details: err.message });
     }
