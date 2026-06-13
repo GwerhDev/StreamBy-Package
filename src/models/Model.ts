@@ -213,6 +213,31 @@ export class Model<T extends Document> {
     return data;
   }
 
+  private async updateSqlJsonbArray(
+    connection: Pool, id: string,
+    op: '$push' | '$pull', field: string, value: any,
+  ): Promise<void> {
+    const schema = this.schema || 'streamby';
+    const tbl = `"${schema}"."${this.tableName}"`;
+    if (op === '$push') {
+      await connection.query(
+        `UPDATE ${tbl} SET "${field}" = "${field}" || $1::jsonb WHERE id = $2`,
+        [JSON.stringify([value]), id],
+      );
+    } else {
+      const matchKey = (value as any).id !== undefined ? 'id' : Object.keys(value)[0];
+      const matchVal = String((value as any)[matchKey]);
+      await connection.query(
+        `UPDATE ${tbl} SET "${field}" = (
+          SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+          FROM jsonb_array_elements("${field}") elem
+          WHERE elem->>'${matchKey}' != $1
+        ) WHERE id = $2`,
+        [matchVal, id],
+      );
+    }
+  }
+
   async update(filter: any, data: Partial<T>): Promise<T | null> {
     const existingProject = await this.findOne(filter); // Find the project first
     if (!existingProject) {
@@ -297,8 +322,15 @@ export class Model<T extends Document> {
       }
     } else {
       // General update logic
-      // Use the correctly constructed updateFilter
       if (dbType === 'sql') {
+        // Detect MongoDB-style array operators ($push / $pull) and map to JSONB operations
+        const op = Object.keys(data).find(k => k === '$push' || k === '$pull') as '$push' | '$pull' | undefined;
+        if (op) {
+          const field = Object.keys((data as any)[op])[0];
+          const value = (data as any)[op][field];
+          await this.updateSqlJsonbArray(connection as Pool, existingProject.id, op, field, value);
+          return await this.findOne({ _id: existingProject.id });
+        }
         const result = await sqlAdapter.update(connection as Pool, this.tableName, updateFilter, data, this.schema);
         if (result) return result as T;
       } else if (dbType === 'nosql') {

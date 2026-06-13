@@ -75,7 +75,7 @@ export const sqlAdapter = {
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
     let query = `SELECT * FROM ${fullTableName}`;
     if (keys.length > 0) {
-      const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND ');
+      const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
       query += ` WHERE ${where}`;
     }
     const result = await connection.query(query, values);
@@ -85,7 +85,7 @@ export const sqlAdapter = {
   findOne: async (connection: Pool, tableName: string, filter: any, schema?: string): Promise<any | null> => {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
-    const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND ');
+    const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
     const result = await connection.query(`SELECT * FROM ${fullTableName} WHERE ${where} LIMIT 1`, values);
     return result.rows[0] || null;
@@ -94,7 +94,7 @@ export const sqlAdapter = {
   create: async (connection: Pool, tableName: string, data: any, schema?: string): Promise<any> => {
     const keys = Object.keys(data as any).map(key => `"${key}"`).join(', ');
     const values = Object.values(data as any);
-    const placeholders = values.map((_, i) => `${i + 1}`).join(', ');
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
     const result = await connection.query(`INSERT INTO ${fullTableName} (${keys}) VALUES (${placeholders}) RETURNING *`, values);
     return result.rows[0];
@@ -104,8 +104,8 @@ export const sqlAdapter = {
     const dataKeys = Object.keys(data);
     const filterKeys = Object.keys(filter);
     const values = [...Object.values(data), ...Object.values(filter)];
-    const setClause = dataKeys.map((key, i) => `"${key}" = ${i + 1}`).join(', ');
-    const whereClause = filterKeys.map((key, i) => `"${key}" = ${dataKeys.length + i + 1}`).join(' AND ');
+    const setClause = dataKeys.map((key, i) => `"${key}" = $${i + 1}`).join(', ');
+    const whereClause = filterKeys.map((key, i) => `"${key}" = $${dataKeys.length + i + 1}`).join(' AND ');
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
     const result = await connection.query(`UPDATE ${fullTableName} SET ${setClause} WHERE ${whereClause} RETURNING *`, values);
     return result.rows[0] || null;

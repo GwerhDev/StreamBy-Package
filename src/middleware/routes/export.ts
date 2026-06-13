@@ -209,7 +209,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(401).json({ message: 'Unauthorized' });
       }
       const projectId = req.params.id;
-      const { name, description, isPrivate, allowedOrigin, useConnections, useCredentials, nodeSchema } = req.body;
+      const { name, description, isPrivate, allowedOrigin, useConnections, useCredentials, nodeSchema, storageDbId } = req.body;
 
       if (!name) {
         return res.status(400).json({ message: 'Missing export name' });
@@ -223,7 +223,10 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const result = await createExport(config, projectId, description, name, project.dbType, exportType, isPrivate, allowedOrigin, resolvedNodeSchema, useConnections, useCredentials);
+      const mainDb = config.databases?.find(db => db.main) ?? config.databases?.[0];
+      const dbType = mainDb?.type ?? 'nosql';
+
+      const result = await createExport(config, projectId, description, name, dbType, exportType, isPrivate, allowedOrigin, resolvedNodeSchema, useConnections, useCredentials, storageDbId);
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {

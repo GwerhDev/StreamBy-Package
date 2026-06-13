@@ -48,7 +48,7 @@ export interface FieldDefinition {
 export interface ProjectInfo {
   _id?: string;
   id: string;
-  dbType: DatabaseType;
+  dbType?: DatabaseType;
   name: string;
   image?: string;
   members?: {
@@ -67,6 +67,7 @@ export interface ProjectInfo {
   };
   credentials?: Credential[];
   apiConnections?: ApiConnection[];
+  dbConnections?: DbConnection[];
 }
 
 export interface Credential {
@@ -91,7 +92,7 @@ export interface ApiConnection {
 
 export interface ProjectListInfo {
   id: string;
-  dbType: DatabaseType;
+  dbType?: DatabaseType;
   name: string;
   image?: string;
   archived: boolean;
@@ -142,6 +143,30 @@ export interface Auth {
 
 export type AuthProvider = (req: Request) => Promise<Auth>;
 
+export type ExternalDbType = 'postgresql' | 'mongodb';
+
+export interface DbConnection {
+  id: string;
+  name: string;
+  dbType: ExternalDbType;
+  credentialId: string;
+  projectId: string;
+  createdAt: Date;
+  description?: string;
+}
+
+export interface ColumnDefinition {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  primaryKey?: boolean;
+}
+
+export interface CreateTableSchema {
+  tableName: string;
+  columns: ColumnDefinition[];
+}
+
 export interface NodeSchema {
   nodes: any[];
   edges: any[];
@@ -166,4 +191,5 @@ export interface Export {
   nodeSchema?: NodeSchema;
   useConnections?: boolean;
   useCredentials?: boolean;
+  storageDbId?: string;
 }

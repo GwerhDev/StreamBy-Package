@@ -44,58 +44,85 @@ const ensureTablesExist = async (pool: Pool) => {
     await pool.query(`
       CREATE SCHEMA IF NOT EXISTS streamby;
       CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    `);
+
+    // Migrate id column from UUID to TEXT if it was created with the old schema
+    await pool.query(`
+      DO $$ BEGIN
+        ALTER TABLE streamby.projects ALTER COLUMN id TYPE TEXT USING id::text;
+        ALTER TABLE streamby.projects ALTER COLUMN id SET DEFAULT uuid_generate_v4()::text;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS streamby.projects (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        name VARCHAR(255) NOT NULL,
-        description TEXT,
-        image TEXT,
-        "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        id               TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        name             VARCHAR(255) NOT NULL,
+        description      TEXT,
+        image            TEXT,
+        "allowedOrigin"  JSONB DEFAULT '[]',
+        exports          JSONB DEFAULT '[]',
+        credentials      JSONB DEFAULT '[]',
+        "apiConnections" JSONB DEFAULT '[]',
+        "dbConnections"  JSONB DEFAULT '[]',
+        "dbType"         VARCHAR(50) NOT NULL DEFAULT 'sql',
+        "createdAt"      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        "updatedAt"      TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
     console.log('✅ "projects" table ensured to exist.');
 
-    // Ensure dbType column exists and is correctly configured
+    // Add JSONB columns to existing tables that predate this schema version
     await pool.query(`
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbType" VARCHAR(50);
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "allowedOrigin"  JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS exports          JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS credentials      JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "apiConnections" JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbConnections"  JSONB DEFAULT '[]';
     `);
+
+    // Ensure dbType exists with a non-null default
     await pool.query(`
-      UPDATE streamby.projects SET "dbType" = 'nosql' WHERE "dbType" IS NULL;
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbType" VARCHAR(50) NOT NULL DEFAULT 'sql';
     `);
+
     await pool.query(`
-      ALTER TABLE streamby.projects ALTER COLUMN "dbType" SET NOT NULL;
+      CREATE TABLE IF NOT EXISTS streamby.project_members (
+        id           TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        "projectId"  TEXT NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
+        "userId"     VARCHAR(255) NOT NULL,
+        role         VARCHAR(255) NOT NULL DEFAULT 'member',
+        archived     BOOLEAN NOT NULL DEFAULT FALSE,
+        "archivedBy" VARCHAR(255),
+        "archivedAt" TIMESTAMP WITH TIME ZONE,
+        "createdAt"  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        "updatedAt"  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE ("projectId", "userId")
+      );
     `);
+    console.log('✅ "project_members" table ensured to exist.');
+
+    // Migrate projectId FK column from UUID to TEXT if table predates this schema version
     await pool.query(`
-      ALTER TABLE streamby.projects ALTER COLUMN "dbType" SET DEFAULT 'nosql';
+      DO $$ BEGIN
+        ALTER TABLE streamby.project_members DROP CONSTRAINT IF EXISTS project_members_projectId_fkey;
+        ALTER TABLE streamby.project_members ALTER COLUMN "projectId" TYPE TEXT;
+        ALTER TABLE streamby.project_members ADD CONSTRAINT project_members_projectid_fkey
+          FOREIGN KEY ("projectId") REFERENCES streamby.projects(id) ON DELETE CASCADE;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
     `);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS streamby.exports (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        "projectId" UUID NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
-        status VARCHAR(50) NOT NULL DEFAULT 'pending',
-        "filePath" TEXT,
+        id          TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        "projectId" TEXT NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
+        status      VARCHAR(50) NOT NULL DEFAULT 'pending',
+        "filePath"  TEXT,
         "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
     console.log('✅ "exports" table ensured to exist.');
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS streamby.project_members (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-        "projectId" UUID NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
-        "userId" VARCHAR(255) NOT NULL,
-        role VARCHAR(255) NOT NULL DEFAULT 'member',
-        archived BOOLEAN NOT NULL DEFAULT FALSE,
-        "archivedBy" VARCHAR(255),
-        "archivedAt" TIMESTAMP WITH TIME ZONE,
-        "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        UNIQUE ("projectId", "userId")
-      );
-    `);
-    console.log('✅ "project_members" table ensured to exist.');
   } catch (error) {
     console.error('❌ Error ensuring tables exist:', error);
   }

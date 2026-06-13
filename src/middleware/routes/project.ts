@@ -54,14 +54,14 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, description, dbType, image, allowedOrigin } = req.body;
+      const { name, description, image, allowedOrigin } = req.body;
 
-      const mainDb = config.databases?.find(db => db.main);
+      const mainDb = config.databases?.find(db => db.main) ?? config.databases?.[0];
       if (!mainDb) {
-        return res.status(500).json({ message: 'Main database not configured' });
+        return res.status(500).json({ message: 'No database configured' });
       }
-      const userDbType = mainDb.type;
-      const User = getModel('users', userDbType);
+      const dbType = mainDb.type;
+      const User = getModel('users', dbType);
       const user = await User.findOne({ _id: auth.userId });
 
       if (!user) {
@@ -69,7 +69,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       const newProject = await Project.create({
-        dbType: dbType || 'nosql',
+        dbType,
         name,
         description: description || '',
         image: image || '',

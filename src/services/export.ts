@@ -24,31 +24,54 @@ export async function createExport(
   nodeSchema?: NodeSchema,
   useConnections?: boolean,
   useCredentials?: boolean,
+  storageDbId?: string,
 ): Promise<ExportResult> {
-  const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
-    config.databases?.find(db => db.type === dbType);
+  const targetDb = storageDbId
+    ? config.databases?.find(db => db.id === storageDbId)
+    : config.databases?.find(db => db.type === dbType && db.main) ||
+      config.databases?.find(db => db.type === dbType);
 
   if (!targetDb) {
     throw new Error(`Database connection not found for type ${dbType}`);
   }
   const connection = getConnection(targetDb.id);
+  const resolvedDbType = targetDb.type;
 
   let exportId: string;
 
-  if (dbType === 'nosql') {
+  if (resolvedDbType === 'nosql') {
     const result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, 'GET', nodeSchema);
     exportId = result.exportId;
-  } else if (dbType === 'sql') {
+  } else if (resolvedDbType === 'sql') {
     const result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, nodeSchema);
     exportId = result.exportId;
   } else {
     throw new Error('Unsupported database type');
   }
 
-  const NoSQLProject = getModel('projects', 'nosql');
-  await NoSQLProject.update(
+  // Route the project document update to the correct DB based on where the project lives
+  const Project = getModel('projects');
+  const project = await Project.findOne({ _id: projectId });
+  const isSqlProject = (project as any)?.dbType === 'sql';
+
+  const exportEntry = {
+    id: isSqlProject ? exportId : new ObjectId(exportId),
+    name: exportName,
+    type: exportType,
+    method: 'GET',
+    private: isPrivate,
+    allowedOrigin,
+    nodeSchema,
+    useConnections,
+    useCredentials,
+    description,
+    storageDbId: targetDb.id,
+  };
+
+  const ProjectModel = isSqlProject ? getModel('projects', 'sql') : getModel('projects', 'nosql');
+  await ProjectModel.update(
     { _id: projectId },
-    { $push: { exports: { id: new ObjectId(exportId), name: exportName, type: exportType, method: 'GET', private: isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials, description } } }
+    { $push: { exports: exportEntry } } as any,
   );
 
   return { exportId, message: `${exportType} export created successfully` };
@@ -68,32 +91,52 @@ export async function updateExport(
   useConnections?: boolean,
   useCredentials?: boolean,
 ): Promise<ExportResult> {
-  const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
-    config.databases?.find(db => db.type === dbType);
+  // Resolve the project to find where its raw export data lives
+  const Project = getModel('projects');
+  const project = await Project.findOne({ _id: projectId });
+  const isSqlProject = (project as any)?.dbType === 'sql';
+
+  // Find storageDbId from the export entry, or fall back to the legacy dbType lookup
+  const exportEntry = (project as any)?.exports?.find((e: any) => String(e.id) === exportId);
+  const resolvedStorageDbId = exportEntry?.storageDbId;
+
+  const targetDb = resolvedStorageDbId
+    ? config.databases?.find(db => db.id === resolvedStorageDbId)
+    : config.databases?.find(db => db.type === dbType && db.main) ||
+      config.databases?.find(db => db.type === dbType);
 
   if (!targetDb) {
     throw new Error(`Database connection not found for type ${dbType}`);
   }
   const connection = getConnection(targetDb.id);
 
-  if (dbType === 'nosql') {
+  if (targetDb.type === 'nosql') {
     const db = (connection.client as MongoClient).db();
     await db.collection(projectId).updateOne(
       { _id: new ObjectId(exportId) },
       { $set: { nodeSchema, description, updatedAt: new Date() } }
     );
-  } else {
-    throw new Error('Unsupported database type for update');
   }
+  // SQL raw export table update would go here if needed in future
 
-  const NoSQLProject = getModel('projects', 'nosql');
-  await NoSQLProject.update(
-    {
-      _id: new ObjectId(projectId),
-      'exports.id': { $in: [new ObjectId(exportId), exportId] }
-    },
-    { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description } }
-  );
+  // Update the export entry in the project document
+  if (isSqlProject) {
+    // For SQL projects: read-modify-write the exports JSONB array
+    const SqlProject = getModel('projects', 'sql');
+    const currentExports: any[] = (project as any)?.exports ?? [];
+    const updatedExports = currentExports.map((e: any) =>
+      String(e.id) === exportId
+        ? { ...e, name: exportName, private: isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials, description }
+        : e,
+    );
+    await SqlProject.update({ _id: projectId }, { exports: updatedExports } as any);
+  } else {
+    const NoSQLProject = getModel('projects', 'nosql');
+    await NoSQLProject.update(
+      { _id: new ObjectId(projectId), 'exports.id': { $in: [new ObjectId(exportId), exportId] } },
+      { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description } },
+    );
+  }
 
   return { exportId, message: `${exportType} export updated successfully` };
 }
@@ -105,26 +148,40 @@ export async function deleteExport(
   dbType: DatabaseType,
   exportName: string,
 ): Promise<{ message: string }> {
-  const targetDb = config.databases?.find(db => db.type === dbType && db.main) ||
-    config.databases?.find(db => db.type === dbType);
+  // Resolve the project to find where its raw export data lives
+  const Project = getModel('projects');
+  const project = await Project.findOne({ _id: projectId });
+  const isSqlProject = (project as any)?.dbType === 'sql';
+
+  const exportEntry = (project as any)?.exports?.find((e: any) => String(e.id) === exportId);
+  const resolvedStorageDbId = exportEntry?.storageDbId;
+
+  const targetDb = resolvedStorageDbId
+    ? config.databases?.find(db => db.id === resolvedStorageDbId)
+    : config.databases?.find(db => db.type === dbType && db.main) ||
+      config.databases?.find(db => db.type === dbType);
 
   if (!targetDb) {
     throw new Error(`Database connection not found for type ${dbType}`);
   }
   const connection = getConnection(targetDb.id);
 
-  if (dbType === 'nosql') {
+  if (targetDb.type === 'nosql') {
     const db = (connection.client as MongoClient).db();
     await db.collection(projectId).deleteOne({ _id: new ObjectId(exportId) });
-  } else {
-    throw new Error('Unsupported database type for delete');
   }
+  // SQL raw export table row deletion would go here if needed in future
 
-  const NoSQLProject = getModel('projects', 'nosql');
-  await NoSQLProject.update(
-    { _id: new ObjectId(projectId) },
-    { $pull: { exports: { id: new ObjectId(exportId) } } }
-  );
+  if (isSqlProject) {
+    const SqlProject = getModel('projects', 'sql');
+    await SqlProject.update({ _id: projectId }, { $pull: { exports: { id: exportId } } } as any);
+  } else {
+    const NoSQLProject = getModel('projects', 'nosql');
+    await NoSQLProject.update(
+      { _id: new ObjectId(projectId) },
+      { $pull: { exports: { id: new ObjectId(exportId) } } },
+    );
+  }
 
   return { message: 'Export deleted successfully' };
 }

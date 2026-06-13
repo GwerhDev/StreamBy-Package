@@ -74,10 +74,22 @@ async function main() {
 
   devApp.use('/streamby', express.json(), createStreamByRouter(streambyConfig));
 
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${config.port} is already in use. Set a different PORT in .env`);
+      process.exit(1);
+    }
+    throw err;
+  });
+
   server.listen(config.port, () => {
     console.log('🟢 StreamBy-core dev server listening on http://localhost:' + config.port + '/streamby');
     console.log('🔌 WebSocket available at ws://localhost:' + config.port + '/streamby/ws');
   });
+
+  const shutdown = () => server.close(() => process.exit(0));
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT',  shutdown);
 }
 
 main().catch((err) => {

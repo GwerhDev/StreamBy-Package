@@ -3,6 +3,66 @@ import { NodeSchema, StreamByConfig } from '../types';
 import { getConnection } from '../adapters/database/connectionManager';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
 
+interface FilterCondition { field: string; op: string; value: string; }
+interface FilterNodeConfig {
+  conditions?:   FilterCondition[];
+  includeFields?: string[];
+  renameFields?:  Array<{ from: string; to: string }>;
+  wrapKey?:       string;
+  limit?:         number;
+}
+
+function applyFilterConfig(payload: any, config: FilterNodeConfig): any {
+  const isArr = Array.isArray(payload);
+  let r: any = isArr ? [...payload] : payload;
+
+  if (config.conditions?.length) {
+    const matches = (item: any) => config.conditions!.every(c => {
+      const v = item?.[c.field];
+      switch (c.op) {
+        case 'eq':         return String(v) === c.value;
+        case 'neq':        return String(v) !== c.value;
+        case 'gt':         return Number(v) >  Number(c.value);
+        case 'lt':         return Number(v) <  Number(c.value);
+        case 'gte':        return Number(v) >= Number(c.value);
+        case 'lte':        return Number(v) <= Number(c.value);
+        case 'contains':   return String(v).includes(c.value);
+        case 'startsWith': return String(v).startsWith(c.value);
+        case 'endsWith':   return String(v).endsWith(c.value);
+        default:           return true;
+      }
+    });
+    r = isArr ? r.filter(matches) : (matches(r) ? r : null);
+    if (r === null) return null;
+  }
+
+  if (config.includeFields?.length) {
+    const pick = (item: any) => {
+      if (!item || typeof item !== 'object') return item;
+      const o: any = {};
+      for (const f of config.includeFields!) if (f in item) o[f] = item[f];
+      return o;
+    };
+    r = isArr ? r.map(pick) : pick(r);
+  }
+
+  if (config.renameFields?.length) {
+    const ren = (item: any) => {
+      if (!item || typeof item !== 'object') return item;
+      const o = { ...item };
+      for (const { from, to } of config.renameFields!) {
+        if (from in o) { o[to] = o[from]; delete o[from]; }
+      }
+      return o;
+    };
+    r = isArr ? r.map(ren) : ren(r);
+  }
+
+  if (config.limit && isArr) r = r.slice(0, config.limit);
+  if (config.wrapKey)        r = { [config.wrapKey]: r };
+  return r;
+}
+
 type PipelineNode = { id: string; type: string; data?: Record<string, any> };
 type PipelineEdge = { id?: string; source: string; sourceHandle: string; target: string; targetHandle: string };
 
@@ -84,7 +144,8 @@ export async function executePipeline(
   // 3. Filter layer — chain from streamby out-right → filterNode in-filter → out-filter → ...
   let filterNode = getTarget(nodes, edges, 'streamby', 'out-right');
   while (filterNode) {
-    // filter logic per filterNode.data.label — pass-through until defined
+    const cfg = filterNode.data?.filterConfig as FilterNodeConfig | undefined;
+    if (cfg) payload = applyFilterConfig(payload, cfg);
     filterNode = getTarget(nodes, edges, filterNode.id, 'out-filter');
   }
 
