@@ -1,7 +1,9 @@
 import { MongoClient } from 'mongodb';
+import { Pool } from 'pg';
 import { NodeSchema, StreamByConfig } from '../types';
 import { getConnection } from '../adapters/database/connectionManager';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
+import { queryRecordsInternal } from './dbConnection';
 
 interface FilterCondition { field: string; op: string; value: string; }
 interface FilterNodeConfig {
@@ -99,17 +101,24 @@ export async function executePipeline(
       }
 
     } else if (node.type === 'dataSourceNode') {
-      const collectionName = node.data?.subtitle || node.data?.label;
-      if (!collectionName) continue;
+      const tableName = (node.data?.tableName || node.data?.subtitle || node.data?.label) as string | undefined;
+      if (!tableName) continue;
 
-      const targetDb = config.databases?.find(db => db.type === project.dbType && db.main)
-        ?? config.databases?.find(db => db.type === project.dbType);
+      const connectionId = node.data?.connectionId as string | undefined;
 
-      if (!targetDb) throw new Error(`No database connection for type ${project.dbType}`);
-
-      const connection = getConnection(targetDb.id);
-      const db = (connection.client as MongoClient).db();
-      dataResults.push(await db.collection(collectionName).find({}).toArray());
+      if (connectionId) {
+        const { client, type } = getConnection(connectionId);
+        const records = await queryRecordsInternal(client as Pool | MongoClient, type, tableName, 500, 0, project.id);
+        dataResults.push(records);
+      } else {
+        // legacy fallback for nodes saved before connectionId was introduced
+        const targetDb = config.databases?.find((db: any) => db.type === project.dbType && db.main)
+          ?? config.databases?.find((db: any) => db.type === project.dbType);
+        if (!targetDb) throw new Error(`No database connection for type ${project.dbType}`);
+        const { client, type } = getConnection(targetDb.id);
+        const records = await queryRecordsInternal(client as Pool | MongoClient, type, tableName, 500, 0, project.id);
+        dataResults.push(records);
+      }
 
     } else if (node.type === 'apiConnectionNode') {
       const apiConnection = project.apiConnections?.find((c: any) => c.id === node.data?.connectionId);
