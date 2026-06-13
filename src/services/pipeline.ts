@@ -3,7 +3,7 @@ import { Pool } from 'pg';
 import { NodeSchema, StreamByConfig } from '../types';
 import { getConnection } from '../adapters/database/connectionManager';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
-import { queryRecordsInternal } from './dbConnection';
+import { queryRecordsInternal, queryRecordByIdInternal } from './dbConnection';
 
 interface FilterCondition { field: string; op: string; value: string; }
 interface FilterNodeConfig {
@@ -105,19 +105,23 @@ export async function executePipeline(
       if (!tableName) continue;
 
       const connectionId = node.data?.connectionId as string | undefined;
+      const recordId     = node.data?.recordId     as string | undefined;
+
+      const fetchData = async (client: Pool | MongoClient, type: 'sql' | 'nosql') =>
+        recordId
+          ? queryRecordByIdInternal(client, type, tableName, recordId, project.id)
+          : queryRecordsInternal(client, type, tableName, 500, 0, project.id);
 
       if (connectionId) {
         const { client, type } = getConnection(connectionId);
-        const records = await queryRecordsInternal(client as Pool | MongoClient, type, tableName, 500, 0, project.id);
-        dataResults.push(records);
+        dataResults.push(await fetchData(client as Pool | MongoClient, type));
       } else {
         // legacy fallback for nodes saved before connectionId was introduced
         const targetDb = config.databases?.find((db: any) => db.type === project.dbType && db.main)
           ?? config.databases?.find((db: any) => db.type === project.dbType);
         if (!targetDb) throw new Error(`No database connection for type ${project.dbType}`);
         const { client, type } = getConnection(targetDb.id);
-        const records = await queryRecordsInternal(client as Pool | MongoClient, type, tableName, 500, 0, project.id);
-        dataResults.push(records);
+        dataResults.push(await fetchData(client as Pool | MongoClient, type));
       }
 
     } else if (node.type === 'apiConnectionNode') {

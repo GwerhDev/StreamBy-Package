@@ -164,6 +164,32 @@ export async function queryRecordsInternal(
   return (client as MongoClient).db().collection(fullName).find().limit(limit).skip(offset).toArray();
 }
 
+export async function queryRecordByIdInternal(
+  client: Pool | MongoClient,
+  dbType: 'sql' | 'nosql',
+  tableName: string,
+  recordId: string,
+  projectId?: string,
+): Promise<any | null> {
+  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
+  if (dbType === 'sql') {
+    const result = await (client as Pool).query(
+      `SELECT * FROM ${quoteSqlTable(fullName)} WHERE id = $1 LIMIT 1`,
+      [recordId],
+    );
+    return result.rows[0] ?? null;
+  }
+  const db = (client as MongoClient).db();
+  let doc = await db.collection(fullName).findOne({ _id: recordId as any });
+  if (!doc) {
+    try {
+      const { ObjectId } = await import('mongodb');
+      doc = await db.collection(fullName).findOne({ _id: new ObjectId(recordId) });
+    } catch { /* invalid ObjectId format — not found */ }
+  }
+  return doc;
+}
+
 export async function createTableOrCollectionInternal(
   client: Pool | MongoClient,
   dbType: 'sql' | 'nosql',
