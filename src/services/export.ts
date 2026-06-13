@@ -38,10 +38,12 @@ export async function createExport(
   const resolvedDbType = targetDb.type;
 
   let exportId: string;
+  let collectionName: string | undefined;
 
   if (resolvedDbType === 'nosql') {
     const result = await createNoSQLRawExportCollection(connection.client as MongoClient, projectId, exportName, 'GET', nodeSchema);
     exportId = result.exportId;
+    collectionName = result.collectionName;
   } else if (resolvedDbType === 'sql') {
     const result = await createSQLRawExportTable(connection.client as Pool, projectId, exportName, nodeSchema);
     exportId = result.exportId;
@@ -66,6 +68,7 @@ export async function createExport(
     useCredentials,
     description,
     storageDbId: targetDb.id,
+    collectionName,
   };
 
   const ProjectModel = isSqlProject ? getModel('projects', 'sql') : getModel('projects', 'nosql');

@@ -367,8 +367,10 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (exportMetadata.nodeSchema) {
         data = await executePipeline(exportMetadata.nodeSchema, project, config);
-      } else {
+        return res.json(data ?? null);
+      }
 
+      // Legacy path: raw JSON or external API export
       const targetDb = config.databases?.find(db => db.type === project.dbType);
       if (!targetDb) {
         return res.status(500).json({ message: `Database connection not found for type ${project.dbType}` });
@@ -378,8 +380,10 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
+        const legacyCollection = exportMetadata.collectionName ?? projectId;
+
         if (exportMetadata.type === 'json') {
-          const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportMetadata.id) });
+          const rawData = await db.collection(legacyCollection).findOne({ _id: new ObjectId(exportMetadata.id.toString()) });
           data = rawData ? rawData.json : null;
         } else if (exportMetadata.type === 'externalApi') {
           let headers: Record<string, string> = {};
@@ -422,13 +426,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(501).json({ message: 'SQL public exports not yet implemented' });
       }
 
-      } // end legacy else block
-
-      if (data === null || data === undefined) {
-        return res.status(404).json({ message: 'Export data not found' });
-      }
-
-      res.json(data);
+      res.json(data ?? null);
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch public export data', details: err.message });
     }
