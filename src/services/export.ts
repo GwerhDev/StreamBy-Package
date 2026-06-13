@@ -87,6 +87,8 @@ export async function updateExport(
   exportType: 'json' | 'externalApi',
   isPrivate?: boolean,
   allowedOrigin?: string[],
+  devMode?: boolean,
+  devPorts?: number[],
   nodeSchema?: NodeSchema,
   useConnections?: boolean,
   useCredentials?: boolean,
@@ -126,7 +128,7 @@ export async function updateExport(
     const currentExports: any[] = (project as any)?.exports ?? [];
     const updatedExports = currentExports.map((e: any) =>
       String(e.id) === exportId
-        ? { ...e, name: exportName, private: isPrivate, allowedOrigin, nodeSchema, useConnections, useCredentials, description }
+        ? { ...e, name: exportName, private: isPrivate, allowedOrigin, devMode, devPorts, nodeSchema, useConnections, useCredentials, description }
         : e,
     );
     await SqlProject.update({ _id: projectId }, { exports: updatedExports } as any);
@@ -134,7 +136,7 @@ export async function updateExport(
     const NoSQLProject = getModel('projects', 'nosql');
     await NoSQLProject.update(
       { _id: new ObjectId(projectId), 'exports.id': { $in: [new ObjectId(exportId), exportId] } },
-      { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description } },
+      { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.devMode': devMode, 'exports.$.devPorts': devPorts, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description } },
     );
   }
 

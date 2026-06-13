@@ -92,6 +92,7 @@ const ensureTablesExist = async (pool: Pool) => {
         "projectId"  TEXT NOT NULL REFERENCES streamby.projects(id) ON DELETE CASCADE,
         "userId"     VARCHAR(255) NOT NULL,
         role         VARCHAR(255) NOT NULL DEFAULT 'member',
+        status       VARCHAR(50) NOT NULL DEFAULT 'active',
         archived     BOOLEAN NOT NULL DEFAULT FALSE,
         "archivedBy" VARCHAR(255),
         "archivedAt" TIMESTAMP WITH TIME ZONE,
@@ -99,6 +100,10 @@ const ensureTablesExist = async (pool: Pool) => {
         "updatedAt"  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         UNIQUE ("projectId", "userId")
       );
+    `);
+
+    await pool.query(`
+      ALTER TABLE streamby.project_members ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'active';
     `);
     console.log('✅ "project_members" table ensured to exist.');
 

@@ -332,3 +332,33 @@ export async function deleteRecordInternal(
   const result = await (client as MongoClient).db().collection(fullName).deleteOne(filter);
   return result.deletedCount > 0;
 }
+
+export async function deleteTableOrCollection(
+  connectionString: string,
+  dbType: ExternalDbType,
+  tableName: string,
+): Promise<void> {
+  if (dbType === 'postgresql') {
+    await withPostgres(connectionString, client =>
+      client.query(`DROP TABLE IF EXISTS "${tableName}"`).then(() => undefined),
+    );
+    return;
+  }
+  await withMongo(connectionString, async db => {
+    await db.dropCollection(tableName);
+  });
+}
+
+export async function deleteTableOrCollectionInternal(
+  client: Pool | MongoClient,
+  dbType: 'sql' | 'nosql',
+  tableName: string,
+  projectId?: string,
+): Promise<void> {
+  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
+  if (dbType === 'sql') {
+    await (client as Pool).query(`DROP TABLE IF EXISTS ${quoteSqlTable(fullName)}`);
+    return;
+  }
+  await (client as MongoClient).db().dropCollection(fullName);
+}

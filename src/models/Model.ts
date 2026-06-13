@@ -55,7 +55,7 @@ export class Model<T extends Document> {
           const userId = processedFilter.members.$elemMatch.userId;
           const schema = this.schema || 'streamby'; // Default to 'streamby' if schema not provided
           const query = `
-            SELECT p.*, pm."userId" as memberUserId, pm.archived as memberArchived
+            SELECT p.*, pm."userId" as memberUserId, pm.role as memberRole, pm.status as memberStatus, pm.archived as memberArchived
             FROM "${schema}"."projects" p
             JOIN "${schema}"."project_members" pm ON p.id = pm."projectId"
             WHERE pm."userId" = $1
@@ -65,8 +65,9 @@ export class Model<T extends Document> {
             ...row,
             members: [{
               userId: row.memberUserId,
+              role: row.memberRole,
+              status: row.memberStatus,
               archived: row.memberArchived,
-              // Add other member fields if necessary
             }]
           }));
         } else {
@@ -81,7 +82,8 @@ export class Model<T extends Document> {
             const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id }, this.schema);
             (transformedItem as any).members = projectMembers.map((member: any) => ({
               userId: member.userId,
-              role: member.role, // Assuming role is also stored in project_members
+              role: member.role,
+              status: member.status,
               archived: member.archived,
             }));
           }
@@ -135,7 +137,8 @@ export class Model<T extends Document> {
             const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedResult.id }, this.schema);
             (transformedResult as any).members = projectMembers.map((member: any) => ({
               userId: member.userId,
-              role: member.role, // Assuming role is also stored in project_members
+              role: member.role,
+              status: member.status,
               archived: member.archived,
             }));
           }

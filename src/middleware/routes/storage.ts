@@ -1,11 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { StreamByConfig, StorageAdapter, Auth } from '../../types';
+import { StreamByConfig, StorageAdapter, Auth, StorageConnection } from '../../types';
 import { deleteProjectImage } from '../../services/file';
 import { getPresignedProjectImageUrl } from '../../services/presign';
 import { createStorageProvider } from '../../providers/storage';
+import { S3Adapter } from '../../adapters/storage/s3';
 import { getModel } from '../../models/manager';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { isProjectMember } from '../../utils/auth';
+import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 
@@ -33,6 +35,36 @@ function getRawFilesCollection() {
   );
   if (!activeId) return null;
   return (getConnection(activeId).client as MongoClient).db().collection('storage_files');
+}
+
+function connFilter(projectId: string, connId: string, extra?: Record<string, any>) {
+  const isBuiltin = connId === 'builtin' || connId.startsWith('builtin-');
+  const connMatch = isBuiltin
+    ? { $or: [{ storageConnectionId: connId }, { storageConnectionId: { $exists: false } }] }
+    : { storageConnectionId: connId };
+  return { projectId, ...connMatch, ...(extra ?? {}) };
+}
+
+async function resolveConnAdapter(
+  connId: string,
+  project: any,
+  globalAdapter: StorageAdapter,
+): Promise<StorageAdapter | { error: string; status: number }> {
+  if (connId === 'builtin' || connId.startsWith('builtin-')) return globalAdapter;
+
+  const conn: StorageConnection | undefined = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
+  if (!conn) return { error: 'Storage connection not found', status: 404 };
+  if (!isEncryptionKeySet()) return { error: 'Encryption key not set', status: 500 };
+
+  const credential = project.credentials?.find((c: any) => c.id === conn.credentialId);
+  if (!credential) return { error: 'Credential not found in project', status: 400 };
+
+  try {
+    const s3Config = JSON.parse(decrypt(credential.encryptedValue));
+    return new S3Adapter(s3Config);
+  } catch (e: any) {
+    return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
+  }
 }
 
 export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
@@ -220,6 +252,166 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list files', details: err.message });
+    }
+  });
+
+  // ─── Per-connection file routes ───────────────────────────────────────────
+
+  router.get('/projects/:projectId/connections/storage/:connId/upload-url', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId } = req.params;
+      const { fileName, contentType, category } = req.query as { fileName?: string; contentType?: string; category?: string };
+
+      if (!category || !VALID_CATEGORIES.includes(category as StorageCategory)) {
+        return res.status(400).json({ message: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
+      }
+      if (!fileName || !contentType) {
+        return res.status(400).json({ message: 'Query params fileName and contentType are required' });
+      }
+      if (!validateContentType(contentType, fileName, category as StorageCategory)) {
+        return res.status(400).json({ message: `File does not match category ${category}` });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
+      if (!connAdapter.getPresignedUploadUrl) return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
+
+      const ext = fileName.includes('.') ? `.${fileName.split('.').pop()!.toLowerCase()}` : '';
+      const fileId = crypto.randomUUID();
+      const storageKey = `${projectId}/${category}/${fileId}${ext}`;
+
+      const collection = getRawFilesCollection();
+      if (collection) {
+        await collection.insertOne({
+          _id: new ObjectId(),
+          fileId,
+          projectId,
+          storageConnectionId: connId,
+          category,
+          storageKey,
+          displayName: fileName,
+          contentType,
+          uploadedBy: auth.userId,
+          createdAt: new Date(),
+        });
+      }
+
+      const url = await connAdapter.getPresignedUploadUrl(storageKey, contentType);
+      res.json({ url, fileId, storageKey, displayName: fileName });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to generate upload URL', details: err.message });
+    }
+  });
+
+  router.get('/projects/:projectId/connections/storage/:connId/files/lasts', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const files = await collection.find(connFilter(projectId, connId)).sort({ createdAt: -1 }).limit(12).toArray();
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter)));
+      res.json({ data });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch latest files', details: err.message });
+    }
+  });
+
+  router.get('/projects/:projectId/connections/storage/:connId/files/:category', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, category } = req.params;
+
+      if (!VALID_CATEGORIES.includes(category as StorageCategory)) {
+        return res.status(400).json({ message: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const files = await collection.find(connFilter(projectId, connId, { category })).sort({ createdAt: -1 }).toArray();
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter)));
+      res.json({ data });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to list files', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:projectId/connections/storage/:connId/files/:fileId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, fileId } = req.params;
+      const { displayName } = req.body;
+
+      if (!displayName || typeof displayName !== 'string') {
+        return res.status(400).json({ message: 'displayName is required' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const result = await collection.findOneAndUpdate(
+        connFilter(projectId, connId, { fileId }),
+        { $set: { displayName } },
+        { returnDocument: 'after' },
+      );
+
+      if (!result) return res.status(404).json({ message: 'File not found' });
+      res.json({ message: 'File renamed successfully', file: result });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to rename file', details: err.message });
+    }
+  });
+
+  router.delete('/projects/:projectId/connections/storage/:connId/files/:fileId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, fileId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const fileDoc = await collection.findOne(connFilter(projectId, connId, { fileId }));
+      if (!fileDoc) return res.status(404).json({ message: 'File not found' });
+
+      if (connAdapter.deleteFile) await connAdapter.deleteFile(fileDoc.storageKey);
+      await collection.deleteOne(connFilter(projectId, connId, { fileId }));
+
+      res.json({ message: 'File deleted successfully' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to delete file', details: err.message });
     }
   });
 

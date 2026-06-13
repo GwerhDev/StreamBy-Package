@@ -8,7 +8,19 @@ export interface S3Config {
   secretAccessKey: string;
 }
 
-export type StorageProviderType = 's3';
+export type StorageProviderType = 's3' | 'gcs' | 'r2' | 'azure';
+export type StorageConnectionType = 's3' | 'gcs' | 'r2' | 'azure';
+
+export interface StorageConnection {
+  id: string;
+  name: string;
+  type: StorageConnectionType;
+  credentialId: string;
+  projectId: string;
+  createdAt: Date;
+  description?: string;
+  isBuiltin?: boolean;
+}
 
 export type StorageProvider = {
   type: StorageProviderType;
@@ -68,6 +80,7 @@ export interface ProjectInfo {
   credentials?: Credential[];
   apiConnections?: ApiConnection[];
   dbConnections?: DbConnection[];
+  storageConnections?: StorageConnection[];
 }
 
 export interface Credential {

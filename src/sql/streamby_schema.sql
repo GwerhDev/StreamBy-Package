@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS __schema__.api_keys (
     expires_at TIMESTAMPTZ
 );
 
+CREATE TABLE IF NOT EXISTS __schema__.project_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "projectId" UUID NOT NULL REFERENCES __schema__.projects(id) ON DELETE CASCADE,
+    "userId" TEXT NOT NULL,
+    role VARCHAR(50) NOT NULL DEFAULT 'viewer',
+    status VARCHAR(50) NOT NULL DEFAULT 'active',
+    archived BOOLEAN DEFAULT FALSE,
+    "archivedBy" TEXT,
+    "archivedAt" TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS __schema__.exports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES __schema__.projects(id) ON DELETE CASCADE,

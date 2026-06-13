@@ -13,12 +13,14 @@ import {
   insertRecord,
   updateRecord,
   deleteRecord,
+  deleteTableOrCollection,
   listTablesInternal,
   queryRecordsInternal,
   createTableOrCollectionInternal,
   insertRecordInternal,
   updateRecordInternal,
   deleteRecordInternal,
+  deleteTableOrCollectionInternal,
 } from '../../services/dbConnection';
 
 const VALID_DB_TYPES: ExternalDbType[] = ['postgresql', 'mongodb'];
@@ -199,6 +201,35 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       return res.status(201).json({ message: `${resolved.conn.dbType === 'postgresql' ? 'Table' : 'Collection'} created successfully` });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to create table/collection', details: err.message });
+    }
+  });
+
+  // ─── Delete table / collection ────────────────────────────────────────────
+  router.delete('/projects/:id/connections/db/:connId/tables/:tableName', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ message: 'Permission denied' });
+      }
+
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      if (isBuiltinDb(req.params.connId, config)) {
+        const internal = resolveBuiltinConnection(req.params.connId, config);
+        if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
+        await deleteTableOrCollectionInternal(internal.client, internal.dbType, req.params.tableName, req.params.id);
+        return res.status(200).json({ message: 'Table/collection deleted' });
+      }
+
+      const resolved = await getDecryptedConnectionString(project, req.params.connId);
+      if ('error' in resolved) return res.status(resolved.status).json({ message: resolved.error });
+
+      await deleteTableOrCollection(resolved.connectionString, resolved.conn.dbType, req.params.tableName);
+      return res.status(200).json({ message: 'Table/collection deleted' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to delete table/collection', details: err.message });
     }
   });
 

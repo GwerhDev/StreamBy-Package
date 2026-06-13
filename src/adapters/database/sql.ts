@@ -114,7 +114,7 @@ export const sqlAdapter = {
   delete: async (connection: Pool, tableName: string, filter: any, schema?: string): Promise<number> => {
     const keys = Object.keys(filter);
     const values = Object.values(filter);
-    const where = keys.map((key, i) => `"${key}" = ${i + 1}`).join(' AND ');
+    const where = keys.map((key, i) => `"${key}" = $${i + 1}`).join(' AND ');
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
     const result = await connection.query(`DELETE FROM ${fullTableName} WHERE ${where}`, values);
     return result.rowCount || 0;

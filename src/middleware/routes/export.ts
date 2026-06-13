@@ -185,8 +185,11 @@ export function exportRouter(config: StreamByConfig): Router {
       let responseData: any;
       responseData = {
         ...data,
+        id: exportId,
         allowedOrigin: exportMetadata.allowedOrigin,
         private: exportMetadata.private,
+        devMode: exportMetadata.devMode,
+        devPorts: exportMetadata.devPorts,
       };
 
       res.json({
@@ -242,7 +245,7 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const { id: projectId, export_id: exportId } = req.params;
-      const { name, description, isPrivate, allowedOrigin, useConnections, useCredentials, nodeSchema } = req.body;
+      const { name, description, isPrivate, allowedOrigin, devMode, devPorts, useConnections, useCredentials, nodeSchema } = req.body;
 
       const project = await Project.findOne({ _id: projectId });
       if (!project || !isProjectMember(project, auth.userId)) {
@@ -259,7 +262,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const resolvedUseConnections = useConnections ?? exportMetadata.useConnections;
       const exportType = resolvedUseConnections ? 'externalApi' : 'json';
 
-      const result = await updateExport(config, projectId, exportId, description ?? exportMetadata.description, resolvedName, project.dbType, exportType, isPrivate ?? exportMetadata.private, allowedOrigin ?? exportMetadata.allowedOrigin, resolvedNodeSchema, resolvedUseConnections, useCredentials ?? exportMetadata.useCredentials);
+      const result = await updateExport(config, projectId, exportId, description ?? exportMetadata.description, resolvedName, project.dbType, exportType, isPrivate ?? exportMetadata.private, allowedOrigin ?? exportMetadata.allowedOrigin, devMode ?? exportMetadata.devMode, devPorts ?? exportMetadata.devPorts, resolvedNodeSchema, resolvedUseConnections, useCredentials ?? exportMetadata.useCredentials);
 
       res.status(200).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -326,16 +329,36 @@ export function exportRouter(config: StreamByConfig): Router {
         }
       }
 
-      // If there's no origin header, deny access unless the effective scope is public.
-      if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
-        return res.status(403).json({ message: 'Origin header required' });
+      // Dev mode: auto-allow localhost requests on configured ports.
+      let devModeAllowed = false;
+      if (exportMetadata.devMode && origin) {
+        const match = origin.match(/^https?:\/\/localhost:(\d+)$/);
+        if (match) {
+          const port = parseInt(match[1]);
+          const allowedPorts: number[] = exportMetadata.devPorts?.length
+            ? exportMetadata.devPorts
+            : [3000, 5173, 8080, 4200];
+          if (allowedPorts.includes(port)) {
+            devModeAllowed = true;
+            res.header('Access-Control-Allow-Origin', origin);
+            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+          }
+        }
       }
 
-      // Check for public access ('*') or if the request's origin is in the effective list.
-      const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
+      if (!devModeAllowed) {
+        // If there's no origin header, deny access unless the effective scope is public.
+        if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
+          return res.status(403).json({ message: 'Origin header required' });
+        }
 
-      if (!isAllowed) {
-        return res.status(403).json({ message: 'Unauthorized' });
+        // Check for public access ('*') or if the request's origin is in the effective list.
+        const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
+
+        if (!isAllowed) {
+          return res.status(403).json({ message: 'Unauthorized' });
+        }
       }
 
       let data: any;

@@ -16,6 +16,7 @@ import { databaseRouter } from './routes/database';
 import { credentialRouter } from './routes/credential';
 import { connectionRouter } from './routes/connection';
 import { dbConnectionRouter } from './routes/dbConnection';
+import { storageConnectionRouter } from './routes/storageConnection';
 import { notificationRouter } from './routes/notification';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
@@ -61,6 +62,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(credentialRouter(config));
   router.use(connectionRouter(config));
   router.use(dbConnectionRouter(config));
+  router.use(storageConnectionRouter(config));
   router.use(notificationRouter(config));
 
   return router;
