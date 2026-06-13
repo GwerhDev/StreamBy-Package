@@ -110,6 +110,55 @@ export async function insertRecord(
   });
 }
 
+export async function updateRecord(
+  connectionString: string,
+  dbType: ExternalDbType,
+  tableName: string,
+  recordId: string,
+  updates: Record<string, unknown>,
+): Promise<any | null> {
+  if (dbType === 'postgresql') {
+    return withPostgres(connectionString, async client => {
+      const keys = Object.keys(updates).filter(k => k !== 'id');
+      if (!keys.length) return null;
+      const sets = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
+      const result = await client.query(
+        `UPDATE "${tableName}" SET ${sets} WHERE id = $${keys.length + 1} RETURNING *`,
+        [...keys.map(k => updates[k]), recordId],
+      );
+      return result.rows[0] ?? null;
+    });
+  }
+  return withMongo(connectionString, async db => {
+    const { ObjectId } = await import('mongodb');
+    const { _id, ...fields } = updates as any;
+    let filter: any;
+    try { filter = { _id: new ObjectId(recordId) }; } catch { filter = { _id: recordId }; }
+    return db.collection(tableName).findOneAndUpdate(filter, { $set: fields }, { returnDocument: 'after' });
+  });
+}
+
+export async function deleteRecord(
+  connectionString: string,
+  dbType: ExternalDbType,
+  tableName: string,
+  recordId: string,
+): Promise<boolean> {
+  if (dbType === 'postgresql') {
+    return withPostgres(connectionString, async client => {
+      const result = await client.query(`DELETE FROM "${tableName}" WHERE id = $1`, [recordId]);
+      return (result.rowCount ?? 0) > 0;
+    });
+  }
+  return withMongo(connectionString, async db => {
+    const { ObjectId } = await import('mongodb');
+    let filter: any;
+    try { filter = { _id: new ObjectId(recordId) }; } catch { filter = { _id: recordId }; }
+    const result = await db.collection(tableName).deleteOne(filter);
+    return result.deletedCount > 0;
+  });
+}
+
 // ─── Internal (pool-based) variants ──────────────────────────────────────────
 // These operate on already-connected Pool / MongoClient from connectionManager.
 
@@ -232,4 +281,54 @@ export async function insertRecordInternal(
   }
   const result = await (client as MongoClient).db().collection(fullName).insertOne(record as any);
   return { ...record, _id: result.insertedId };
+}
+
+export async function updateRecordInternal(
+  client: Pool | MongoClient,
+  dbType: 'sql' | 'nosql',
+  tableName: string,
+  recordId: string,
+  updates: Record<string, unknown>,
+  projectId?: string,
+): Promise<any | null> {
+  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
+  if (dbType === 'sql') {
+    const keys = Object.keys(updates).filter(k => k !== 'id');
+    if (!keys.length) return null;
+    const sets = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
+    const result = await (client as Pool).query(
+      `UPDATE ${quoteSqlTable(fullName)} SET ${sets} WHERE id = $${keys.length + 1} RETURNING *`,
+      [...keys.map(k => updates[k]), recordId],
+    );
+    return result.rows[0] ?? null;
+  }
+  const { ObjectId } = await import('mongodb');
+  const { _id, ...fields } = updates as any;
+  let filter: any;
+  try { filter = { _id: new ObjectId(recordId) }; } catch { filter = { _id: recordId }; }
+  return (client as MongoClient).db().collection(fullName).findOneAndUpdate(
+    filter, { $set: fields }, { returnDocument: 'after' },
+  );
+}
+
+export async function deleteRecordInternal(
+  client: Pool | MongoClient,
+  dbType: 'sql' | 'nosql',
+  tableName: string,
+  recordId: string,
+  projectId?: string,
+): Promise<boolean> {
+  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
+  if (dbType === 'sql') {
+    const result = await (client as Pool).query(
+      `DELETE FROM ${quoteSqlTable(fullName)} WHERE id = $1`,
+      [recordId],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+  const { ObjectId } = await import('mongodb');
+  let filter: any;
+  try { filter = { _id: new ObjectId(recordId) }; } catch { filter = { _id: recordId }; }
+  const result = await (client as MongoClient).db().collection(fullName).deleteOne(filter);
+  return result.deletedCount > 0;
 }

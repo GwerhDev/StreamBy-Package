@@ -11,10 +11,14 @@ import {
   createTableOrCollection,
   queryRecords,
   insertRecord,
+  updateRecord,
+  deleteRecord,
   listTablesInternal,
   queryRecordsInternal,
   createTableOrCollectionInternal,
   insertRecordInternal,
+  updateRecordInternal,
+  deleteRecordInternal,
 } from '../../services/dbConnection';
 
 const VALID_DB_TYPES: ExternalDbType[] = ['postgresql', 'mongodb'];
@@ -257,6 +261,65 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       return res.status(201).json({ data: inserted });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to insert record', details: err.message });
+    }
+  });
+
+  // ─── Update record ────────────────────────────────────────────────────────
+  router.put('/projects/:id/connections/db/:connId/tables/:tableName/:recordId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') return res.status(403).json({ message: 'Permission denied' });
+
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      const updates = req.body;
+      if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+        return res.status(400).json({ message: 'Request body must be a JSON object' });
+      }
+
+      if (isBuiltinDb(req.params.connId, config)) {
+        const internal = resolveBuiltinConnection(req.params.connId, config);
+        if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
+        const updated = await updateRecordInternal(internal.client, internal.dbType, req.params.tableName, req.params.recordId, updates, req.params.id);
+        return res.status(200).json({ data: updated });
+      }
+
+      const resolved = await getDecryptedConnectionString(project, req.params.connId);
+      if ('error' in resolved) return res.status(resolved.status).json({ message: resolved.error });
+
+      const updated = await updateRecord(resolved.connectionString, resolved.conn.dbType, req.params.tableName, req.params.recordId, updates);
+      return res.status(200).json({ data: updated });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to update record', details: err.message });
+    }
+  });
+
+  // ─── Delete record ────────────────────────────────────────────────────────
+  router.delete('/projects/:id/connections/db/:connId/tables/:tableName/:recordId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') return res.status(403).json({ message: 'Permission denied' });
+
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      if (isBuiltinDb(req.params.connId, config)) {
+        const internal = resolveBuiltinConnection(req.params.connId, config);
+        if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
+        await deleteRecordInternal(internal.client, internal.dbType, req.params.tableName, req.params.recordId, req.params.id);
+        return res.status(200).json({ message: 'Record deleted' });
+      }
+
+      const resolved = await getDecryptedConnectionString(project, req.params.connId);
+      if ('error' in resolved) return res.status(resolved.status).json({ message: resolved.error });
+
+      await deleteRecord(resolved.connectionString, resolved.conn.dbType, req.params.tableName, req.params.recordId);
+      return res.status(200).json({ message: 'Record deleted' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to delete record', details: err.message });
     }
   });
 
