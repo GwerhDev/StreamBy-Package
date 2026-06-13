@@ -69,10 +69,14 @@ export async function createExport(
   };
 
   const ProjectModel = isSqlProject ? getModel('projects', 'sql') : getModel('projects', 'nosql');
-  await ProjectModel.update(
+  const updated = await ProjectModel.update(
     { _id: projectId },
     { $push: { exports: exportEntry } } as any,
   );
+
+  if (!updated) {
+    throw new Error(`Failed to save export entry to project ${projectId}. The project may not exist or the database update failed.`);
+  }
 
   return { exportId, message: `${exportType} export created successfully` };
 }

@@ -307,7 +307,9 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      const exportMetadata = project.exports.find((e: any) => e.name === exportName);
+      const exportMetadata = (project.exports as any[] | undefined)?.find(
+        (e: any) => e.name?.toLowerCase().trim() === exportName.toLowerCase().trim(),
+      );
       if (!exportMetadata) {
         return res.status(404).json({ message: 'Export not found in this project' });
       }
@@ -422,7 +424,7 @@ export function exportRouter(config: StreamByConfig): Router {
 
       } // end legacy else block
 
-      if (!data) {
+      if (data === null || data === undefined) {
         return res.status(404).json({ message: 'Export data not found' });
       }
 
