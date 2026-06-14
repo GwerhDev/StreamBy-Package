@@ -47,14 +47,44 @@ export function projectRouter(config: StreamByConfig): Router {
     }
   });
 
+  router.get('/projects/explore', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const allProjects = await Project.find({});
+      const result = allProjects
+        .filter((p: any) => p.public !== false)
+        .map((p: any) => ({
+          id: p._id || p.id,
+          name: p.name,
+          description: p.description || '',
+          image: p.image || '',
+          memberCount: (p.members || []).filter((m: any) => m.status === 'active').length,
+          isMember: (p.members || []).some((m: any) => m.userId?.toString() === auth.userId && m.status === 'active'),
+          hasPendingRequest: (p.members || []).some((m: any) => m.userId?.toString() === auth.userId && m.status === 'pending'),
+        }));
+      res.json({ projects: result });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to explore projects', details: err.message });
+    }
+  });
+
   router.post('/projects/create', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
+
+      if ((req as any).subscription === 'freemium') {
+        return res.status(403).json({ error: 'Freemium users cannot create projects' });
+      }
+
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, description, image, allowedOrigin } = req.body;
+      const { name, description, image, allowedOrigin, public: isPublic = true } = req.body;
+
+      if (isPublic === false && (req as any).subscription === 'freemium') {
+        return res.status(403).json({ error: 'Private projects require a subscriber plan' });
+      }
 
       const mainDb = config.databases?.find(db => db.main) ?? config.databases?.[0];
       if (!mainDb) {
@@ -74,6 +104,7 @@ export function projectRouter(config: StreamByConfig): Router {
         description: description || '',
         image: image || '',
         allowedOrigin: allowedOrigin || [],
+        public: isPublic,
         members: [{ userId: auth.userId, username: user.username, role: "admin", status: "active", archived: false }],
       });
 

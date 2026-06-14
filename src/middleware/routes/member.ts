@@ -251,6 +251,112 @@ export function memberRouter(config: StreamByConfig): Router {
     }
   });
 
+  router.post('/projects/:id/request-join', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const projectId = req.params.id;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+      if (project.public === false) {
+        return res.status(403).json({ message: 'This project is not open for join requests' });
+      }
+
+      const alreadyMember = project.members?.some((m: any) => m.userId?.toString() === auth.userId?.toString());
+      if (alreadyMember) {
+        return res.status(400).json({ message: 'You are already a member or have a pending request' });
+      }
+
+      const User = getModel('users');
+      const user = await User.findOne({ _id: auth.userId });
+      const username = user?.username || auth.username;
+
+      if (project.dbType === 'sql') {
+        const connection = getSqlConnection();
+        if (!connection) {
+          return res.status(503).json({ message: 'SQL connection not available' });
+        }
+        await sqlAdapter.create(connection as any, 'project_members', {
+          projectId,
+          userId: auth.userId,
+          role: 'viewer',
+          archived: false,
+          status: 'pending',
+          invitedBy: auth.userId,
+        }, 'streamby');
+      } else {
+        await Project.update({ _id: projectId }, {
+          $push: { members: { userId: auth.userId, username, role: 'viewer', archived: false, status: 'pending', invitedBy: auth.userId } },
+        });
+      }
+
+      const admins = (project.members || []).filter((m: any) => m.role === 'admin' && m.status === 'active');
+      await Promise.all(admins.map((admin: any) =>
+        createNotification(
+          admin.userId,
+          'join_request',
+          `${username} has requested to join "${project.name}"`,
+          { projectId, userId: auth.userId },
+        )
+      ));
+
+      res.status(201).json({ message: 'Join request sent successfully' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to send join request', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:id/members/:userId/approve', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { id: projectId, userId: targetUserId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) {
+        return res.status(404).json({ message: 'Project not found' });
+      }
+
+      const requestingMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
+      if (!requestingMember || requestingMember.status !== 'active' || requestingMember.role !== 'admin') {
+        return res.status(403).json({ message: 'Only project admins can approve requests' });
+      }
+
+      const targetMember = project.members?.find((m: any) => m.userId?.toString() === targetUserId?.toString());
+      if (!targetMember) {
+        return res.status(404).json({ message: 'Member not found in project' });
+      }
+      if (targetMember.status !== 'pending') {
+        return res.status(400).json({ message: 'No pending request for this user' });
+      }
+
+      if (project.dbType === 'sql') {
+        const connection = getSqlConnection();
+        if (!connection) {
+          return res.status(503).json({ message: 'SQL connection not available' });
+        }
+        await sqlAdapter.update(connection as any, 'project_members', { projectId, userId: targetUserId }, { status: 'active' }, 'streamby');
+      } else {
+        const updatedMembers = project.members.map((m: any) =>
+          m.userId?.toString() === targetUserId ? { ...m, status: 'active' } : m
+        );
+        await Project.update({ _id: projectId }, { members: updatedMembers });
+      }
+
+      await createNotification(
+        targetUserId,
+        'join_approved',
+        `Your request to join "${project.name}" has been approved`,
+        { projectId },
+      );
+
+      res.status(200).json({ message: 'Join request approved' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to approve join request', details: err.message });
+    }
+  });
+
   router.delete('/projects/:id/members/:userId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;

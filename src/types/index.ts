@@ -63,6 +63,7 @@ export interface ProjectInfo {
   dbType?: DatabaseType;
   name: string;
   image?: string;
+  public?: boolean;
   members?: {
     role: 'viewer' | 'editor' | 'admin';
     userId: string;
@@ -155,6 +156,16 @@ export interface Auth {
 }
 
 export type AuthProvider = (req: Request) => Promise<Auth>;
+
+export type UserPlan = 'freemium' | 'subscriber' | 'admin';
+
+export interface UserSubscription {
+  id: string;
+  user_id: string;
+  plan: UserPlan;
+  created_at: Date;
+  updated_at: Date;
+}
 
 export type ExternalDbType = 'postgresql' | 'mongodb';
 

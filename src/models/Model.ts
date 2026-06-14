@@ -192,8 +192,9 @@ export class Model<T extends Document> {
       for (const key in data) {
         if (this.tableName === 'projects' && key === 'members') {
           membersToInsert = (data as any)[key];
-        } else if (this.tableName === 'projects' && key.toLowerCase() === 'dbtype') {
-          dataToInsert["dbType"] = (data as any)[key];
+        } else if (key.toLowerCase() === 'dbtype') {
+          if (this.tableName === 'projects') dataToInsert["dbType"] = (data as any)[key];
+          // else: routing hint only — never a real column
         } else {
           dataToInsert[key] = (data as any)[key];
         }
