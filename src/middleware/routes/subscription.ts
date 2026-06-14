@@ -16,6 +16,7 @@ const resolveSubscription = async (auth: Auth): Promise<UserPlan> => {
 export const ensureSubscription = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const auth = (req as any).auth as Auth;
+    if (!auth) return next();
     const plan = await resolveSubscription(auth);
     (req as any).subscription = plan;
     next();
