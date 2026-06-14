@@ -107,10 +107,11 @@ export async function executePipeline(
       const connectionId = node.data?.connectionId as string | undefined;
       const recordId     = node.data?.recordId     as string | undefined;
 
+      const projectIdentifier = project._id?.toString() ?? project.id;
       const fetchData = async (client: Pool | MongoClient, type: 'sql' | 'nosql') =>
         recordId
-          ? queryRecordByIdInternal(client, type, tableName, recordId, project.id)
-          : queryRecordsInternal(client, type, tableName, 500, 0, project.id);
+          ? queryRecordByIdInternal(client, type, tableName, recordId, projectIdentifier)
+          : queryRecordsInternal(client, type, tableName, 500, 0, projectIdentifier);
 
       if (connectionId) {
         const { client, type } = getConnection(connectionId);

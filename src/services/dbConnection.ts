@@ -161,11 +161,18 @@ export async function deleteRecord(
 
 // ─── Internal (pool-based) variants ──────────────────────────────────────────
 // These operate on already-connected Pool / MongoClient from connectionManager.
+//
+// nosql storage pattern: all user records go into a single 'records' collection
+// with _projectId and _tableName metadata fields. Table membership is tracked in
+// a separate '_tables' collection. SQL keeps the legacy db_{projectId}_{tableName}
+// table-per-collection pattern which is appropriate for relational databases.
 
 function quoteSqlTable(tableName: string): string {
   const parts = tableName.split('.');
   return parts.length === 2 ? `"${parts[0]}"."${parts[1]}"` : `"${tableName}"`;
 }
+
+const RECORD_META_PROJECTION = { _projectId: 0, _tableName: 0 };
 
 export async function listTablesInternal(
   client: Pool | MongoClient,
@@ -188,10 +195,13 @@ export async function listTablesInternal(
       return prefix ? full.slice(prefix.length) : full;
     });
   }
-  const cols = await (client as MongoClient).db().listCollections().toArray();
-  const names = cols.map(c => c.name).sort();
-  if (!prefix) return names;
-  return names.filter(n => n.startsWith(prefix)).map(n => n.slice(prefix.length));
+  const db = (client as MongoClient).db();
+  if (!projectId) {
+    const cols = await db.listCollections().toArray();
+    return cols.map(c => c.name).sort();
+  }
+  const tables = await db.collection('_tables').find({ _projectId: projectId }).toArray();
+  return tables.map((t: any) => t.tableName).sort();
 }
 
 export async function queryRecordsInternal(
@@ -202,15 +212,19 @@ export async function queryRecordsInternal(
   offset = 0,
   projectId?: string,
 ): Promise<any[]> {
-  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
     const result = await (client as Pool).query(
       `SELECT * FROM ${quoteSqlTable(fullName)} LIMIT $1 OFFSET $2`,
       [limit, offset],
     );
     return result.rows;
   }
-  return (client as MongoClient).db().collection(fullName).find().limit(limit).skip(offset).toArray();
+  const db = (client as MongoClient).db();
+  const filter: any = {};
+  if (projectId) filter._projectId = projectId;
+  if (tableName) filter._tableName = tableName;
+  return db.collection('records').find(filter, { projection: RECORD_META_PROJECTION }).limit(limit).skip(offset).toArray();
 }
 
 export async function queryRecordByIdInternal(
@@ -220,8 +234,8 @@ export async function queryRecordByIdInternal(
   recordId: string,
   projectId?: string,
 ): Promise<any | null> {
-  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
     const result = await (client as Pool).query(
       `SELECT * FROM ${quoteSqlTable(fullName)} WHERE id = $1 LIMIT 1`,
       [recordId],
@@ -229,11 +243,15 @@ export async function queryRecordByIdInternal(
     return result.rows[0] ?? null;
   }
   const db = (client as MongoClient).db();
-  let doc = await db.collection(fullName).findOne({ _id: recordId as any });
+  const meta: any = {};
+  if (projectId) meta._projectId = projectId;
+  if (tableName) meta._tableName = tableName;
+  const opts = { projection: RECORD_META_PROJECTION };
+  let doc = await db.collection('records').findOne({ ...meta, _id: recordId as any }, opts);
   if (!doc) {
     try {
       const { ObjectId } = await import('mongodb');
-      doc = await db.collection(fullName).findOne({ _id: new ObjectId(recordId) });
+      doc = await db.collection('records').findOne({ ...meta, _id: new ObjectId(recordId) }, opts);
     } catch { /* invalid ObjectId format — not found */ }
   }
   return doc;
@@ -245,8 +263,8 @@ export async function createTableOrCollectionInternal(
   schema: CreateTableSchema,
   projectId?: string,
 ): Promise<void> {
-  const fullName = projectId ? `db_${projectId}_${schema.tableName}` : schema.tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${schema.tableName}` : schema.tableName;
     const columnDdl = schema.columns.map(col => {
       const nullable = col.nullable === false ? 'NOT NULL' : '';
       const pk = col.primaryKey ? 'PRIMARY KEY' : '';
@@ -257,7 +275,12 @@ export async function createTableOrCollectionInternal(
     );
     return;
   }
-  await (client as MongoClient).db().createCollection(fullName);
+  const db = (client as MongoClient).db();
+  await db.collection('_tables').insertOne({
+    _projectId: projectId ?? null,
+    tableName: schema.tableName,
+    createdAt: new Date(),
+  });
 }
 
 export async function insertRecordInternal(
@@ -267,8 +290,8 @@ export async function insertRecordInternal(
   record: Record<string, unknown>,
   projectId?: string,
 ): Promise<any> {
-  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
     const keys = Object.keys(record);
     const values = Object.values(record);
     const cols = keys.map(k => `"${k}"`).join(', ');
@@ -279,7 +302,9 @@ export async function insertRecordInternal(
     );
     return result.rows[0];
   }
-  const result = await (client as MongoClient).db().collection(fullName).insertOne(record as any);
+  const db = (client as MongoClient).db();
+  const doc = { _projectId: projectId ?? null, _tableName: tableName, ...record };
+  const result = await db.collection('records').insertOne(doc as any);
   return { ...record, _id: result.insertedId };
 }
 
@@ -291,8 +316,8 @@ export async function updateRecordInternal(
   updates: Record<string, unknown>,
   projectId?: string,
 ): Promise<any | null> {
-  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
     const keys = Object.keys(updates).filter(k => k !== 'id');
     if (!keys.length) return null;
     const sets = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
@@ -303,11 +328,16 @@ export async function updateRecordInternal(
     return result.rows[0] ?? null;
   }
   const { ObjectId } = await import('mongodb');
-  const { _id, ...fields } = updates as any;
-  let filter: any;
-  try { filter = { _id: new ObjectId(recordId) }; } catch { filter = { _id: recordId }; }
-  return (client as MongoClient).db().collection(fullName).findOneAndUpdate(
-    filter, { $set: fields }, { returnDocument: 'after' },
+  const { _id, _projectId: _p, _tableName: _t, ...fields } = updates as any;
+  const meta: any = {};
+  if (projectId) meta._projectId = projectId;
+  if (tableName) meta._tableName = tableName;
+  let idFilter: any;
+  try { idFilter = new ObjectId(recordId); } catch { idFilter = recordId; }
+  return (client as MongoClient).db().collection('records').findOneAndUpdate(
+    { ...meta, _id: idFilter },
+    { $set: fields },
+    { returnDocument: 'after', projection: RECORD_META_PROJECTION },
   );
 }
 
@@ -318,8 +348,8 @@ export async function deleteRecordInternal(
   recordId: string,
   projectId?: string,
 ): Promise<boolean> {
-  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
     const result = await (client as Pool).query(
       `DELETE FROM ${quoteSqlTable(fullName)} WHERE id = $1`,
       [recordId],
@@ -327,9 +357,12 @@ export async function deleteRecordInternal(
     return (result.rowCount ?? 0) > 0;
   }
   const { ObjectId } = await import('mongodb');
-  let filter: any;
-  try { filter = { _id: new ObjectId(recordId) }; } catch { filter = { _id: recordId }; }
-  const result = await (client as MongoClient).db().collection(fullName).deleteOne(filter);
+  const meta: any = {};
+  if (projectId) meta._projectId = projectId;
+  if (tableName) meta._tableName = tableName;
+  let idFilter: any;
+  try { idFilter = new ObjectId(recordId); } catch { idFilter = recordId; }
+  const result = await (client as MongoClient).db().collection('records').deleteOne({ ...meta, _id: idFilter });
   return result.deletedCount > 0;
 }
 
@@ -355,10 +388,15 @@ export async function deleteTableOrCollectionInternal(
   tableName: string,
   projectId?: string,
 ): Promise<void> {
-  const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
   if (dbType === 'sql') {
+    const fullName = projectId ? `db_${projectId}_${tableName}` : tableName;
     await (client as Pool).query(`DROP TABLE IF EXISTS ${quoteSqlTable(fullName)}`);
     return;
   }
-  await (client as MongoClient).db().dropCollection(fullName);
+  const db = (client as MongoClient).db();
+  const meta: any = {};
+  if (projectId) meta._projectId = projectId;
+  if (tableName) meta._tableName = tableName;
+  await db.collection('records').deleteMany(meta);
+  await db.collection('_tables').deleteOne({ _projectId: projectId ?? null, tableName });
 }

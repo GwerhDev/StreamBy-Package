@@ -6,6 +6,7 @@ import { createExport, updateExport, deleteExport } from '../../services/export'
 import { executePipeline } from '../../services/pipeline';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
+import { Pool } from 'pg';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 
 const DEFAULT_NODE_SCHEMA = {
@@ -96,12 +97,11 @@ export function exportRouter(config: StreamByConfig): Router {
             type: exportMetadata.type,
           };
         } else if (exportMetadata.type === 'json') {
-          const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
+          const rawData = await db.collection('exports').findOne({ _id: new ObjectId(exportId) });
           data = {
             json: rawData?.json,
             name: rawData?.name,
             method: rawData?.method,
-            collectionName: rawData?.collectionName,
             createdAt: rawData?.createdAt,
             updatedAt: rawData?.updatedAt,
             type: exportMetadata.type,
@@ -109,7 +109,7 @@ export function exportRouter(config: StreamByConfig): Router {
             description: rawData?.description,
           };
         } else if (exportMetadata.type === 'externalApi') {
-          const ProjectModel = getModel('projects', 'nosql');
+          const ProjectModel = getModel('projects');
           const currentProject = await ProjectModel.findOne({ _id: projectId });
 
           if (!currentProject) {
@@ -160,14 +160,13 @@ export function exportRouter(config: StreamByConfig): Router {
           };
 
         } else {
-          const rawData = await db.collection(exportMetadata.collectionName).findOne({ _id: new ObjectId(exportId) });
+          const rawData = await db.collection('exports').findOne({ _id: new ObjectId(exportId) });
           data = {
             json: rawData?.json,
             name: rawData?.name,
             method: rawData?.method,
             createdAt: rawData?.createdAt,
             updatedAt: rawData?.updatedAt,
-            collectionName: rawData?.collectionName,
             type: exportMetadata.type,
             credentialId: exportMetadata.credentialId,
             description: rawData?.description,
@@ -175,7 +174,32 @@ export function exportRouter(config: StreamByConfig): Router {
           };
         }
       } else if (project.dbType === 'sql') {
-        // ... SQL implementation needed
+        const pool = connection.client as Pool;
+        if (exportMetadata.nodeSchema) {
+          data = {
+            name: exportMetadata.name,
+            description: exportMetadata.description,
+            nodeSchema: exportMetadata.nodeSchema,
+            useConnections: exportMetadata.useConnections,
+            useCredentials: exportMetadata.useCredentials,
+            type: exportMetadata.type,
+          };
+        } else {
+          const result = await pool.query(`SELECT * FROM "exports" WHERE id = $1`, [exportId]);
+          const rawData = result.rows[0];
+          if (rawData) {
+            data = {
+              json: rawData.json,
+              name: rawData.name,
+              method: rawData.method,
+              createdAt: rawData.created_at,
+              updatedAt: rawData.updated_at,
+              type: exportMetadata.type,
+              fields: exportMetadata.fields,
+              description: rawData.description,
+            };
+          }
+        }
       }
 
       if (!data) {
@@ -290,7 +314,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Export not found in this project' });
       }
 
-      await deleteExport(config, projectId, exportId, project.dbType, exportMetadata.name);
+      await deleteExport(config, projectId, exportId, project.dbType);
 
       res.status(200).json({ message: 'Export deleted successfully' });
     } catch (err: any) {
@@ -298,7 +322,7 @@ export function exportRouter(config: StreamByConfig): Router {
     }
   });
 
-  router.get('/:projectId/get-export/:exportName', async (req: Request, res: Response) => {
+  router.get('/:projectId/export/:exportName', async (req: Request, res: Response) => {
     try {
       const { projectId, exportName } = req.params;
 
@@ -380,10 +404,9 @@ export function exportRouter(config: StreamByConfig): Router {
 
       if (project.dbType === 'nosql') {
         const db = (connection.client as MongoClient).db();
-        const legacyCollection = exportMetadata.collectionName ?? projectId;
 
         if (exportMetadata.type === 'json') {
-          const rawData = await db.collection(legacyCollection).findOne({ _id: new ObjectId(exportMetadata.id.toString()) });
+          const rawData = await db.collection('exports').findOne({ _id: new ObjectId(exportMetadata.id.toString()) });
           data = rawData ? rawData.json : null;
         } else if (exportMetadata.type === 'externalApi') {
           let headers: Record<string, string> = {};

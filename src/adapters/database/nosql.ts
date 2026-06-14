@@ -4,57 +4,36 @@ import { FieldDefinition, NodeSchema } from '../../types';
 export const ensureCollectionsExist = async (client: MongoClient) => {
   const db = client.db();
 
-  // Ensure 'projects' collection exists and define its schema implicitly
-  // Schema: { _id: ObjectId, name: string, description: string, dbType: string, createdAt: Date, updatedAt: Date, members: [{ userId: string, archived: boolean }] }
-  const projectsCollection = db.collection('projects');
-  await projectsCollection.findOne({}); // Attempt to find one to ensure collection is created if it doesn't exist
+  await db.collection('projects').findOne({});
   console.log('✅ "projects" collection ensured to exist.');
 
-  // Ensure 'exports' collection exists and define its schema implicitly
-  // Schema: { _id: ObjectId, projectId: ObjectId, status: string, filePath: string, createdAt: Date, updatedAt: Date }
-  const exportsCollection = db.collection('exports');
-  await exportsCollection.findOne({}); // Attempt to find one to ensure collection is created if it doesn't exist
+  await db.collection('exports').findOne({});
   console.log('✅ "exports" collection ensured to exist.');
+
+  await db.collection('records').findOne({});
+  console.log('✅ "records" collection ensured to exist.');
+
+  await db.collection('_tables').findOne({});
+  console.log('✅ "_tables" collection ensured to exist.');
 };
 
 export const createNoSQLExportCollection = async (
   connection: MongoClient,
   projectId: string,
   exportName: string,
-  fields: FieldDefinition[]
-): Promise<{ collectionName: string; exportId: string }> => {
-  const db = connection.db();
-  const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const collectionName = `export_${projectId}_${slug}`;
-
-  // Create the collection implicitly by inserting the metadata document
-  const metadataDocument = {
-    __metadata: {
-      fields,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    },
-  };
-
-  await db.collection(collectionName).insertOne(metadataDocument);
-  console.log(`✅ Collection '${collectionName}' created with metadata.`);
-
-  return { collectionName, exportId: collectionName };
-};
-
-export const createNoSQLRawExportCollection = async (
-  connection: MongoClient,
-  projectId: string,
-  exportName: string,
   method: string,
   nodeSchema?: NodeSchema,
-): Promise<{ collectionName: string; exportId: string }> => {
+): Promise<{ exportId: string }> => {
   const db = connection.db();
-  const collectionName = projectId;
-
-  const result = await db.collection(collectionName).insertOne({ nodeSchema, name: exportName, method, createdAt: new Date(), updatedAt: new Date() });
-
-  return { collectionName, exportId: result.insertedId.toHexString() };
+  const result = await db.collection('exports').insertOne({
+    projectId,
+    name: exportName,
+    method,
+    nodeSchema,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  return { exportId: result.insertedId.toHexString() };
 };
 
 export const nosqlAdapter = {

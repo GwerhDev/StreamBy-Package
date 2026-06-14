@@ -2,70 +2,26 @@ import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 import { FieldDefinition } from '../../types';
 
+function serializeForPg(v: unknown): unknown {
+  if (Array.isArray(v) || (v !== null && typeof v === 'object' && !(v instanceof Date))) {
+    return JSON.stringify(v);
+  }
+  return v;
+}
+
 export const createSQLExportTable = async (
   connection: Pool,
   projectId: string,
   exportName: string,
-  fields: FieldDefinition[]
-): Promise<{ collectionName: string; exportId: string }> => {
-  const slug = exportName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const tableName = `export_${projectId}_${slug}`;
-
-  const columns = fields.map(field => `"${field.name}" ${field.type}`).join(',');
-
-  const createTableQuery = `
-    CREATE TABLE IF NOT EXISTS "${tableName}" (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      "projectId" UUID NOT NULL,
-      __metadata JSONB NOT NULL,
-      ${columns ? `, ${columns}` : ''}
-    );
-  `;
-
-  await connection.query(createTableQuery);
-  console.log(`✅ Table '${tableName}' created with metadata.`);
-
-  const metadata = {
-    fields,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-
-  // Insert metadata as the first row, or a dedicated metadata row
-  // For simplicity, we'll just create the table with the metadata column.
-  // Actual metadata insertion for validation would happen on data inserts.
-
-  return { collectionName: tableName, exportId: tableName };
-};
-
-export const createSQLRawExportTable = async (
-  connection: Pool,
-  projectId: string,
-  exportName: string,
   nodeSchema?: any
-): Promise<{ collectionName: string; exportId: string }> => {
-  const tableName = projectId;
+): Promise<{ exportId: string }> => {
   const exportId = randomUUID();
-
-  const createTableQuery = `
-    CREATE TABLE IF NOT EXISTS "${tableName}" (
-      id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-      node_schema JSONB,
-      name TEXT,
-      method TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `;
-
-  await connection.query(createTableQuery);
   await connection.query(
-    `INSERT INTO "${tableName}" (id, node_schema, name, method) VALUES ($1, $2, $3, $4)`,
-    [exportId, nodeSchema ? JSON.stringify(nodeSchema) : null, exportName, 'GET']
+    `INSERT INTO "exports" (id, "projectId", node_schema, name, method, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'GET', NOW(), NOW())`,
+    [exportId, projectId, nodeSchema ? JSON.stringify(nodeSchema) : null, exportName],
   );
-  console.log(`✅ Raw table '${tableName}' created.`);
-
-  return { collectionName: tableName, exportId };
+  return { exportId };
 };
 
 export const sqlAdapter = {
@@ -93,7 +49,7 @@ export const sqlAdapter = {
 
   create: async (connection: Pool, tableName: string, data: any, schema?: string): Promise<any> => {
     const keys = Object.keys(data as any).map(key => `"${key}"`).join(', ');
-    const values = Object.values(data as any);
+    const values = Object.values(data as any).map(serializeForPg);
     const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;
     const result = await connection.query(`INSERT INTO ${fullTableName} (${keys}) VALUES (${placeholders}) RETURNING *`, values);
@@ -103,7 +59,7 @@ export const sqlAdapter = {
   update: async (connection: Pool, tableName: string, filter: any, data: any, schema?: string): Promise<any | null> => {
     const dataKeys = Object.keys(data);
     const filterKeys = Object.keys(filter);
-    const values = [...Object.values(data), ...Object.values(filter)];
+    const values = [...Object.values(data).map(serializeForPg), ...Object.values(filter)];
     const setClause = dataKeys.map((key, i) => `"${key}" = $${i + 1}`).join(', ');
     const whereClause = filterKeys.map((key, i) => `"${key}" = $${dataKeys.length + i + 1}`).join(' AND ');
     const fullTableName = schema ? `"${schema}"."${tableName}"` : `"${tableName}"`;

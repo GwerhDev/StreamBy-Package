@@ -142,6 +142,8 @@ export class Model<T extends Document> {
               archived: member.archived,
             }));
           }
+          // Track which connection found this record so update() routes correctly
+          try { Object.defineProperty(transformedResult, '__foundByConnectionId', { value: connectionId, enumerable: false, writable: true }); } catch {}
           return transformedResult as T;
         }
       } else if (dbType === 'nosql') {
@@ -155,7 +157,10 @@ export class Model<T extends Document> {
           }
         }
         const result = await nosqlAdapter.findOne(connection as MongoClient, this.tableName, processedFilter);
-        if (result) return result as T;
+        if (result) {
+          try { Object.defineProperty(result, '__foundByConnectionId', { value: connectionId, enumerable: false, writable: true }); } catch {}
+          return result as T;
+        }
       }
     }
     return null;
@@ -247,16 +252,19 @@ export class Model<T extends Document> {
       return null; // Project not found
     }
 
-    const targetDbType = (existingProject as any).dbType; // Get the actual dbType of the project
-
-    // Find the connection that matches the targetDbType (only among active connections)
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
-    const clientEntry = activeConnectionIds
-      .map(id => getConnection(id))
-      .find(entry => entry.type === targetDbType);
+
+    // Use the connection where findOne actually found the record, not project.dbType.
+    // project.dbType is the DATA db type (where the project's collections live), not the
+    // STORAGE db type (where the project document itself lives). Using dbType here would
+    // route SQL-stored projects with dbType:'nosql' to MongoDB, causing update failures.
+    const storageConnectionId = (existingProject as any).__foundByConnectionId;
+    const clientEntry = (storageConnectionId && activeConnectionIds.includes(storageConnectionId))
+      ? getConnection(storageConnectionId)
+      : activeConnectionIds.map(id => getConnection(id)).find(entry => entry.type === (existingProject as any).dbType);
 
     if (!clientEntry) {
-      throw new Error(`No active connection found for database type: ${targetDbType}`);
+      throw new Error(`No active connection found for database type: ${(existingProject as any).dbType}`);
     }
 
     const connection = clientEntry.client;

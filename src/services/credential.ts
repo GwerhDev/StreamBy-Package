@@ -12,7 +12,7 @@ export async function addCredential(
     throw new Error('Encryption key is not set. Cannot add credentials.');
   }
 
-  const ProjectModel = getModel('projects', 'nosql');
+  const ProjectModel = getModel('projects');
   const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
 
   if (!project) {
@@ -48,7 +48,7 @@ export async function updateCredential(
     throw new Error('Encryption key is not set. Cannot update credentials.');
   }
 
-  const ProjectModel = getModel('projects', 'nosql');
+  const ProjectModel = getModel('projects');
   const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
 
   if (!project) {
@@ -91,7 +91,7 @@ export async function deleteCredential(
   projectId: string,
   credentialId: string
 ): Promise<ProjectInfo> {
-  const ProjectModel = getModel('projects', 'nosql');
+  const ProjectModel = getModel('projects');
   const project = await ProjectModel.findOne({ _id: projectId }) as ProjectInfo;
 
   if (!project) {
