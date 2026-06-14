@@ -338,56 +338,49 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Export not found in this project' });
       }
 
-      // Authenticated project members bypass origin checks (e.g. dev environments).
-      const auth = await config.authProvider(req).catch(() => null);
-      const isMember = auth?.userId && isProjectMember(project, auth.userId);
+      const origin = req.headers.origin;
+      let effectiveAllowedOrigins = exportMetadata.allowedOrigin;
+      const projectOrigins = project.allowedOrigin;
 
-      if (!isMember) {
-        const origin = req.headers.origin;
-        let effectiveAllowedOrigins = exportMetadata.allowedOrigin;
-        const projectOrigins = project.allowedOrigin;
-
-        // If export's allowedOrigin is empty, ['*'], or not set, it inherits from the project.
-        if (!effectiveAllowedOrigins || effectiveAllowedOrigins.length === 0 || (effectiveAllowedOrigins.length === 1 && effectiveAllowedOrigins[0] === '*')) {
-          effectiveAllowedOrigins = projectOrigins;
-        } else {
-          // If the export has its own list, ensure it's a subset of the project's list (if project is not public).
-          if (projectOrigins && !projectOrigins.includes('*')) {
-            const isSubset = effectiveAllowedOrigins.every((o: string) => projectOrigins.includes(o));
-            if (!isSubset) {
-              return res.status(403).json({ message: 'Unauthorized: Export origins are not allowed by the parent project.' });
-            }
+      // If export's allowedOrigin is empty, ['*'], or not set, it inherits from the project.
+      if (!effectiveAllowedOrigins || effectiveAllowedOrigins.length === 0 || (effectiveAllowedOrigins.length === 1 && effectiveAllowedOrigins[0] === '*')) {
+        effectiveAllowedOrigins = projectOrigins;
+      } else {
+        if (projectOrigins && !projectOrigins.includes('*')) {
+          const isSubset = effectiveAllowedOrigins.every((o: string) => projectOrigins.includes(o));
+          if (!isSubset) {
+            return res.status(403).json({ message: 'Unauthorized: Export origins are not allowed by the parent project.' });
           }
         }
+      }
 
-        // Dev mode: auto-allow localhost requests on configured ports.
-        let devModeAllowed = false;
-        if (exportMetadata.devMode && origin) {
-          const match = origin.match(/^https?:\/\/localhost:(\d+)$/);
-          if (match) {
-            const port = parseInt(match[1]);
-            const allowedPorts: number[] = exportMetadata.devPorts?.length
-              ? exportMetadata.devPorts
-              : [3000, 5173, 8080, 4200];
-            if (allowedPorts.includes(port)) {
-              devModeAllowed = true;
-              res.header('Access-Control-Allow-Origin', origin);
-              res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-              res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-            }
+      // Dev mode: auto-allow localhost requests on configured ports.
+      let devModeAllowed = false;
+      if (exportMetadata.devMode && origin) {
+        const match = origin.match(/^https?:\/\/localhost:(\d+)$/);
+        if (match) {
+          const port = parseInt(match[1]);
+          const allowedPorts: number[] = exportMetadata.devPorts?.length
+            ? exportMetadata.devPorts
+            : [3000, 5173, 8080, 4200];
+          if (allowedPorts.includes(port)) {
+            devModeAllowed = true;
+            res.header('Access-Control-Allow-Origin', origin);
+            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+            res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
           }
         }
+      }
 
-        if (!devModeAllowed) {
-          if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
-            return res.status(403).json({ message: 'Origin header required' });
-          }
+      if (!devModeAllowed) {
+        if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
+          return res.status(403).json({ message: 'Origin header required' });
+        }
 
-          const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
+        const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
 
-          if (!isAllowed) {
-            return res.status(403).json({ message: 'Unauthorized' });
-          }
+        if (!isAllowed) {
+          return res.status(403).json({ message: 'Unauthorized' });
         }
       }
 
