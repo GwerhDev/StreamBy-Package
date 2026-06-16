@@ -157,6 +157,43 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     }
   });
 
+  router.get('/projects/:projectId/storage/files/:fileId/replace-url', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, fileId } = req.params;
+      const { contentType, fileName } = req.query as { contentType?: string; fileName?: string };
+
+      if (!contentType || !fileName) {
+        return res.status(400).json({ message: 'Query params contentType and fileName are required' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const fileDoc = await collection.findOne({ fileId, projectId });
+      if (!fileDoc) return res.status(404).json({ message: 'File not found' });
+
+      if (!validateContentType(contentType, fileName, fileDoc.category as StorageCategory)) {
+        return res.status(400).json({ message: `File does not match category ${fileDoc.category}` });
+      }
+
+      if (!adapter.getPresignedUploadUrl) {
+        return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
+      }
+
+      const url = await adapter.getPresignedUploadUrl(fileDoc.storageKey, contentType);
+      await collection.updateOne({ fileId, projectId }, { $set: { contentType, updatedAt: new Date() } });
+
+      res.json({ url, storageKey: fileDoc.storageKey, fileId });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
+    }
+  });
+
   router.patch('/projects/:projectId/storage/files/:fileId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
@@ -355,6 +392,48 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list files', details: err.message });
+    }
+  });
+
+  router.get('/projects/:projectId/connections/storage/:connId/files/:fileId/replace-url', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, fileId } = req.params;
+      const { contentType, fileName } = req.query as { contentType?: string; fileName?: string };
+
+      if (!contentType || !fileName) {
+        return res.status(400).json({ message: 'Query params contentType and fileName are required' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const fileDoc = await collection.findOne(connFilter(projectId, connId, { fileId }));
+      if (!fileDoc) return res.status(404).json({ message: 'File not found' });
+
+      if (!validateContentType(contentType, fileName, fileDoc.category as StorageCategory)) {
+        return res.status(400).json({ message: `File does not match category ${fileDoc.category}` });
+      }
+
+      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
+      if (!connAdapter.getPresignedUploadUrl) {
+        return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
+      }
+
+      const url = await connAdapter.getPresignedUploadUrl(fileDoc.storageKey, contentType);
+      await collection.updateOne(
+        connFilter(projectId, connId, { fileId }),
+        { $set: { contentType, updatedAt: new Date() } },
+      );
+
+      res.json({ url, storageKey: fileDoc.storageKey, fileId });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }
   });
 
