@@ -664,6 +664,46 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     }
   });
 
+  router.patch('/projects/:projectId/connections/storage/:connId/folders/:folderId/move', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, folderId } = req.params;
+      const { newParentId } = req.body as { newParentId?: string | null };
+
+      if (newParentId === folderId) {
+        return res.status(400).json({ message: 'A folder cannot be its own parent' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFoldersCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const result = await collection.findOneAndUpdate(
+        connFilter(projectId, connId, { folderId }),
+        { $set: { parentId: newParentId ?? null, updatedAt: new Date() } },
+        { returnDocument: 'after' },
+      );
+
+      if (!result) return res.status(404).json({ message: 'Folder not found' });
+
+      res.json({
+        message: 'Folder moved successfully',
+        folder: {
+          id: result.folderId,
+          name: result.name,
+          parentId: result.parentId ?? null,
+          projectId: result.projectId,
+          createdAt: result.createdAt,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to move folder', details: err.message });
+    }
+  });
+
   router.delete('/projects/:projectId/connections/storage/:connId/folders/:folderId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
