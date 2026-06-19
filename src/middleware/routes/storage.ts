@@ -37,6 +37,16 @@ function getRawFilesCollection() {
   return (getConnection(activeId).client as MongoClient).db().collection('storage_files');
 }
 
+function getRawFoldersCollection() {
+  const model = getModel('storage_files', 'nosql') as any;
+  const connectionIds: string[] = model.getConnectionIds();
+  const activeId = connectionIds.find((id: string) =>
+    getConnectedIds().includes(id) && getConnection(id).type === 'nosql',
+  );
+  if (!activeId) return null;
+  return (getConnection(activeId).client as MongoClient).db().collection('storage_folders');
+}
+
 function connFilter(projectId: string, connId: string, extra?: Record<string, any>) {
   const isBuiltin = connId === 'builtin' || connId.startsWith('builtin-');
   const connMatch = isBuiltin
@@ -494,6 +504,236 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     }
   });
 
+  // ─── Folder routes (per-connection) ─────────────────────────────────────
+
+  router.get('/projects/:projectId/connections/storage/:connId/folders', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId } = req.params;
+      const { parentId } = req.query as { parentId?: string };
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFoldersCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const parentFilter = (parentId === undefined || parentId === 'null')
+        ? { parentId: null }
+        : { parentId };
+
+      const folders = await collection
+        .find(connFilter(projectId, connId, parentFilter))
+        .sort({ name: 1 })
+        .toArray();
+
+      res.json({
+        data: folders.map(f => ({
+          id: f.folderId,
+          name: f.name,
+          parentId: f.parentId ?? null,
+          projectId: f.projectId,
+          storageConnectionId: f.storageConnectionId,
+          createdBy: f.createdBy,
+          createdAt: f.createdAt,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to list folders', details: err.message });
+    }
+  });
+
+  router.get('/projects/:projectId/connections/storage/:connId/folders/:folderId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, folderId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFoldersCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const f = await collection.findOne(connFilter(projectId, connId, { folderId }));
+      if (!f) return res.status(404).json({ message: 'Folder not found' });
+
+      res.json({
+        folder: {
+          id: f.folderId,
+          name: f.name,
+          parentId: f.parentId ?? null,
+          projectId: f.projectId,
+          storageConnectionId: f.storageConnectionId,
+          createdBy: f.createdBy,
+          createdAt: f.createdAt,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to get folder', details: err.message });
+    }
+  });
+
+  router.post('/projects/:projectId/connections/storage/:connId/folders', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId } = req.params;
+      const { name, parentId } = req.body;
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ message: 'Folder name is required' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFoldersCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const folderId = crypto.randomUUID();
+      const isBuiltin = connId === 'builtin' || connId.startsWith('builtin-');
+      const folderDoc: Record<string, any> = {
+        _id: new ObjectId(),
+        folderId,
+        projectId,
+        name: name.trim(),
+        parentId: parentId ?? null,
+        createdBy: auth.userId,
+        createdAt: new Date(),
+      };
+      if (!isBuiltin) folderDoc.storageConnectionId = connId;
+
+      await collection.insertOne(folderDoc);
+
+      res.status(201).json({
+        message: 'Folder created successfully',
+        folder: {
+          id: folderId,
+          name: folderDoc.name,
+          parentId: folderDoc.parentId,
+          projectId,
+          storageConnectionId: isBuiltin ? undefined : connId,
+          createdBy: auth.userId,
+          createdAt: folderDoc.createdAt,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to create folder', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:projectId/connections/storage/:connId/folders/:folderId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, folderId } = req.params;
+      const { name } = req.body;
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ message: 'Folder name is required' });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFoldersCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+
+      const result = await collection.findOneAndUpdate(
+        connFilter(projectId, connId, { folderId }),
+        { $set: { name: name.trim(), updatedAt: new Date() } },
+        { returnDocument: 'after' },
+      );
+
+      if (!result) return res.status(404).json({ message: 'Folder not found' });
+
+      res.json({
+        message: 'Folder renamed successfully',
+        folder: {
+          id: result.folderId,
+          name: result.name,
+          parentId: result.parentId ?? null,
+          projectId: result.projectId,
+          createdAt: result.createdAt,
+        },
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to rename folder', details: err.message });
+    }
+  });
+
+  router.delete('/projects/:projectId/connections/storage/:connId/folders/:folderId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, folderId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const foldersCollection = getRawFoldersCollection();
+      if (!foldersCollection) return res.status(500).json({ message: 'Database not available' });
+
+      const folderDoc = await foldersCollection.findOne(connFilter(projectId, connId, { folderId }));
+      if (!folderDoc) return res.status(404).json({ message: 'Folder not found' });
+
+      const filesCollection = getRawFilesCollection();
+      if (filesCollection) {
+        await filesCollection.updateMany(
+          connFilter(projectId, connId, { folderId }),
+          { $set: { folderId: folderDoc.parentId ?? null } },
+        );
+      }
+
+      await foldersCollection.updateMany(
+        connFilter(projectId, connId, { parentId: folderId }),
+        { $set: { parentId: folderDoc.parentId ?? null } },
+      );
+
+      await foldersCollection.deleteOne(connFilter(projectId, connId, { folderId }));
+
+      res.json({ message: 'Folder deleted successfully' });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to delete folder', details: err.message });
+    }
+  });
+
+  router.patch('/projects/:projectId/connections/storage/:connId/files/:fileId/move', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, connId, fileId } = req.params;
+      const { folderId } = req.body;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      if (folderId != null) {
+        const foldersCollection = getRawFoldersCollection();
+        if (foldersCollection) {
+          const folderDoc = await foldersCollection.findOne(connFilter(projectId, connId, { folderId }));
+          if (!folderDoc) return res.status(404).json({ message: 'Folder not found' });
+        }
+      }
+
+      const filesCollection = getRawFilesCollection();
+      if (!filesCollection) return res.status(500).json({ message: 'Database not available' });
+
+      const result = await filesCollection.findOneAndUpdate(
+        connFilter(projectId, connId, { fileId }),
+        { $set: { folderId: folderId ?? null } },
+        { returnDocument: 'after' },
+      );
+
+      if (!result) return res.status(404).json({ message: 'File not found' });
+      res.json({ message: 'File moved successfully', file: result });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to move file', details: err.message });
+    }
+  });
+
   router.get('/storages', async (_req: Request, res: Response) => {
     try {
       const STORAGE_DISPLAY: Record<string, { value: string; name: string }> = {
@@ -530,6 +770,7 @@ async function resolveFileUrl(file: any, adapter: StorageAdapter): Promise<any> 
     contentType: file.contentType,
     uploadedBy: file.uploadedBy,
     createdAt: file.createdAt,
+    folderId: file.folderId ?? null,
     url,
   };
 }
