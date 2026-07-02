@@ -255,6 +255,49 @@ export interface AssetDependencyGraphRecord {
   edges: { from: string; to: string; relationship: string }[];
   resolvedAt: Date;
 }
+
+export type ReviewStatus = 'open' | 'approved' | 'rejected' | 'expired';
+export type ReviewDecision = 'approve' | 'reject';
+
+export interface ReviewApproval {
+  userId: string;
+  username: string;
+  decision: ReviewDecision;
+  comment?: string;
+  at: Date;
+}
+
+export interface ReviewSessionRecord {
+  id: string;
+  projectId: string;
+  assetId: string;
+  assetVersionId: string;
+  status: ReviewStatus;
+  requiredApprovers: number;
+  approvals: ReviewApproval[];
+  deadline?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type AnnotationType = 'timecoded' | 'spatial' | 'region';
+
+export interface AnnotationRecord {
+  id: string;
+  assetId: string;
+  assetVersionId: string;
+  projectId: string;
+  authorId: string;
+  authorUsername: string;
+  type: AnnotationType;
+  timecode?: string;
+  position3d?: { x: number; y: number; z: number };
+  regionRect?: { x: number; y: number; width: number; height: number };
+  text: string;
+  resolved: boolean;
+  resolvedBy?: string;
+  createdAt: Date;
+}
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface JobRecord {

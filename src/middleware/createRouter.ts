@@ -21,6 +21,7 @@ import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
 import { mediaRouter } from './routes/media';
 import { renderFarmRouter } from './routes/renderFarm';
+import { reviewRouter } from './routes/review';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -45,6 +46,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       registerModel('media_metadata', nosqlDbIds, 'media_metadata');
       registerModel('asset_versions', nosqlDbIds, 'asset_versions');
       registerModel('asset_dependency_graphs', nosqlDbIds, 'asset_dependency_graphs');
+      registerModel('review_sessions', nosqlDbIds, 'review_sessions');
+      registerModel('annotations', nosqlDbIds, 'annotations');
     }
 
     const mainDb = config.databases.find(db => db.main);
@@ -75,6 +78,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(subscriptionRouter(config));
   router.use(mediaRouter(config));
   router.use(renderFarmRouter(config));
+  router.use(reviewRouter(config));
 
   return router;
 }
