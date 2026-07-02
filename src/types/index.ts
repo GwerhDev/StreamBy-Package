@@ -273,7 +273,19 @@ export interface QcReportRecord {
   generatedAt: Date;
 }
 
-export type JobType = 'ingest' | 'transcode' | 'caption' | 'thumbnail' | 'render' | 'format-convert' | 'lod' | 'distribute' | 'qc';
+export type JobType =
+  | 'ingest' | 'transcode' | 'caption' | 'thumbnail'
+  | 'render' | 'format-convert' | 'lod'
+  | 'distribute' | 'qc'
+  | 'transcription' | 'upscale' | 'generate-asset';
+
+export type AiProvider = 'openai' | 'deepgram' | 'assemblyai' | 'stabilityai' | 'meshy' | 'elevenlabs' | 'custom';
+
+export interface PipelineSuggestion {
+  rationale: string;
+  nodesToAdd: { type: string; label: string; position: { x: number; y: number } }[];
+  edgesToAdd: { source: string; sourceHandle: string; target: string; targetHandle: string }[];
+}
 
 export type RenderFarmProvider = 'flamenco' | 'deadline' | 'rebusfarm' | 'sheepit' | 'custom';
 

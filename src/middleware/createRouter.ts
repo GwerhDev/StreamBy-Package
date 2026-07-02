@@ -23,6 +23,7 @@ import { mediaRouter } from './routes/media';
 import { renderFarmRouter } from './routes/renderFarm';
 import { reviewRouter } from './routes/review';
 import { distributionRouter } from './routes/distribution';
+import { aiRouter } from './routes/ai';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -50,6 +51,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       registerModel('review_sessions', nosqlDbIds, 'review_sessions');
       registerModel('annotations', nosqlDbIds, 'annotations');
       registerModel('qc_reports', nosqlDbIds, 'qc_reports');
+      registerModel('generative_jobs', nosqlDbIds, 'generative_jobs');
     }
 
     const mainDb = config.databases.find(db => db.main);
@@ -82,6 +84,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(renderFarmRouter(config));
   router.use(reviewRouter(config));
   router.use(distributionRouter(config));
+  router.use(aiRouter(config));
 
   return router;
 }

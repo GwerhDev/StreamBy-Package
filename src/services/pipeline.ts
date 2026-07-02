@@ -12,6 +12,7 @@ import {
   runCaptionJob,
 } from './mediaProcessor';
 import { runRenderJob, runFormatConvertJob, runLodJob } from './vfxProcessor';
+import { runTranscriptionJob, runUpscaleJob, runGenerateAssetJob, buildPipelineSuggestion } from './aiProcessor';
 import { createStorageProvider } from '../providers/storage';
 
 interface FilterCondition { field: string; op: string; value: string; }
@@ -247,15 +248,56 @@ export async function executePipeline(
       payload = { ...payload, jobId: job.jobId, jobType: 'lod' };
 
     } else if (processNode.type === 'qcCheckNode' && fileId) {
-      // QC runs synchronously within the pipeline — results surface in the payload
       const checks = (nodeData.checks as string[] | undefined) ?? [];
       const checkResults = checks.map((name: string) => ({
-        name,
-        passed: true,
-        value: 'ok',
-        threshold: 'ok',
+        name, passed: true, value: 'ok', threshold: 'ok',
       }));
       payload = { ...payload, qcReport: { checks: checkResults, overallPassed: true } };
+
+    } else if (processNode.type === 'transcriptionNode' && fileId) {
+      const job = createJob('transcription', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runTranscriptionJob(job.jobId, fileId, projectId, {
+          model:          nodeData.model,
+          sourceLanguage: nodeData.sourceLanguage,
+          outputFormats:  nodeData.outputFormats,
+          provider:       nodeData.provider,
+          credentialId:   nodeData.credentialId,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'transcription' };
+
+    } else if (processNode.type === 'upscaleNode' && fileId) {
+      const job = createJob('upscale', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runUpscaleJob(job.jobId, fileId, projectId, {
+          scale:        nodeData.scale,
+          model:        nodeData.model,
+          mode:         nodeData.mode,
+          credentialId: nodeData.credentialId,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'upscale' };
+
+    } else if (processNode.type === 'proceduralAssetNode') {
+      const job = createJob('generate-asset', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runGenerateAssetJob(job.jobId, projectId, {
+          assetType:    nodeData.assetType,
+          provider:     nodeData.provider,
+          prompt:       nodeData.prompt ?? '',
+          seed:         nodeData.seed,
+          credentialId: nodeData.credentialId,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'generate-asset' };
+
+    } else if (processNode.type === 'pipelineSuggestNode') {
+      const suggestion = await buildPipelineSuggestion(
+        { nodes, edges },
+        Object.keys(nodeSchema),
+      );
+      payload = { ...payload, pipelineSuggestion: suggestion };
     }
 
     processNode = getTarget(nodes, edges, processNode.id, 'out-process');
