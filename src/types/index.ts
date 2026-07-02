@@ -217,3 +217,50 @@ export interface Export {
   useCredentials?: boolean;
   storageDbId?: string;
 }
+
+export type JobType = 'ingest' | 'transcode' | 'caption' | 'thumbnail';
+export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface JobRecord {
+  jobId: string;
+  jobType: JobType;
+  userId: string;
+  projectId: string;
+  assetId?: string;
+  status: JobStatus;
+  stage: string;
+  progress: number;
+  payload: Record<string, any>;
+  error?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AssetMetadataRecord {
+  assetId: string;
+  projectId: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+  frameRate?: number;
+  colorSpace?: string;
+  codec?: string;
+  bitrate?: number;
+  channels?: number;
+  sampleRate?: number;
+  customTags: Record<string, string>;
+  extractedAt: Date;
+}
+
+export interface AssetVersionRecord {
+  versionId: string;
+  assetId: string;
+  projectId: string;
+  version: number;
+  label?: string;
+  storageKey: string;
+  size: number;
+  createdBy: string;
+  changeNote?: string;
+  createdAt: Date;
+}

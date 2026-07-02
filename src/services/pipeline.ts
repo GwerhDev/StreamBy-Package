@@ -4,6 +4,14 @@ import { NodeSchema, StreamByConfig } from '../types';
 import { getConnection } from '../adapters/database/connectionManager';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
 import { queryRecordsInternal, queryRecordByIdInternal } from './dbConnection';
+import { createJob } from './jobQueue';
+import {
+  runIngestJob,
+  runTranscodeJob,
+  runThumbnailJob,
+  runCaptionJob,
+} from './mediaProcessor';
+import { createStorageProvider } from '../providers/storage';
 
 interface FilterCondition { field: string; op: string; value: string; }
 interface FilterNodeConfig {
@@ -149,9 +157,57 @@ export async function executePipeline(
   let payload: any = dataResults.length === 1 ? dataResults[0] : dataResults;
 
   // 2. Process layer — chain from streamby out-top → processNode in-process → out-process → ...
+  const adapter = createStorageProvider(config.storageProviders);
+  const projectId = project._id?.toString() ?? project.id;
+  // userId is not available in pipeline context; use a sentinel for job attribution
+  const systemUserId = 'pipeline';
+
   let processNode = getTarget(nodes, edges, 'streamby', 'out-top');
   while (processNode) {
-    // transform/auth/custom logic per processNode.data.label — pass-through until defined
+    const nodeData = processNode.data ?? {};
+    const fileId = nodeData.fileId as string | undefined;
+
+    if (processNode.type === 'transcodeNode' && fileId) {
+      const job = createJob('transcode', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runTranscodeJob(job.jobId, fileId, projectId, {
+          codec:        nodeData.codec,
+          resolution:   nodeData.resolution,
+          outputFormat: nodeData.outputFormat,
+          bitrate:      nodeData.bitrate,
+          audioCodec:   nodeData.audioCodec,
+        }, adapter),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'transcode' };
+
+    } else if (processNode.type === 'captionNode' && fileId) {
+      const job = createJob('caption', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runCaptionJob(job.jobId, fileId, projectId, {
+          sourceLanguage: nodeData.sourceLanguage,
+          outputFormat:   nodeData.outputFormat,
+          provider:       nodeData.provider,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'caption' };
+
+    } else if (processNode.type === 'thumbnailNode' && fileId) {
+      const job = createJob('thumbnail', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runThumbnailJob(job.jobId, fileId, projectId, {
+          timecode:   nodeData.timecode,
+          resolution: nodeData.resolution,
+          strategy:   nodeData.strategy,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'thumbnail' };
+
+    } else if (processNode.type === 'ingestNode' && fileId) {
+      const job = createJob('ingest', systemUserId, projectId, nodeData);
+      setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
+      payload = { ...payload, jobId: job.jobId, jobType: 'ingest' };
+    }
+
     processNode = getTarget(nodes, edges, processNode.id, 'out-process');
   }
 

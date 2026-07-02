@@ -19,6 +19,7 @@ import { dbConnectionRouter } from './routes/dbConnection';
 import { storageConnectionRouter } from './routes/storageConnection';
 import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
+import { mediaRouter } from './routes/media';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -40,6 +41,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     if (nosqlDbIds.length > 0) {
       registerModel('notifications', nosqlDbIds, 'notifications', streambySchema);
       registerModel('storage_files', nosqlDbIds, 'storage_files');
+      registerModel('media_metadata', nosqlDbIds, 'media_metadata');
+      registerModel('asset_versions', nosqlDbIds, 'asset_versions');
     }
 
     const mainDb = config.databases.find(db => db.main);
@@ -68,6 +71,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(storageConnectionRouter(config));
   router.use(notificationRouter(config));
   router.use(subscriptionRouter(config));
+  router.use(mediaRouter(config));
 
   return router;
 }
