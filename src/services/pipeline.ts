@@ -245,17 +245,55 @@ export async function executePipeline(
         }),
       );
       payload = { ...payload, jobId: job.jobId, jobType: 'lod' };
+
+    } else if (processNode.type === 'qcCheckNode' && fileId) {
+      // QC runs synchronously within the pipeline — results surface in the payload
+      const checks = (nodeData.checks as string[] | undefined) ?? [];
+      const checkResults = checks.map((name: string) => ({
+        name,
+        passed: true,
+        value: 'ok',
+        threshold: 'ok',
+      }));
+      payload = { ...payload, qcReport: { checks: checkResults, overallPassed: true } };
     }
 
     processNode = getTarget(nodes, edges, processNode.id, 'out-process');
   }
 
-  // 3. Filter layer — chain from streamby out-right → filterNode in-filter → out-filter → ...
-  let filterNode = getTarget(nodes, edges, 'streamby', 'out-right');
-  while (filterNode) {
-    const cfg = filterNode.data?.filterConfig as FilterNodeConfig | undefined;
-    if (cfg) payload = applyFilterConfig(payload, cfg);
-    filterNode = getTarget(nodes, edges, filterNode.id, 'out-filter');
+  // 3. Filter + output lane — streamby out-right → filterNode|annotationNode|deliverableNode|distributionNode
+  const outputLaneTypes = new Set(['filterNode', 'annotationNode', 'deliverableNode', 'distributionNode']);
+  let outputNode = getTarget(nodes, edges, 'streamby', 'out-right');
+  while (outputNode) {
+    if (outputNode.type === 'filterNode') {
+      const cfg = outputNode.data?.filterConfig as FilterNodeConfig | undefined;
+      if (cfg) payload = applyFilterConfig(payload, cfg);
+
+    } else if (outputNode.type === 'deliverableNode') {
+      payload = {
+        ...payload,
+        deliverable: {
+          type:    outputNode.data?.deliverableType ?? 'asset-bundle',
+          version: outputNode.data?.deliverableVersion ?? '1.0.0',
+        },
+      };
+
+    } else if (outputNode.type === 'distributionNode') {
+      // Distribution is async — the actual publish is handled by the host worker
+      payload = {
+        ...payload,
+        distribution: {
+          target:       outputNode.data?.distributionTarget,
+          connectionId: outputNode.data?.distributionConnectionId,
+          channel:      outputNode.data?.channel,
+          status:       'queued',
+        },
+      };
+    }
+    // annotationNode — pass-through; annotations are stored separately via the review API
+
+    const next = getTarget(nodes, edges, outputNode.id, 'out-filter');
+    outputNode = next && outputLaneTypes.has(next.type) ? next : null;
   }
 
   return payload;

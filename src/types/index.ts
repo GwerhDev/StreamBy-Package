@@ -216,9 +216,64 @@ export interface Export {
   useConnections?: boolean;
   useCredentials?: boolean;
   storageDbId?: string;
+  // Phase 4 deliverable fields
+  deliverableType?: 'api' | 'video-stream' | 'game-build' | 'asset-bundle' | 'app-binary';
+  deliverableVersion?: string;
+  deliverableTargets?: DeliveryTarget[];
+  publishedAt?: Date;
+  publishedBy?: string;
+  cdnUrl?: string;
 }
 
-export type JobType = 'ingest' | 'transcode' | 'caption' | 'thumbnail' | 'render' | 'format-convert' | 'lod';
+export type DistributionTarget =
+  | 'cdnPush'
+  | 'hlsStream'
+  | 'steam'
+  | 'appStoreConnect'
+  | 'googlePlay'
+  | 'itchIo'
+  | 'customWebhook';
+
+export type DeliveryStatus = 'pending' | 'publishing' | 'published' | 'failed';
+
+export interface DeliveryTarget {
+  connectionId: string;
+  target: DistributionTarget;
+  channel?: string;
+  publishedAt?: Date;
+  publishedBy?: string;
+  receipt?: Record<string, string>;
+  status: DeliveryStatus;
+}
+
+export interface DistributionConnection {
+  id: string;
+  name: string;
+  target: DistributionTarget;
+  credentialId?: string;
+  projectId: string;
+  config: Record<string, string>;
+  createdAt: Date;
+  description?: string;
+}
+
+export interface QcCheck {
+  name: string;
+  passed: boolean;
+  value: string | number;
+  threshold: string | number;
+  message?: string;
+}
+
+export interface QcReportRecord {
+  assetId: string;
+  projectId: string;
+  checks: QcCheck[];
+  overallPassed: boolean;
+  generatedAt: Date;
+}
+
+export type JobType = 'ingest' | 'transcode' | 'caption' | 'thumbnail' | 'render' | 'format-convert' | 'lod' | 'distribute' | 'qc';
 
 export type RenderFarmProvider = 'flamenco' | 'deadline' | 'rebusfarm' | 'sheepit' | 'custom';
 
