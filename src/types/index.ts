@@ -218,7 +218,43 @@ export interface Export {
   storageDbId?: string;
 }
 
-export type JobType = 'ingest' | 'transcode' | 'caption' | 'thumbnail';
+export type JobType = 'ingest' | 'transcode' | 'caption' | 'thumbnail' | 'render' | 'format-convert' | 'lod';
+
+export type RenderFarmProvider = 'flamenco' | 'deadline' | 'rebusfarm' | 'sheepit' | 'custom';
+
+export interface RenderFarmConnection {
+  id: string;
+  name: string;
+  provider: RenderFarmProvider;
+  apiUrl: string;
+  credentialId?: string;
+  projectId: string;
+  createdAt: Date;
+  description?: string;
+}
+
+export interface LodLevel {
+  level: number;
+  ratio: number;
+  storageFileId: string;
+  polyCount?: number;
+  fileSize?: number;
+}
+
+export interface LodManifestRecord {
+  assetId: string;
+  projectId: string;
+  levels: LodLevel[];
+  generatedAt: Date;
+}
+
+export interface AssetDependencyGraphRecord {
+  rootAssetId: string;
+  projectId: string;
+  nodes: { assetId: string; type: string; resolved: boolean }[];
+  edges: { from: string; to: string; relationship: string }[];
+  resolvedAt: Date;
+}
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface JobRecord {

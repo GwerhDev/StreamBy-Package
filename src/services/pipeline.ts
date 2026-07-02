@@ -11,6 +11,7 @@ import {
   runThumbnailJob,
   runCaptionJob,
 } from './mediaProcessor';
+import { runRenderJob, runFormatConvertJob, runLodJob } from './vfxProcessor';
 import { createStorageProvider } from '../providers/storage';
 
 interface FilterCondition { field: string; op: string; value: string; }
@@ -206,6 +207,44 @@ export async function executePipeline(
       const job = createJob('ingest', systemUserId, projectId, nodeData);
       setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
       payload = { ...payload, jobId: job.jobId, jobType: 'ingest' };
+
+    } else if (processNode.type === 'renderJobNode' && fileId) {
+      const job = createJob('render', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runRenderJob(job.jobId, fileId, projectId, {
+          renderer:               nodeData.renderer,
+          renderFarmConnectionId: nodeData.renderFarmConnectionId,
+          frameRange:             nodeData.frameRange,
+          resolution:             nodeData.resolution,
+          samples:                nodeData.samples,
+          outputFormat:           nodeData.outputFormat,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'render' };
+
+    } else if (processNode.type === 'formatConvertNode' && fileId) {
+      const job = createJob('format-convert', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runFormatConvertJob(job.jobId, fileId, projectId, {
+          inputFormat:    nodeData.inputFormat,
+          outputFormat:   nodeData.outputFormat,
+          applyTransforms: nodeData.applyTransforms,
+          embedTextures:  nodeData.embedTextures,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'format-convert' };
+
+    } else if (processNode.type === 'lodNode' && fileId) {
+      const job = createJob('lod', systemUserId, projectId, nodeData);
+      setImmediate(() =>
+        runLodJob(job.jobId, fileId, projectId, {
+          levels:          nodeData.levels,
+          reductionRatios: nodeData.reductionRatios,
+          algorithm:       nodeData.algorithm,
+          outputFormat:    nodeData.outputFormat,
+        }),
+      );
+      payload = { ...payload, jobId: job.jobId, jobType: 'lod' };
     }
 
     processNode = getTarget(nodes, edges, processNode.id, 'out-process');
