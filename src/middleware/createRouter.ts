@@ -24,6 +24,8 @@ import { renderFarmRouter } from './routes/renderFarm';
 import { reviewRouter } from './routes/review';
 import { distributionRouter } from './routes/distribution';
 import { aiRouter } from './routes/ai';
+import { productionRouter } from './routes/production';
+import { rightsRouter } from './routes/rights';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -85,6 +87,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(reviewRouter(config));
   router.use(distributionRouter(config));
   router.use(aiRouter(config));
+  router.use(productionRouter(config));
+  router.use(rightsRouter(config));
 
   return router;
 }
