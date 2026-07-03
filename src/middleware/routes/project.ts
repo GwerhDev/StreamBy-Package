@@ -80,7 +80,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, description, image, allowedOrigin, public: isPublic = true } = req.body;
+      const { name, description, image, allowedOrigin, public: isPublic = true, category } = req.body;
 
       if (isPublic === false && (req as any).subscription === 'freemium') {
         return res.status(403).json({ error: 'Private projects require a subscriber plan' });
@@ -105,6 +105,7 @@ export function projectRouter(config: StreamByConfig): Router {
         image: image || '',
         allowedOrigin: allowedOrigin || [],
         public: isPublic,
+        category: category || null,
         members: [{ userId: auth.userId, username: user.username, role: "admin", status: "active", archived: false }],
       });
 
