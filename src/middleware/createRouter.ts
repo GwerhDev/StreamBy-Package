@@ -26,6 +26,7 @@ import { distributionRouter } from './routes/distribution';
 import { aiRouter } from './routes/ai';
 import { productionRouter } from './routes/production';
 import { rightsRouter } from './routes/rights';
+import { workflowRouter } from './routes/workflow';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -89,6 +90,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(aiRouter(config));
   router.use(productionRouter(config));
   router.use(rightsRouter(config));
+  router.use(workflowRouter(config));
 
   return router;
 }
