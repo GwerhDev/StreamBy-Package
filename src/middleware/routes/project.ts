@@ -284,23 +284,18 @@ export function projectRouter(config: StreamByConfig): Router {
           connection as any,
           'project_members',
           { projectId: projectId, userId: auth.userId },
-          { archived: true, archivedBy: auth.userId, archivedAt: new Date() }
+          { archived: true, archivedBy: auth.userId, archivedAt: new Date() },
+          'streamby'
         );
       } else {
         const memberIndex = project.members.findIndex((member: any) => member.userId === auth.userId);
-
         if (memberIndex === -1) {
           return res.status(403).json({ message: 'Unauthorized project access' });
         }
-
         project.members[memberIndex].archived = true;
         project.members[memberIndex].archivedBy = auth.userId;
         project.members[memberIndex].archivedAt = new Date();
-
-        await Project.update(
-          { _id: projectId },
-          { members: project.members }
-        );
+        await Project.update({ _id: projectId }, { members: project.members });
       }
 
       // Re-fetch all projects for the user to ensure the list is up-to-date
@@ -335,23 +330,18 @@ export function projectRouter(config: StreamByConfig): Router {
           connection as any,
           'project_members',
           { projectId: projectId, userId: auth.userId },
-          { archived: false, archivedBy: null, archivedAt: null }
+          { archived: false, archivedBy: null, archivedAt: null },
+          'streamby'
         );
       } else {
         const memberIndex = project.members.findIndex((member: any) => member.userId === auth.userId);
-
         if (memberIndex === -1) {
           return res.status(403).json({ message: 'Unauthorized project access' });
         }
-
         project.members[memberIndex].archived = false;
         project.members[memberIndex].archivedBy = null;
         project.members[memberIndex].archivedAt = null;
-
-        await Project.update(
-          { _id: projectId },
-          { members: project.members }
-        );
+        await Project.update({ _id: projectId }, { members: project.members });
       }
 
       // Re-fetch all projects for the user to ensure the list is up-to-date

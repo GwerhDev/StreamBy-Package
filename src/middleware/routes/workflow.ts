@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
@@ -57,7 +58,7 @@ export function workflowRouter(config: StreamByConfig): Router {
 
       const now = new Date();
       const workflow = {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         name,
         description: description ?? '',
         status: 'draft',
