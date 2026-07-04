@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth, ApiConnectionMethod } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
-import { addApiConnection, deleteApiConnection } from '../../services/apiConnection';
+import { addApiConnection, updateApiConnection, deleteApiConnection } from '../../services/apiConnection';
 
 const VALID_METHODS: ApiConnectionMethod[] = ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'];
 
@@ -78,6 +78,50 @@ export function connectionRouter(config: StreamByConfig): Router {
       return res.status(201).json({ data: connection });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to add API connection', details: err.message });
+    }
+  });
+
+  // Update an API connection (name, url, method, prefix, credentialId, description)
+  router.patch('/projects/:id/connections/api/:connectionId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ message: 'Permission denied' });
+      }
+
+      const { id: projectId, connectionId } = req.params;
+      const { name, apiUrl, method, description, credentialId, prefix } = req.body;
+
+      if (method && !VALID_METHODS.includes(method)) {
+        return res.status(400).json({ message: `method must be one of: ${VALID_METHODS.join(', ')}` });
+      }
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+
+      if (!isProjectMember(project, auth.userId)) {
+        return res.status(403).json({ message: 'Unauthorized project access' });
+      }
+
+      if (credentialId) {
+        const credExists = project.credentials?.some((c: any) => c.id === credentialId);
+        if (!credExists) {
+          return res.status(400).json({ message: 'Credential not found in project' });
+        }
+      }
+
+      const updated = await updateApiConnection(config, projectId, connectionId, {
+        ...(name !== undefined && { name }),
+        ...(apiUrl !== undefined && { apiUrl }),
+        ...(method !== undefined && { method }),
+        ...(description !== undefined && { description }),
+        ...(prefix !== undefined && { prefix }),
+        ...(credentialId !== undefined && { credentialId }),
+      });
+
+      return res.status(200).json({ data: updated });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to update API connection', details: err.message });
     }
   });
 
