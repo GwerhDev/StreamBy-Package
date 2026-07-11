@@ -60,7 +60,16 @@ async function migrateSql() {
   const pg = new Client({ connectionString: POSTGRES_URI });
   await pg.connect();
 
-  // The `workflows` column may not exist on newer schemas — guard the query.
+  // Ensure the target columns exist so the script is self-contained (runnable
+  // before the 0.29.6 server deploy that adds them via ensureTablesExist).
+  if (!DRY_RUN) {
+    await pg.query(`
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS workflow  JSONB;
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS pipelines JSONB DEFAULT '[]';
+    `);
+  }
+
+  // The legacy `workflows` column may not exist on newer schemas — guard the query.
   const hasCol = await pg.query(
     `SELECT 1 FROM information_schema.columns
      WHERE table_schema = 'streamby' AND table_name = 'projects' AND column_name = 'workflows'`,
