@@ -9,12 +9,9 @@ export function workflowRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
-  // A project has exactly one Workflow (the central canvas). It is stored as the
-  // single `project.workflow` object. Reads fall back to the legacy `workflows[0]`
-  // array so pre-migration data keeps working; PATCH upserts and writes only the
-  // new single field (and clears the legacy array on Mongo).
-  const resolveWorkflow = (project: any): any | null =>
-    project.workflow ?? (project.workflows ?? [])[0] ?? null;
+  // A project has exactly one Workflow (the central canvas), stored as the single
+  // `project.workflow` object. PATCH upserts it.
+  const resolveWorkflow = (project: any): any | null => project.workflow ?? null;
 
   router.get('/projects/:id/workflow', async (req: Request, res: Response) => {
     try {
@@ -75,7 +72,7 @@ export function workflowRouter(config: StreamByConfig): Router {
       } else {
         await Project.update(
           { _id: new ObjectId(projectId) },
-          { $set: { workflow: updated }, $unset: { workflows: '' } } as any,
+          { $set: { workflow: updated } } as any,
         );
       }
 
