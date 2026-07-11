@@ -75,28 +75,28 @@ function applyFilterConfig(payload: any, config: FilterNodeConfig): any {
   return r;
 }
 
-type PipelineNode = { id: string; type: string; data?: Record<string, any> };
-type PipelineEdge = { id?: string; source: string; sourceHandle: string; target: string; targetHandle: string };
+type ExecutionNode = { id: string; type: string; data?: Record<string, any> };
+type ExecutionEdge = { id?: string; source: string; sourceHandle: string; target: string; targetHandle: string };
 
-function getSources(nodes: PipelineNode[], edges: PipelineEdge[], targetId: string, targetHandle: string): PipelineNode[] {
+function getSources(nodes: ExecutionNode[], edges: ExecutionEdge[], targetId: string, targetHandle: string): ExecutionNode[] {
   return edges
     .filter(e => e.target === targetId && e.targetHandle === targetHandle)
     .map(e => nodes.find(n => n.id === e.source))
-    .filter((n): n is PipelineNode => n !== undefined);
+    .filter((n): n is ExecutionNode => n !== undefined);
 }
 
-function getTarget(nodes: PipelineNode[], edges: PipelineEdge[], sourceId: string, sourceHandle: string): PipelineNode | null {
+function getTarget(nodes: ExecutionNode[], edges: ExecutionEdge[], sourceId: string, sourceHandle: string): ExecutionNode | null {
   const edge = edges.find(e => e.source === sourceId && e.sourceHandle === sourceHandle);
   return edge ? (nodes.find(n => n.id === edge.target) ?? null) : null;
 }
 
-export async function executePipeline(
+export async function executeExport(
   nodeSchema: NodeSchema,
   project: any,
   config: StreamByConfig,
 ): Promise<any> {
-  const nodes = nodeSchema.nodes as PipelineNode[];
-  const edges = nodeSchema.edges as PipelineEdge[];
+  const nodes = nodeSchema.nodes as ExecutionNode[];
+  const edges = nodeSchema.edges as ExecutionEdge[];
 
   // 1. Data layer — nodes connected to streamby in-bottom
   const dataSources = getSources(nodes, edges, 'streamby', 'in-bottom');

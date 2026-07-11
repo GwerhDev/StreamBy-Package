@@ -79,6 +79,8 @@ const ensureTablesExist = async (pool: Pool) => {
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS credentials      JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "apiConnections" JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbConnections"  JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS workflow         JSONB;
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS pipelines        JSONB DEFAULT '[]';
     `);
 
     // Ensure dbType exists with a non-null default

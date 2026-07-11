@@ -3,7 +3,7 @@ import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { createExport, updateExport, deleteExport } from '../../services/export';
-import { executePipeline } from '../../services/pipeline';
+import { executeExport } from '../../services/executor';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 import { Pool } from 'pg';
@@ -404,7 +404,7 @@ export function exportRouter(config: StreamByConfig): Router {
       let data: any;
 
       if (exportMetadata.nodeSchema) {
-        data = await executePipeline(exportMetadata.nodeSchema, project, config);
+        data = await executeExport(exportMetadata.nodeSchema, project, config);
         return res.json(data ?? null);
       }
 
