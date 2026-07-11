@@ -33,7 +33,24 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
 
   if (config.encrypt) setEncryptionKey(config.encrypt);
 
-  initConnections(config.databases || []);
+  // Establish DB connections asynchronously (Postgres/Mongo + schema migrations).
+  // Until they're ready, HOLD incoming requests instead of letting them through —
+  // route handlers resolve projects/exports (e.g. the /menu-list export) against a
+  // live connection, so hitting them before startup finishes would 404. This gate
+  // makes the client's fetch wait for StreamBy's instances to come up.
+  let ready = false;
+  const readyPromise = initConnections(config.databases || [])
+    .catch((err) => {
+      console.error('❌ StreamBy: failed to initialize database connections:', err);
+    })
+    .finally(() => {
+      ready = true;
+    });
+
+  router.use((_req, _res, next) => {
+    if (ready) return next();
+    readyPromise.then(() => next());
+  });
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
 
