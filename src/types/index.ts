@@ -82,6 +82,7 @@ export interface ProjectInfo {
   apiConnections?: ApiConnection[];
   dbConnections?: DbConnection[];
   storageConnections?: StorageConnection[];
+  pipelines?: PipelineRef[];
 }
 
 export interface Credential {
@@ -194,6 +195,28 @@ export interface CreateTableSchema {
 export interface NodeSchema {
   nodes: any[];
   edges: any[];
+}
+
+// A Pipeline is a sub-workflow for a specific sub-process; a project has many.
+// The `pipelines` collection is the source of truth; ProjectInfo.pipelines holds
+// lightweight refs kept in sync on create/update/delete.
+export interface Pipeline {
+  _id?: string;
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  order: number;
+  nodeSchema: NodeSchema | null;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PipelineRef {
+  id: string;
+  name: string;
+  order: number;
 }
 
 export interface Export {
