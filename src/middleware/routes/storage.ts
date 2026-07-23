@@ -65,8 +65,11 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   function connFilter(projectId: string, connId: string, project: any, extra?: Record<string, any>) {
     const conn = findStorageConn(project, connId);
     const isBuiltin = conn?.source === 'builtin';
+    // Builtin files may be stamped one of two ways depending on when they were uploaded:
+    // legacy docs (pre-per-row-ids) used the builtin's config id (e.g. 'builtin') or have no
+    // storageConnectionId at all; current uploads use the row's own generated id (connId).
     const connMatch = isBuiltin
-      ? { $or: [{ storageConnectionId: connId }, { storageConnectionId: { $exists: false } }] }
+      ? { $or: [{ storageConnectionId: connId }, { storageConnectionId: conn!.integrationId }, { storageConnectionId: { $exists: false } }] }
       : { storageConnectionId: connId };
     return { projectId, ...connMatch, ...(extra ?? {}) };
   }
