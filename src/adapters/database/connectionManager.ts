@@ -74,13 +74,14 @@ const ensureTablesExist = async (pool: Pool) => {
 
     // Add JSONB columns to existing tables that predate this schema version
     await pool.query(`
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "allowedOrigin"  JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS exports          JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS credentials      JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "apiConnections" JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbConnections"  JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS workflow         JSONB;
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS pipelines        JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "allowedOrigin"     JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS exports             JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS credentials         JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "apiConnections"    JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbConnections"     JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "storageConnections" JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS workflow            JSONB;
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS pipelines           JSONB DEFAULT '[]';
     `);
 
     // Ensure dbType exists with a non-null default
@@ -130,6 +131,25 @@ const ensureTablesExist = async (pool: Pool) => {
       );
     `);
     console.log('✅ "exports" table ensured to exist.');
+
+    // user_integrations is registered against the main db only (see createRouter.ts), but
+    // this function runs per-SQL-connection like projects/exports above — harmless on
+    // non-main connections since the model never queries them there.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS streamby.user_integrations (
+        id                     TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        "userId"               VARCHAR(255) NOT NULL,
+        kind                   VARCHAR(20) NOT NULL,
+        provider               VARCHAR(20) NOT NULL,
+        name                   VARCHAR(255) NOT NULL,
+        description            TEXT,
+        "encryptedCredential"  TEXT NOT NULL,
+        "createdAt"            TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        "updatedAt"            TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS user_integrations_userid_idx ON streamby.user_integrations ("userId");
+    `);
+    console.log('✅ "user_integrations" table ensured to exist.');
   } catch (error) {
     console.error('❌ Error ensuring tables exist:', error);
   }

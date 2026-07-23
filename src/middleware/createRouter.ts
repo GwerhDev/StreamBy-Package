@@ -3,6 +3,7 @@ import { StreamByConfig, StorageAdapter } from '../types';
 import { registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
 import { initConnections } from '../adapters/database/connectionManager';
+import { backfillBuiltinConnections } from '../services/backfillBuiltinConnections';
 import { initWsHub } from '../services/wsHub';
 import { authenticate } from '../services/auth';
 import { setEncryptionKey } from '../utils/encryption';
@@ -17,6 +18,7 @@ import { credentialRouter } from './routes/credential';
 import { connectionRouter } from './routes/connection';
 import { dbConnectionRouter } from './routes/dbConnection';
 import { storageConnectionRouter } from './routes/storageConnection';
+import { userIntegrationRouter } from './routes/userIntegration';
 import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
 import { mediaRouter } from './routes/media';
@@ -43,6 +45,10 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   const readyPromise = initConnections(config.databases || [])
     .catch((err) => {
       console.error('❌ StreamBy: failed to initialize database connections:', err);
+    })
+    .then(() => backfillBuiltinConnections(config))
+    .catch((err) => {
+      console.error('❌ StreamBy: failed to backfill built-in connections:', err);
     })
     .finally(() => {
       ready = true;
@@ -79,6 +85,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     if (mainDb) {
       registerModel('users', [mainDb.id], 'users', 'accounts');
       registerModel('user_subscriptions', [mainDb.id], 'user_subscriptions', 'streamby');
+      registerModel('user_integrations', [mainDb.id], 'user_integrations', streambySchema);
     }
   }
 
@@ -99,6 +106,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(connectionRouter(config));
   router.use(dbConnectionRouter(config));
   router.use(storageConnectionRouter(config));
+  router.use(userIntegrationRouter(config));
   router.use(notificationRouter(config));
   router.use(subscriptionRouter(config));
   router.use(mediaRouter(config));

@@ -8,6 +8,7 @@ import { getModel } from '../../models/manager';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { isProjectMember } from '../../utils/auth';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
+import { assertBuiltinAccess, isBuiltinStorageId } from '../../utils/builtinAccess';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 
@@ -47,41 +48,48 @@ function getRawFoldersCollection() {
   return (getConnection(activeId).client as MongoClient).db().collection('storage_folders');
 }
 
-function connFilter(projectId: string, connId: string, extra?: Record<string, any>) {
-  const isBuiltin = connId === 'builtin' || connId.startsWith('builtin-');
-  const connMatch = isBuiltin
-    ? { $or: [{ storageConnectionId: connId }, { storageConnectionId: { $exists: false } }] }
-    : { storageConnectionId: connId };
-  return { projectId, ...connMatch, ...(extra ?? {}) };
-}
-
-async function resolveConnAdapter(
-  connId: string,
-  project: any,
-  globalAdapter: StorageAdapter,
-): Promise<StorageAdapter | { error: string; status: number }> {
-  if (connId === 'builtin' || connId.startsWith('builtin-')) return globalAdapter;
-
-  const conn: StorageConnection | undefined = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
-  if (!conn) return { error: 'Storage connection not found', status: 404 };
-  if (!isEncryptionKeySet()) return { error: 'Encryption key not set', status: 500 };
-
-  const credential = project.credentials?.find((c: any) => c.id === conn.credentialId);
-  if (!credential) return { error: 'Credential not found in project', status: 400 };
-
-  try {
-    const s3Config = JSON.parse(decrypt(credential.encryptedValue));
-    return new S3Adapter(s3Config);
-  } catch (e: any) {
-    return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
-  }
-}
-
 export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = Router();
 
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
   const Project = getModel('projects');
+
+  function connFilter(projectId: string, connId: string, extra?: Record<string, any>) {
+    const isBuiltin = isBuiltinStorageId(connId, config);
+    const connMatch = isBuiltin
+      ? { $or: [{ storageConnectionId: connId }, { storageConnectionId: { $exists: false } }] }
+      : { storageConnectionId: connId };
+    return { projectId, ...connMatch, ...(extra ?? {}) };
+  }
+
+  async function resolveConnAdapter(
+    connId: string,
+    project: any,
+    auth: Auth,
+  ): Promise<StorageAdapter | { error: string; status: number }> {
+    if (isBuiltinStorageId(connId, config)) {
+      if (!(await assertBuiltinAccess(auth, connId, config, 'storage'))) {
+        return { error: 'Access to this built-in storage is not permitted', status: 403 };
+      }
+      const provider = config.storageProviders.find(p => p.id === connId);
+      if (!provider) return { error: 'Storage provider not found', status: 404 };
+      return provider.type === 's3' ? new S3Adapter(provider.config) : adapter;
+    }
+
+    const conn: StorageConnection | undefined = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
+    if (!conn) return { error: 'Storage connection not found', status: 404 };
+    if (!isEncryptionKeySet()) return { error: 'Encryption key not set', status: 500 };
+
+    const credential = project.credentials?.find((c: any) => c.id === conn.credentialId);
+    if (!credential) return { error: 'Credential not found in project', status: 400 };
+
+    try {
+      const s3Config = JSON.parse(decrypt(credential.encryptedValue));
+      return new S3Adapter(s3Config);
+    } catch (e: any) {
+      return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
+    }
+  }
 
   router.get('/upload-project-image-url/:id', async (req: Request, res: Response) => {
     try {
@@ -324,7 +332,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
-      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
       if (!connAdapter.getPresignedUploadUrl) return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
 
@@ -364,7 +372,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
-      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
 
       const collection = getRawFilesCollection();
@@ -391,7 +399,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
-      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
 
       const collection = getRawFilesCollection();
@@ -429,7 +437,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         return res.status(400).json({ message: `File does not match category ${fileDoc.category}` });
       }
 
-      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
       if (!connAdapter.getPresignedUploadUrl) {
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
@@ -486,7 +494,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
-      const connAdapter = await resolveConnAdapter(connId, project, adapter);
+      const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
 
       const collection = getRawFilesCollection();
@@ -589,11 +597,15 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
+      const isBuiltin = isBuiltinStorageId(connId, config);
+      if (isBuiltin && !(await assertBuiltinAccess(auth, connId, config, 'storage'))) {
+        return res.status(403).json({ message: 'Access to this built-in storage is not permitted' });
+      }
+
       const collection = getRawFoldersCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const folderId = crypto.randomUUID();
-      const isBuiltin = connId === 'builtin' || connId.startsWith('builtin-');
       const folderDoc: Record<string, any> = {
         _id: new ObjectId(),
         folderId,
@@ -784,6 +796,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       };
 
       const storages = (config.storageProviders || []).map(provider => ({
+        id: provider.id,
         ...STORAGE_DISPLAY[provider.type],
         type: provider.type,
       }));

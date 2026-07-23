@@ -3,15 +3,9 @@ import { ObjectId } from 'mongodb';
 import { StreamByConfig, Auth, StorageConnection, StorageConnectionType } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
+import { assertBuiltinAccess, isBuiltinStorageId } from '../../utils/builtinAccess';
 
 const VALID_STORAGE_TYPES: StorageConnectionType[] = ['s3', 'gcs', 'r2', 'azure'];
-
-const STORAGE_DISPLAY: Record<StorageConnectionType, string> = {
-  s3:    'AWS S3',
-  gcs:   'Google Cloud Storage',
-  r2:    'Cloudflare R2',
-  azure: 'Azure Blob Storage',
-};
 
 export function storageConnectionRouter(config: StreamByConfig): Router {
   const router = Router();
@@ -25,18 +19,16 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const builtinConnections: StorageConnection[] = (config.storageProviders || []).map((provider, i) => ({
-        id: i === 0 ? 'builtin' : `builtin-${i}`,
-        name: STORAGE_DISPLAY[provider.type] || provider.type,
-        type: provider.type,
-        credentialId: '',
-        projectId: req.params.id,
-        createdAt: new Date(0),
-        isBuiltin: true,
+      const connections: StorageConnection[] = project.storageConnections || [];
+      // Recompute availability live for builtins — never trust a stored flag, per
+      // "validate on every use" (TCORE-69). BYOC (source: 'integration') is always available.
+      const data = await Promise.all(connections.map(async conn => {
+        if (conn.source !== 'builtin') return conn;
+        const available = await assertBuiltinAccess(auth, conn.integrationId ?? conn.id, config, 'storage');
+        return { ...conn, isBuiltin: true, available };
       }));
 
-      const projectConnections: StorageConnection[] = project.storageConnections || [];
-      return res.status(200).json({ data: [...builtinConnections, ...projectConnections] });
+      return res.status(200).json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch storage connections', details: err.message });
     }
@@ -86,7 +78,7 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
   router.delete('/projects/:id/connections/storage/:connId', async (req: Request, res: Response) => {
     try {
       const { connId } = req.params;
-      if (connId === 'builtin' || connId.startsWith('builtin-')) {
+      if (isBuiltinStorageId(connId, config)) {
         return res.status(403).json({ message: 'Cannot delete a built-in storage connection' });
       }
 

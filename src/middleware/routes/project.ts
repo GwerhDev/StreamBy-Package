@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { StreamByConfig, Auth } from '../../types';
+import crypto from 'crypto';
+import { DbConnection, StorageConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { sanitizeProject } from '../../utils/sanitize';
+import { assertBuiltinAccess, isBuiltinDb, isBuiltinStorageId } from '../../utils/builtinAccess';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -80,7 +82,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, description, image, allowedOrigin, public: isPublic = true, category } = req.body;
+      const { name, description, image, allowedOrigin, public: isPublic = true, category, integrationIds } = req.body;
 
       if (isPublic === false && (req as any).subscription === 'freemium') {
         return res.status(403).json({ error: 'Private projects require a subscriber plan' });
@@ -98,7 +100,53 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'User not found' });
       }
 
-      const newProject = await Project.create({
+      // Classify + revalidate every integrationId server-side — never trust a client-supplied
+      // builtin id. Any invalid id rejects the whole request (no project is created).
+      const dbConnections: DbConnection[] = [];
+      const storageConnections: StorageConnection[] = [];
+      if (Array.isArray(integrationIds)) {
+        const UserIntegrationModel = getModel('user_integrations');
+        for (const id of integrationIds as string[]) {
+          const now = new Date();
+          if (isBuiltinDb(id, config)) {
+            if (!(await assertBuiltinAccess(auth, id, config, 'database'))) {
+              return res.status(403).json({ message: `Access to built-in database '${id}' is not permitted` });
+            }
+            const db = config.databases!.find(d => d.id === id)!;
+            dbConnections.push({
+              id: crypto.randomUUID(), name: id, dbType: db.type === 'sql' ? 'postgresql' : 'mongodb',
+              credentialId: '', projectId: '', createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
+            });
+          } else if (isBuiltinStorageId(id, config)) {
+            if (!(await assertBuiltinAccess(auth, id, config, 'storage'))) {
+              return res.status(403).json({ message: `Access to built-in storage '${id}' is not permitted` });
+            }
+            const provider = config.storageProviders.find(p => p.id === id)!;
+            storageConnections.push({
+              id: crypto.randomUUID(), name: id, type: provider.type,
+              credentialId: '', projectId: '', createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
+            });
+          } else {
+            const integration = await UserIntegrationModel.findOne({ id, userId: auth.userId });
+            if (!integration) {
+              return res.status(403).json({ message: `Integration '${id}' is not valid or does not belong to you` });
+            }
+            if (integration.kind === 'database') {
+              dbConnections.push({
+                id: crypto.randomUUID(), name: integration.name, dbType: integration.provider,
+                credentialId: '', projectId: '', createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
+              });
+            } else {
+              storageConnections.push({
+                id: crypto.randomUUID(), name: integration.name, type: integration.provider,
+                credentialId: '', projectId: '', createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
+              });
+            }
+          }
+        }
+      }
+
+      let newProject = await Project.create({
         dbType,
         name,
         description: description || '',
@@ -107,7 +155,18 @@ export function projectRouter(config: StreamByConfig): Router {
         public: isPublic,
         category: category || null,
         members: [{ userId: auth.userId, username: user.username, role: "admin", status: "active", archived: false }],
+        dbConnections: [],
+        storageConnections: [],
       });
+
+      const newProjectId = newProject._id || newProject.id;
+      if (dbConnections.length || storageConnections.length) {
+        const stamped = await Project.update({ _id: newProjectId }, {
+          dbConnections: dbConnections.map(c => ({ ...c, projectId: newProjectId })),
+          storageConnections: storageConnections.map(c => ({ ...c, projectId: newProjectId })),
+        });
+        if (stamped) newProject = stamped;
+      }
 
       const allProjects = await Project.find({});
       const projects = allProjects

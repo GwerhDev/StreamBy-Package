@@ -20,9 +20,13 @@ export interface StorageConnection {
   createdAt: Date;
   description?: string;
   isBuiltin?: boolean;
+  integrationId?: string;
+  source?: 'builtin' | 'integration';
+  available?: boolean;
 }
 
 export type StorageProvider = {
+  id: string;
   type: StorageProviderType;
   config: S3Config;
 };
@@ -83,6 +87,10 @@ export interface ProjectInfo {
   dbConnections?: DbConnection[];
   storageConnections?: StorageConnection[];
   pipelines?: PipelineRef[];
+  // Set once by backfillBuiltinConnections after seeding built-in dbConnections/
+  // storageConnections for a pre-BYOC project — guards against re-seeding a builtin an
+  // admin has since disconnected on purpose.
+  builtinBackfilledAt?: Date;
 }
 
 export interface Credential {
@@ -123,10 +131,7 @@ export interface DatabaseCredential {
 }
 
 export interface StreamByConfig {
-  storageProviders: {
-    type: StorageProviderType;
-    config: S3Config;
-  }[];
+  storageProviders: StorageProvider[];
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
   adapter?: StorageAdapter;
@@ -134,6 +139,10 @@ export interface StreamByConfig {
   websocket?: {
     server: WebSocketServer;
   };
+  // Gates access to a built-in database/storage provider — implemented by whoever mounts
+  // the package (e.g. Nhexa-API checking user_subscriptions). Absent = allow (default,
+  // preserves pre-BYOC behavior for deploys that don't implement subscription gating).
+  canUseBuiltin?: (auth: Auth, builtinId: string, kind: 'database' | 'storage') => boolean | Promise<boolean>;
 }
 
 export interface Notification {
@@ -178,6 +187,25 @@ export interface DbConnection {
   projectId: string;
   createdAt: Date;
   description?: string;
+  isBuiltin?: boolean;
+  integrationId?: string;
+  source?: 'builtin' | 'integration';
+}
+
+export type IntegrationKind = 'database' | 'storage';
+
+// A user-registered (BYOC) database/storage credential — always the user's own, never a
+// copy of a built-in. Lives in the main db only (see createRouter.ts's mainDb block).
+export interface UserIntegration {
+  id: string;
+  userId: string;
+  kind: IntegrationKind;
+  provider: ExternalDbType | StorageProviderType;
+  name: string;
+  description?: string;
+  encryptedCredential: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface ColumnDefinition {
