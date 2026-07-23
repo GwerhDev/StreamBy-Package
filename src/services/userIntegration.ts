@@ -68,6 +68,20 @@ export async function deleteUserIntegration(userId: string, integrationId: strin
 export async function getDecryptedIntegrationCredential(userId: string, integrationId: string): Promise<unknown | null> {
   const UserIntegrationModel = getModel('user_integrations');
   const integration = await UserIntegrationModel.findOne({ id: integrationId, userId }) as UserIntegration | null;
+  return decryptIntegration(integration);
+}
+
+// Used when resolving a project connection's `integrationId` at connection-use time — the
+// project already validated ownership when the connection was created (see project.ts /
+// dbConnection.ts POST), so there's no userId to filter by here, only the integrationId
+// stored on the connection itself.
+export async function getDecryptedIntegrationCredentialById(integrationId: string): Promise<unknown | null> {
+  const UserIntegrationModel = getModel('user_integrations');
+  const integration = await UserIntegrationModel.findOne({ id: integrationId }) as UserIntegration | null;
+  return decryptIntegration(integration);
+}
+
+async function decryptIntegration(integration: UserIntegration | null): Promise<unknown | null> {
   if (!integration) return null;
   if (!isEncryptionKeySet()) {
     throw new Error('Encryption key is not set. Cannot decrypt integration credential.');

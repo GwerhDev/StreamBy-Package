@@ -42,9 +42,15 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, type, credentialId, description } = req.body;
-      if (!name || !type || !credentialId) {
-        return res.status(400).json({ message: 'name, type, and credentialId are required' });
+      const { name, type, credentialId, integrationId, description } = req.body;
+      if (!name || !type) {
+        return res.status(400).json({ message: 'name and type are required' });
+      }
+      if (!credentialId && !integrationId) {
+        return res.status(400).json({ message: 'Either credentialId or integrationId is required' });
+      }
+      if (credentialId && integrationId) {
+        return res.status(400).json({ message: 'Provide only one of credentialId or integrationId' });
       }
       if (!VALID_STORAGE_TYPES.includes(type)) {
         return res.status(400).json({ message: `type must be one of: ${VALID_STORAGE_TYPES.join(', ')}` });
@@ -54,16 +60,25 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const credExists = project.credentials?.some((c: any) => c.id === credentialId);
-      if (!credExists) return res.status(400).json({ message: 'Credential not found in project' });
+      if (integrationId) {
+        const UserIntegrationModel = getModel('user_integrations');
+        const integration = await UserIntegrationModel.findOne({ id: integrationId, userId: auth.userId });
+        if (!integration) return res.status(404).json({ message: 'Integration not found' });
+        if (integration.kind !== 'storage') return res.status(400).json({ message: 'Integration is not a storage integration' });
+      } else {
+        const credExists = project.credentials?.some((c: any) => c.id === credentialId);
+        if (!credExists) return res.status(400).json({ message: 'Credential not found in project' });
+      }
 
       const connection: StorageConnection = {
         id: new ObjectId().toHexString(),
         name,
         type,
-        credentialId,
+        credentialId: credentialId ?? '',
         projectId: req.params.id,
         createdAt: new Date(),
+        source: integrationId ? 'integration' : 'manual',
+        ...(integrationId && { integrationId }),
         ...(description !== undefined && { description }),
       };
 

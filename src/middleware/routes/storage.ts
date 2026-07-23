@@ -9,6 +9,7 @@ import { getConnection, getConnectedIds } from '../../adapters/database/connecti
 import { isProjectMember } from '../../utils/auth';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 import { assertBuiltinAccess, isBuiltinStorageId } from '../../utils/builtinAccess';
+import { getDecryptedIntegrationCredentialById } from '../../services/userIntegration';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 
@@ -78,6 +79,18 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
     const conn: StorageConnection | undefined = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
     if (!conn) return { error: 'Storage connection not found', status: 404 };
+
+    if (conn.source === 'integration') {
+      if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
+      try {
+        const s3Config = await getDecryptedIntegrationCredentialById(conn.integrationId);
+        if (!s3Config) return { error: 'Integration not found', status: 400 };
+        return new S3Adapter(s3Config as any);
+      } catch (e: any) {
+        return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
+      }
+    }
+
     if (!isEncryptionKeySet()) return { error: 'Encryption key not set', status: 500 };
 
     const credential = project.credentials?.find((c: any) => c.id === conn.credentialId);

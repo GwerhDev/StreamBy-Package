@@ -7,6 +7,7 @@ import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { assertBuiltinAccess, isBuiltinDb } from '../../utils/builtinAccess';
+import { getDecryptedIntegrationCredentialById } from '../../services/userIntegration';
 import {
   listTablesOrCollections,
   createTableOrCollection,
@@ -44,6 +45,13 @@ async function getDecryptedConnectionString(project: any, connId: string): Promi
   const conn: DbConnection | undefined = project.dbConnections?.find((c: DbConnection) => c.id === connId);
   if (!conn) return { error: 'DB connection not found', status: 404 };
 
+  if (conn.source === 'integration') {
+    if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
+    const credential = await getDecryptedIntegrationCredentialById(conn.integrationId);
+    if (!credential) return { error: 'Integration not found', status: 400 };
+    return { connectionString: credential as string, conn };
+  }
+
   const { decrypt, isEncryptionKeySet } = await import('../../utils/encryption');
   if (!isEncryptionKeySet()) return { error: 'Encryption key is not set', status: 500 };
 
@@ -79,9 +87,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, dbType, credentialId, description } = req.body;
-      if (!name || !dbType || !credentialId) {
-        return res.status(400).json({ message: 'name, dbType, and credentialId are required' });
+      const { name, dbType, credentialId, integrationId, description } = req.body;
+      if (!name || !dbType) {
+        return res.status(400).json({ message: 'name and dbType are required' });
+      }
+      if (!credentialId && !integrationId) {
+        return res.status(400).json({ message: 'Either credentialId or integrationId is required' });
+      }
+      if (credentialId && integrationId) {
+        return res.status(400).json({ message: 'Provide only one of credentialId or integrationId' });
       }
       if (!VALID_DB_TYPES.includes(dbType)) {
         return res.status(400).json({ message: `dbType must be one of: ${VALID_DB_TYPES.join(', ')}` });
@@ -91,16 +105,25 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const credExists = project.credentials?.some((c: any) => c.id === credentialId);
-      if (!credExists) return res.status(400).json({ message: 'Credential not found in project' });
+      if (integrationId) {
+        const UserIntegrationModel = getModel('user_integrations');
+        const integration = await UserIntegrationModel.findOne({ id: integrationId, userId: auth.userId });
+        if (!integration) return res.status(404).json({ message: 'Integration not found' });
+        if (integration.kind !== 'database') return res.status(400).json({ message: 'Integration is not a database integration' });
+      } else {
+        const credExists = project.credentials?.some((c: any) => c.id === credentialId);
+        if (!credExists) return res.status(400).json({ message: 'Credential not found in project' });
+      }
 
       const connection: DbConnection = {
         id: new ObjectId().toHexString(),
         name,
         dbType,
-        credentialId,
+        credentialId: credentialId ?? '',
         projectId: req.params.id,
         createdAt: new Date(),
+        source: integrationId ? 'integration' : 'manual',
+        ...(integrationId && { integrationId }),
         ...(description !== undefined && { description }),
       };
 

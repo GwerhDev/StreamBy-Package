@@ -54,6 +54,7 @@ async function main() {
     ],
     storageProviders: [
       {
+        id: 'builtin',
         type: 's3',
         config: {
           region: config.awsBucketRegion!,

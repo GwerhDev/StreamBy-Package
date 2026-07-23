@@ -21,7 +21,7 @@ export interface StorageConnection {
   description?: string;
   isBuiltin?: boolean;
   integrationId?: string;
-  source?: 'builtin' | 'integration';
+  source?: 'builtin' | 'integration' | 'manual';
   available?: boolean;
 }
 
@@ -189,7 +189,7 @@ export interface DbConnection {
   description?: string;
   isBuiltin?: boolean;
   integrationId?: string;
-  source?: 'builtin' | 'integration';
+  source?: 'builtin' | 'integration' | 'manual';
 }
 
 export type IntegrationKind = 'database' | 'storage';
