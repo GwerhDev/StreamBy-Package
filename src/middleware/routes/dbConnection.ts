@@ -6,7 +6,7 @@ import { StreamByConfig, Auth, DbConnection, ExternalDbType, CreateTableSchema }
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
-import { assertBuiltinAccess, isBuiltinDb } from '../../utils/builtinAccess';
+import { assertBuiltinAccess } from '../../utils/builtinAccess';
 import { getDecryptedIntegrationCredentialById } from '../../services/userIntegration';
 import {
   listTablesOrCollections,
@@ -27,18 +27,27 @@ import {
 
 const VALID_DB_TYPES: ExternalDbType[] = ['postgresql', 'mongodb'];
 
+// `builtinId` is config.databases[].id (e.g. 'mongo'), NOT the DbConnection row's own id —
+// those are different values since TCORE-69's backfill gives each row its own UUID.
 function resolveBuiltinConnection(
-  connId: string,
+  builtinId: string,
   config: StreamByConfig,
 ): { client: Pool | MongoClient; dbType: 'sql' | 'nosql' } | { error: string; status: number } {
-  const db = (config.databases ?? []).find(d => d.id === connId);
-  if (!db) return { error: `Database '${connId}' not found in config`, status: 404 };
+  const db = (config.databases ?? []).find(d => d.id === builtinId);
+  if (!db) return { error: `Database '${builtinId}' not found in config`, status: 404 };
   try {
-    const { client, type } = getConnection(connId);
+    const { client, type } = getConnection(builtinId);
     return { client: client as Pool | MongoClient, dbType: type };
   } catch (e: any) {
     return { error: e.message, status: 503 };
   }
+}
+
+// Finds the connection row + classifies it. A row is builtin iff conn.source === 'builtin'
+// (persisted at creation/backfill time) — NOT by comparing the row's own id against
+// config.databases, which no longer holds since builtin rows get their own generated id.
+function findDbConnection(project: any, connId: string): DbConnection | undefined {
+  return project.dbConnections?.find((c: DbConnection) => c.id === connId);
 }
 
 async function getDecryptedConnectionString(project: any, connId: string): Promise<{ connectionString: string; conn: DbConnection } | { error: string; status: number }> {
@@ -137,10 +146,6 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
   // ─── Delete DB connection ─────────────────────────────────────────────────
   router.delete('/projects/:id/connections/db/:connId', async (req: Request, res: Response) => {
     try {
-      if (isBuiltinDb(req.params.connId, config)) {
-        return res.status(403).json({ message: 'Cannot delete a built-in database connection' });
-      }
-
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ message: 'Permission denied' });
@@ -150,8 +155,11 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const exists = project.dbConnections?.some((c: any) => c.id === req.params.connId);
-      if (!exists) return res.status(404).json({ message: 'DB connection not found' });
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+      if (conn.source === 'builtin') {
+        return res.status(403).json({ message: 'Cannot delete a built-in database connection' });
+      }
 
       await Project.update({ _id: req.params.id }, { $pull: { dbConnections: { id: req.params.connId } } });
       return res.status(200).json({ message: 'DB connection deleted successfully' });
@@ -168,11 +176,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         const tables = await listTablesInternal(internal.client, internal.dbType, req.params.id);
         return res.status(200).json({ data: tables });
@@ -203,11 +215,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       const schema: CreateTableSchema = req.body;
       if (!schema.tableName) return res.status(400).json({ message: 'tableName is required' });
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         if (internal.dbType === 'sql' && (!Array.isArray(schema.columns) || schema.columns.length === 0)) {
           return res.status(400).json({ message: 'columns are required for SQL tables' });
@@ -242,11 +258,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         await deleteTableOrCollectionInternal(internal.client, internal.dbType, req.params.tableName, req.params.id);
         return res.status(200).json({ message: 'Table/collection deleted' });
@@ -273,11 +293,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       const limit  = Math.min(parseInt(String(req.query.limit  ?? 50),  10), 500);
       const offset = Math.max(parseInt(String(req.query.offset ?? 0),   10), 0);
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         const records = await queryRecordsInternal(internal.client, internal.dbType, req.params.tableName, limit, offset, req.params.id);
         return res.status(200).json({ data: records });
@@ -310,11 +334,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Request body must be a JSON object' });
       }
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         const inserted = await insertRecordInternal(internal.client, internal.dbType, req.params.tableName, record, req.params.id);
         return res.status(201).json({ data: inserted });
@@ -345,11 +373,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Request body must be a JSON object' });
       }
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         const updated = await updateRecordInternal(internal.client, internal.dbType, req.params.tableName, req.params.recordId, updates, req.params.id);
         return res.status(200).json({ data: updated });
@@ -375,11 +407,15 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      if (isBuiltinDb(req.params.connId, config)) {
-        if (!(await assertBuiltinAccess(auth, req.params.connId, config, 'database'))) {
+      const conn = findDbConnection(project, req.params.connId);
+      if (!conn) return res.status(404).json({ message: 'DB connection not found' });
+
+      if (conn.source === 'builtin') {
+        const builtinId = conn.integrationId!;
+        if (!(await assertBuiltinAccess(auth, builtinId, config, 'database'))) {
           return res.status(403).json({ message: 'Access to this built-in database is not permitted' });
         }
-        const internal = resolveBuiltinConnection(req.params.connId, config);
+        const internal = resolveBuiltinConnection(builtinId, config);
         if ('error' in internal) return res.status(internal.status).json({ message: internal.error });
         await deleteRecordInternal(internal.client, internal.dbType, req.params.tableName, req.params.recordId, req.params.id);
         return res.status(200).json({ message: 'Record deleted' });

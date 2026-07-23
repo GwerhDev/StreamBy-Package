@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Auth, ExternalDbType, IntegrationKind, StorageProviderType, StreamByConfig } from '../../types';
-import { assertBuiltinAccess } from '../../utils/builtinAccess';
+import { assertBuiltinAccess, BUILTIN_DB_DISPLAY, BUILTIN_STORAGE_DISPLAY } from '../../utils/builtinAccess';
 import {
   createUserIntegration,
   deleteUserIntegration,
@@ -40,12 +40,12 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
         // requiredPlan is not populated here — canUseBuiltin only returns a boolean today,
         // so there's no plan-level detail to surface without a hook-signature change.
         const available = await assertBuiltinAccess(auth, db.id, config, 'database');
-        pool.push({ id: db.id, kind: 'database', name: db.id, provider: db.type, source: 'builtin', available });
+        pool.push({ id: db.id, kind: 'database', name: BUILTIN_DB_DISPLAY[db.type] ?? db.type, provider: db.type, source: 'builtin', available });
       }
 
       for (const provider of config.storageProviders ?? []) {
         const available = await assertBuiltinAccess(auth, provider.id, config, 'storage');
-        pool.push({ id: provider.id, kind: 'storage', name: provider.id, provider: provider.type, source: 'builtin', available });
+        pool.push({ id: provider.id, kind: 'storage', name: BUILTIN_STORAGE_DISPLAY[provider.type] ?? provider.type, provider: provider.type, source: 'builtin', available });
       }
 
       res.json({ data: pool });

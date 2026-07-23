@@ -3,7 +3,7 @@ import { ObjectId } from 'mongodb';
 import { StreamByConfig, Auth, StorageConnection, StorageConnectionType } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
-import { assertBuiltinAccess, isBuiltinStorageId } from '../../utils/builtinAccess';
+import { assertBuiltinAccess } from '../../utils/builtinAccess';
 
 const VALID_STORAGE_TYPES: StorageConnectionType[] = ['s3', 'gcs', 'r2', 'azure'];
 
@@ -93,10 +93,6 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
   router.delete('/projects/:id/connections/storage/:connId', async (req: Request, res: Response) => {
     try {
       const { connId } = req.params;
-      if (isBuiltinStorageId(connId, config)) {
-        return res.status(403).json({ message: 'Cannot delete a built-in storage connection' });
-      }
-
       const auth = (req as any).auth as Auth;
       if (auth.role !== 'admin' && auth.role !== 'editor') {
         return res.status(403).json({ message: 'Permission denied' });
@@ -106,8 +102,11 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const exists = project.storageConnections?.some((c: any) => c.id === connId);
-      if (!exists) return res.status(404).json({ message: 'Storage connection not found' });
+      const conn = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
+      if (!conn) return res.status(404).json({ message: 'Storage connection not found' });
+      if (conn.source === 'builtin') {
+        return res.status(403).json({ message: 'Cannot delete a built-in storage connection' });
+      }
 
       await Project.update({ _id: req.params.id }, { $pull: { storageConnections: { id: connId } } });
       return res.status(200).json({ message: 'Storage connection deleted successfully' });

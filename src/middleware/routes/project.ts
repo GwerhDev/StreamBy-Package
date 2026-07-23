@@ -1,12 +1,11 @@
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import { DbConnection, StorageConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { sanitizeProject } from '../../utils/sanitize';
-import { assertBuiltinAccess, isBuiltinDb, isBuiltinStorageId } from '../../utils/builtinAccess';
+import { classifyIntegrationId } from '../../services/projectIntegration';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -105,44 +104,11 @@ export function projectRouter(config: StreamByConfig): Router {
       const dbConnections: DbConnection[] = [];
       const storageConnections: StorageConnection[] = [];
       if (Array.isArray(integrationIds)) {
-        const UserIntegrationModel = getModel('user_integrations');
         for (const id of integrationIds as string[]) {
-          const now = new Date();
-          if (isBuiltinDb(id, config)) {
-            if (!(await assertBuiltinAccess(auth, id, config, 'database'))) {
-              return res.status(403).json({ message: `Access to built-in database '${id}' is not permitted` });
-            }
-            const db = config.databases!.find(d => d.id === id)!;
-            dbConnections.push({
-              id: crypto.randomUUID(), name: id, dbType: db.type === 'sql' ? 'postgresql' : 'mongodb',
-              credentialId: '', projectId: '', createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
-            });
-          } else if (isBuiltinStorageId(id, config)) {
-            if (!(await assertBuiltinAccess(auth, id, config, 'storage'))) {
-              return res.status(403).json({ message: `Access to built-in storage '${id}' is not permitted` });
-            }
-            const provider = config.storageProviders.find(p => p.id === id)!;
-            storageConnections.push({
-              id: crypto.randomUUID(), name: id, type: provider.type,
-              credentialId: '', projectId: '', createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
-            });
-          } else {
-            const integration = await UserIntegrationModel.findOne({ id, userId: auth.userId });
-            if (!integration) {
-              return res.status(403).json({ message: `Integration '${id}' is not valid or does not belong to you` });
-            }
-            if (integration.kind === 'database') {
-              dbConnections.push({
-                id: crypto.randomUUID(), name: integration.name, dbType: integration.provider,
-                credentialId: '', projectId: '', createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
-              });
-            } else {
-              storageConnections.push({
-                id: crypto.randomUUID(), name: integration.name, type: integration.provider,
-                credentialId: '', projectId: '', createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
-              });
-            }
-          }
+          const result = await classifyIntegrationId(id, auth, config, '');
+          if ('error' in result) return res.status(result.status).json({ message: result.error });
+          if (result.kind === 'database') dbConnections.push(result.connection);
+          else storageConnections.push(result.connection);
         }
       }
 
@@ -483,6 +449,70 @@ export function projectRouter(config: StreamByConfig): Router {
       res.status(200).json({ success: true, project: sanitizeProject(updated), message: 'Project origins updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project origins', details: err.message });
+    }
+  });
+
+  // ─── Add an integration to an existing project ───────────────────────────
+  router.post('/projects/:id/integrations', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ message: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+      const { integrationId } = req.body;
+      if (!integrationId) return res.status(400).json({ message: 'integrationId is required' });
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      const alreadyConnected = [...(project.dbConnections ?? []), ...(project.storageConnections ?? [])]
+        .some((c: any) => c.integrationId === integrationId);
+      if (alreadyConnected) return res.status(400).json({ message: 'This integration is already connected to the project' });
+
+      const result = await classifyIntegrationId(integrationId, auth, config, projectId);
+      if ('error' in result) return res.status(result.status).json({ message: result.error });
+
+      const updated = result.kind === 'database'
+        ? await Project.update({ _id: projectId }, { $push: { dbConnections: result.connection } })
+        : await Project.update({ _id: projectId }, { $push: { storageConnections: result.connection } });
+      if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
+
+      res.status(201).json({ data: result.connection, project: sanitizeProject(updated) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to add integration', details: err.message });
+    }
+  });
+
+  // ─── Remove an integration from a project ────────────────────────────────
+  router.delete('/projects/:id/integrations/:integrationId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      if (auth.role !== 'admin' && auth.role !== 'editor') {
+        return res.status(403).json({ message: 'Permission denied' });
+      }
+
+      const projectId = req.params.id;
+      const { integrationId } = req.params;
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      const dbConn = (project.dbConnections ?? []).find((c: any) => c.integrationId === integrationId);
+      const storageConn = (project.storageConnections ?? []).find((c: any) => c.integrationId === integrationId);
+      if (!dbConn && !storageConn) return res.status(404).json({ message: 'Integration not connected to this project' });
+
+      const updated = dbConn
+        ? await Project.update({ _id: projectId }, { $pull: { dbConnections: { id: dbConn.id } } })
+        : await Project.update({ _id: projectId }, { $pull: { storageConnections: { id: storageConn.id } } });
+      if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
+
+      res.status(200).json({ message: 'Integration removed', project: sanitizeProject(updated) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to remove integration', details: err.message });
     }
   });
 

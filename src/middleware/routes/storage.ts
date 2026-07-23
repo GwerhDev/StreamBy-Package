@@ -8,7 +8,7 @@ import { getModel } from '../../models/manager';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { isProjectMember } from '../../utils/auth';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
-import { assertBuiltinAccess, isBuiltinStorageId } from '../../utils/builtinAccess';
+import { assertBuiltinAccess } from '../../utils/builtinAccess';
 import { getDecryptedIntegrationCredentialById } from '../../services/userIntegration';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
@@ -55,8 +55,16 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   const adapter: StorageAdapter = config.adapter || createStorageProvider(config.storageProviders);
   const Project = getModel('projects');
 
-  function connFilter(projectId: string, connId: string, extra?: Record<string, any>) {
-    const isBuiltin = isBuiltinStorageId(connId, config);
+  // A row is builtin iff its own `source === 'builtin'` (set at backfill/creation time) —
+  // NOT by comparing connId (the row's own generated id) against config.storageProviders,
+  // which no longer holds since builtin rows get their own id distinct from provider.id.
+  function findStorageConn(project: any, connId: string): StorageConnection | undefined {
+    return project.storageConnections?.find((c: StorageConnection) => c.id === connId);
+  }
+
+  function connFilter(projectId: string, connId: string, project: any, extra?: Record<string, any>) {
+    const conn = findStorageConn(project, connId);
+    const isBuiltin = conn?.source === 'builtin';
     const connMatch = isBuiltin
       ? { $or: [{ storageConnectionId: connId }, { storageConnectionId: { $exists: false } }] }
       : { storageConnectionId: connId };
@@ -68,17 +76,18 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     project: any,
     auth: Auth,
   ): Promise<StorageAdapter | { error: string; status: number }> {
-    if (isBuiltinStorageId(connId, config)) {
-      if (!(await assertBuiltinAccess(auth, connId, config, 'storage'))) {
+    const conn: StorageConnection | undefined = findStorageConn(project, connId);
+    if (!conn) return { error: 'Storage connection not found', status: 404 };
+
+    if (conn.source === 'builtin') {
+      const builtinId = conn.integrationId!;
+      if (!(await assertBuiltinAccess(auth, builtinId, config, 'storage'))) {
         return { error: 'Access to this built-in storage is not permitted', status: 403 };
       }
-      const provider = config.storageProviders.find(p => p.id === connId);
+      const provider = config.storageProviders.find(p => p.id === builtinId);
       if (!provider) return { error: 'Storage provider not found', status: 404 };
       return provider.type === 's3' ? new S3Adapter(provider.config) : adapter;
     }
-
-    const conn: StorageConnection | undefined = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
-    if (!conn) return { error: 'Storage connection not found', status: 404 };
 
     if (conn.source === 'integration') {
       if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
@@ -391,7 +400,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-      const files = await collection.find(connFilter(projectId, connId)).sort({ createdAt: -1 }).limit(12).toArray();
+      const files = await collection.find(connFilter(projectId, connId, project)).sort({ createdAt: -1 }).limit(12).toArray();
       const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter)));
       res.json({ data });
     } catch (err: any) {
@@ -418,7 +427,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-      const files = await collection.find(connFilter(projectId, connId, { category })).sort({ createdAt: -1 }).toArray();
+      const files = await collection.find(connFilter(projectId, connId, project, { category })).sort({ createdAt: -1 }).toArray();
       const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter)));
       res.json({ data });
     } catch (err: any) {
@@ -443,7 +452,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-      const fileDoc = await collection.findOne(connFilter(projectId, connId, { fileId }));
+      const fileDoc = await collection.findOne(connFilter(projectId, connId, project, { fileId }));
       if (!fileDoc) return res.status(404).json({ message: 'File not found' });
 
       if (!validateContentType(contentType, fileName, fileDoc.category as StorageCategory)) {
@@ -458,7 +467,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const url = await connAdapter.getPresignedUploadUrl(fileDoc.storageKey, contentType);
       await collection.updateOne(
-        connFilter(projectId, connId, { fileId }),
+        connFilter(projectId, connId, project, { fileId }),
         { $set: { contentType, updatedAt: new Date() } },
       );
 
@@ -486,7 +495,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const result = await collection.findOneAndUpdate(
-        connFilter(projectId, connId, { fileId }),
+        connFilter(projectId, connId, project, { fileId }),
         { $set: { displayName } },
         { returnDocument: 'after' },
       );
@@ -513,11 +522,11 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-      const fileDoc = await collection.findOne(connFilter(projectId, connId, { fileId }));
+      const fileDoc = await collection.findOne(connFilter(projectId, connId, project, { fileId }));
       if (!fileDoc) return res.status(404).json({ message: 'File not found' });
 
       if (connAdapter.deleteFile) await connAdapter.deleteFile(fileDoc.storageKey);
-      await collection.deleteOne(connFilter(projectId, connId, { fileId }));
+      await collection.deleteOne(connFilter(projectId, connId, project, { fileId }));
 
       res.json({ message: 'File deleted successfully' });
     } catch (err: any) {
@@ -545,7 +554,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         : { parentId };
 
       const folders = await collection
-        .find(connFilter(projectId, connId, parentFilter))
+        .find(connFilter(projectId, connId, project, parentFilter))
         .sort({ name: 1 })
         .toArray();
 
@@ -577,7 +586,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const collection = getRawFoldersCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
-      const f = await collection.findOne(connFilter(projectId, connId, { folderId }));
+      const f = await collection.findOne(connFilter(projectId, connId, project, { folderId }));
       if (!f) return res.status(404).json({ message: 'Folder not found' });
 
       res.json({
@@ -610,8 +619,9 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
-      const isBuiltin = isBuiltinStorageId(connId, config);
-      if (isBuiltin && !(await assertBuiltinAccess(auth, connId, config, 'storage'))) {
+      const conn = findStorageConn(project, connId);
+      const isBuiltin = conn?.source === 'builtin';
+      if (isBuiltin && !(await assertBuiltinAccess(auth, conn!.integrationId!, config, 'storage'))) {
         return res.status(403).json({ message: 'Access to this built-in storage is not permitted' });
       }
 
@@ -667,7 +677,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const result = await collection.findOneAndUpdate(
-        connFilter(projectId, connId, { folderId }),
+        connFilter(projectId, connId, project, { folderId }),
         { $set: { name: name.trim(), updatedAt: new Date() } },
         { returnDocument: 'after' },
       );
@@ -707,7 +717,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const result = await collection.findOneAndUpdate(
-        connFilter(projectId, connId, { folderId }),
+        connFilter(projectId, connId, project, { folderId }),
         { $set: { parentId: newParentId ?? null, updatedAt: new Date() } },
         { returnDocument: 'after' },
       );
@@ -741,23 +751,23 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const foldersCollection = getRawFoldersCollection();
       if (!foldersCollection) return res.status(500).json({ message: 'Database not available' });
 
-      const folderDoc = await foldersCollection.findOne(connFilter(projectId, connId, { folderId }));
+      const folderDoc = await foldersCollection.findOne(connFilter(projectId, connId, project, { folderId }));
       if (!folderDoc) return res.status(404).json({ message: 'Folder not found' });
 
       const filesCollection = getRawFilesCollection();
       if (filesCollection) {
         await filesCollection.updateMany(
-          connFilter(projectId, connId, { folderId }),
+          connFilter(projectId, connId, project, { folderId }),
           { $set: { folderId: folderDoc.parentId ?? null } },
         );
       }
 
       await foldersCollection.updateMany(
-        connFilter(projectId, connId, { parentId: folderId }),
+        connFilter(projectId, connId, project, { parentId: folderId }),
         { $set: { parentId: folderDoc.parentId ?? null } },
       );
 
-      await foldersCollection.deleteOne(connFilter(projectId, connId, { folderId }));
+      await foldersCollection.deleteOne(connFilter(projectId, connId, project, { folderId }));
 
       res.json({ message: 'Folder deleted successfully' });
     } catch (err: any) {
@@ -778,7 +788,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (folderId != null) {
         const foldersCollection = getRawFoldersCollection();
         if (foldersCollection) {
-          const folderDoc = await foldersCollection.findOne(connFilter(projectId, connId, { folderId }));
+          const folderDoc = await foldersCollection.findOne(connFilter(projectId, connId, project, { folderId }));
           if (!folderDoc) return res.status(404).json({ message: 'Folder not found' });
         }
       }
@@ -787,7 +797,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!filesCollection) return res.status(500).json({ message: 'Database not available' });
 
       const result = await filesCollection.findOneAndUpdate(
-        connFilter(projectId, connId, { fileId }),
+        connFilter(projectId, connId, project, { fileId }),
         { $set: { folderId: folderId ?? null } },
         { returnDocument: 'after' },
       );

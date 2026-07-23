@@ -20,3 +20,17 @@ export function isBuiltinStorageId(id: string, config: StreamByConfig): boolean 
 export function isBuiltinDb(id: string, config: StreamByConfig): boolean {
   return (config.databases ?? []).some(db => db.id === id);
 }
+
+// Display names for builtin connections — never the raw config id/type. The frontend pairs
+// this with the StreamBy icon to visually mark a connection as built-in vs BYOC.
+export const BUILTIN_STORAGE_DISPLAY: Record<string, string> = {
+  s3: 'AWS S3',
+  gcs: 'Google Cloud Storage',
+  r2: 'Cloudflare R2',
+  azure: 'Azure Blob Storage',
+};
+
+export const BUILTIN_DB_DISPLAY: Record<string, string> = {
+  sql: 'PostgreSQL',
+  nosql: 'MongoDB',
+};

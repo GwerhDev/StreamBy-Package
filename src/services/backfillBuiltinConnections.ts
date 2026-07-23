@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { getModel } from '../models/manager';
 import { DbConnection, ProjectInfo, StorageConnection, StreamByConfig } from '../types';
+import { BUILTIN_DB_DISPLAY, BUILTIN_STORAGE_DISPLAY } from '../utils/builtinAccess';
 
 // Pre-BYOC, every project appeared connected to every configured builtin because
 // storageConnection.ts/dbConnection.ts SYNTHESIZED builtins at read time instead of
@@ -23,7 +24,7 @@ export async function backfillBuiltinConnections(config: StreamByConfig): Promis
 
     const dbConnections: DbConnection[] = (config.databases ?? []).map(db => ({
       id: crypto.randomUUID(),
-      name: db.id,
+      name: BUILTIN_DB_DISPLAY[db.type] ?? db.type,
       dbType: db.type === 'sql' ? 'postgresql' : 'mongodb',
       credentialId: '',
       projectId: project.id,
@@ -35,7 +36,7 @@ export async function backfillBuiltinConnections(config: StreamByConfig): Promis
 
     const storageConnections: StorageConnection[] = (config.storageProviders ?? []).map(provider => ({
       id: crypto.randomUUID(),
-      name: provider.id,
+      name: BUILTIN_STORAGE_DISPLAY[provider.type] ?? provider.type,
       type: provider.type,
       credentialId: '',
       projectId: project.id,
