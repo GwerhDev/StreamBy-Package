@@ -14,7 +14,6 @@ import { memberRouter } from './routes/member';
 import { storageRouter } from './routes/storage';
 import { projectRouter } from './routes/project';
 import { databaseRouter } from './routes/database';
-import { credentialRouter } from './routes/credential';
 import { connectionRouter } from './routes/connection';
 import { dbConnectionRouter } from './routes/dbConnection';
 import { storageConnectionRouter } from './routes/storageConnection';
@@ -102,7 +101,6 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(storageRouter(config));
   router.use(projectRouter(config));
   router.use(databaseRouter(config));
-  router.use(credentialRouter(config));
   router.use(connectionRouter(config));
   router.use(dbConnectionRouter(config));
   router.use(storageConnectionRouter(config));

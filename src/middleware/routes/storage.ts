@@ -104,12 +104,10 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     }
 
     if (!isEncryptionKeySet()) return { error: 'Encryption key not set', status: 500 };
-
-    const credential = project.credentials?.find((c: any) => c.id === conn.credentialId);
-    if (!credential) return { error: 'Credential not found in project', status: 400 };
+    if (!conn.encryptedCredential) return { error: 'Connection has no stored credential', status: 400 };
 
     try {
-      const s3Config = JSON.parse(decrypt(credential.encryptedValue));
+      const s3Config = JSON.parse(decrypt(conn.encryptedCredential));
       return new S3Adapter(s3Config);
     } catch (e: any) {
       return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };

@@ -135,23 +135,20 @@ export async function executeExport(
         dataResults.push(await fetchData(client as Pool | MongoClient, type));
       }
 
-    } else if (node.type === 'apiConnectionNode') {
-      const apiConnection = project.apiConnections?.find((c: any) => c.id === node.data?.connectionId);
-      if (!apiConnection) continue;
+    } else if (node.type === 'connectionNode') {
+      const connection = project.connections?.find((c: any) => c.id === node.data?.connectionId);
+      if (!connection) continue;
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-      if (apiConnection.credentialId && isEncryptionKeySet()) {
-        const credential = project.credentials?.find((c: any) => c.id === apiConnection.credentialId);
-        if (credential) {
-          const decrypted = decrypt(credential.encryptedValue);
-          const prefix = apiConnection.prefix ? `${apiConnection.prefix} ` : '';
-          headers['Authorization'] = `${prefix}${decrypted}`;
-        }
+      if (connection.encryptedCredential && isEncryptionKeySet()) {
+        const decrypted = decrypt(connection.encryptedCredential);
+        const prefix = connection.prefix ? `${connection.prefix} ` : '';
+        headers['Authorization'] = `${prefix}${decrypted}`;
       }
 
-      const response = await fetch(apiConnection.apiUrl, { method: apiConnection.method || 'GET', headers });
-      if (!response.ok) throw new Error(`API connection fetch failed: ${response.statusText}`);
+      const response = await fetch(connection.apiUrl, { method: connection.method || 'GET', headers });
+      if (!response.ok) throw new Error(`Connection fetch failed: ${response.statusText}`);
       dataResults.push(await response.json());
     }
   }

@@ -4,6 +4,8 @@ import { StreamByConfig, Auth, StorageConnection, StorageConnectionType } from '
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { assertBuiltinAccess } from '../../utils/builtinAccess';
+import { sanitizeConnection } from '../../utils/sanitize';
+import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
 
 const VALID_STORAGE_TYPES: StorageConnectionType[] = ['s3', 'gcs', 'r2', 'azure'];
 
@@ -23,9 +25,9 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
       // Recompute availability live for builtins — never trust a stored flag, per
       // "validate on every use" (TCORE-69). BYOC (source: 'integration') is always available.
       const data = await Promise.all(connections.map(async conn => {
-        if (conn.source !== 'builtin') return conn;
+        if (conn.source !== 'builtin') return sanitizeConnection(conn);
         const available = await assertBuiltinAccess(auth, conn.integrationId ?? conn.id, config, 'storage');
-        return { ...conn, isBuiltin: true, available };
+        return sanitizeConnection({ ...conn, isBuiltin: true, available });
       }));
 
       return res.status(200).json({ data });
@@ -42,15 +44,15 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
-      const { name, type, credentialId, integrationId, description } = req.body;
+      const { name, type, credential, integrationId, description } = req.body;
       if (!name || !type) {
         return res.status(400).json({ message: 'name and type are required' });
       }
-      if (!credentialId && !integrationId) {
-        return res.status(400).json({ message: 'Either credentialId or integrationId is required' });
+      if (!credential && !integrationId) {
+        return res.status(400).json({ message: 'Either credential or integrationId is required' });
       }
-      if (credentialId && integrationId) {
-        return res.status(400).json({ message: 'Provide only one of credentialId or integrationId' });
+      if (credential && integrationId) {
+        return res.status(400).json({ message: 'Provide only one of credential or integrationId' });
       }
       if (!VALID_STORAGE_TYPES.includes(type)) {
         return res.status(400).json({ message: `type must be one of: ${VALID_STORAGE_TYPES.join(', ')}` });
@@ -60,30 +62,31 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
+      let encryptedCredential: string | undefined;
       if (integrationId) {
         const UserIntegrationModel = getModel('user_integrations');
         const integration = await UserIntegrationModel.findOne({ id: integrationId, userId: auth.userId });
         if (!integration) return res.status(404).json({ message: 'Integration not found' });
         if (integration.kind !== 'storage') return res.status(400).json({ message: 'Integration is not a storage integration' });
       } else {
-        const credExists = project.credentials?.some((c: any) => c.id === credentialId);
-        if (!credExists) return res.status(400).json({ message: 'Credential not found in project' });
+        if (!isEncryptionKeySet()) return res.status(500).json({ message: 'Encryption key is not set' });
+        encryptedCredential = encrypt(credential);
       }
 
       const connection: StorageConnection = {
         id: new ObjectId().toHexString(),
         name,
         type,
-        credentialId: credentialId ?? '',
         projectId: req.params.id,
         createdAt: new Date(),
         source: integrationId ? 'integration' : 'manual',
         ...(integrationId && { integrationId }),
+        ...(encryptedCredential !== undefined && { encryptedCredential }),
         ...(description !== undefined && { description }),
       };
 
       await Project.update({ _id: req.params.id }, { $push: { storageConnections: connection } });
-      return res.status(201).json({ data: connection });
+      return res.status(201).json({ data: sanitizeConnection(connection) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to add storage connection', details: err.message });
     }

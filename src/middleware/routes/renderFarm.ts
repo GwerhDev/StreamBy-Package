@@ -5,6 +5,7 @@ import { isProjectMember } from '../../utils/auth';
 import { createJob, getJob } from '../../services/jobQueue';
 import { runRenderJob, runFormatConvertJob, runLodJob, resolveAssetDependencyGraph } from '../../services/vfxProcessor';
 import { Auth } from '../../types';
+import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
 import crypto from 'crypto';
 
 export function renderFarmRouter(_config: StreamByConfig): Router {
@@ -20,7 +21,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-      res.json({ connections: project.renderFarmConnections ?? [] });
+      res.json({ connections: sanitizeConnections(project.renderFarmConnections) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -30,7 +31,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId } = req.params;
-      const { name, provider, apiUrl, credentialId, description } = req.body;
+      const { name, provider, apiUrl, encryptedCredential, description } = req.body;
 
       if (!name || !provider || !apiUrl) {
         return res.status(400).json({ message: 'name, provider and apiUrl are required' });
@@ -45,7 +46,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
         name,
         provider,
         apiUrl,
-        credentialId,
+        encryptedCredential,
         description,
         projectId,
         createdAt: new Date(),
@@ -56,7 +57,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
         { $push: { renderFarmConnections: connection } },
       );
 
-      res.status(201).json({ connection });
+      res.status(201).json({ connection: sanitizeConnection(connection) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

@@ -15,7 +15,7 @@ export interface StorageConnection {
   id: string;
   name: string;
   type: StorageConnectionType;
-  credentialId: string;
+  encryptedCredential?: string;
   projectId: string;
   createdAt: Date;
   description?: string;
@@ -82,8 +82,7 @@ export interface ProjectInfo {
     allowUpload?: boolean;
     allowSharing?: boolean;
   };
-  credentials?: Credential[];
-  apiConnections?: ApiConnection[];
+  connections?: Connection[];
   dbConnections?: DbConnection[];
   storageConnections?: StorageConnection[];
   pipelines?: PipelineRef[];
@@ -93,24 +92,18 @@ export interface ProjectInfo {
   builtinBackfilledAt?: Date;
 }
 
-export interface Credential {
-  id: string;
-  key: string;
-  encryptedValue: string;
-}
+export type ConnectionMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
-export type ApiConnectionMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
-
-export interface ApiConnection {
+export interface Connection {
   id: string;
   name: string;
   apiUrl: string;
-  method: ApiConnectionMethod;
+  method: ConnectionMethod;
   projectId: string;
   createdAt: Date;
   prefix?: string;
   description?: string;
-  credentialId?: string;
+  encryptedCredential?: string;
 }
 
 export interface ProjectListInfo {
@@ -183,7 +176,7 @@ export interface DbConnection {
   id: string;
   name: string;
   dbType: ExternalDbType;
-  credentialId: string;
+  encryptedCredential?: string;
   projectId: string;
   createdAt: Date;
   description?: string;
@@ -258,7 +251,7 @@ export interface Export {
   fields?: FieldDefinition[];
   jsonData?: any;
   apiUrl?: string;
-  credentialId?: string;
+  encryptedCredential?: string;
   prefix?: string;
   // current fields
   private?: boolean;
@@ -301,7 +294,7 @@ export interface DistributionConnection {
   id: string;
   name: string;
   target: DistributionTarget;
-  credentialId?: string;
+  encryptedCredential?: string;
   projectId: string;
   config: Record<string, string>;
   createdAt: Date;
@@ -345,7 +338,7 @@ export interface RenderFarmConnection {
   name: string;
   provider: RenderFarmProvider;
   apiUrl: string;
-  credentialId?: string;
+  encryptedCredential?: string;
   projectId: string;
   createdAt: Date;
   description?: string;

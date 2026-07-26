@@ -210,7 +210,7 @@ export function projectRouter(config: StreamByConfig): Router {
         useCredentials: e.useCredentials,
       }));
 
-      const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, apiConnections: project.apiConnections || [], exports });
+      const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, connections: project.connections || [], exports });
       res.json({ project: sanitized, message: 'Project fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch project', details: err.message });

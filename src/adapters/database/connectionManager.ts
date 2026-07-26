@@ -62,8 +62,7 @@ const ensureTablesExist = async (pool: Pool) => {
         image            TEXT,
         "allowedOrigin"  JSONB DEFAULT '[]',
         exports          JSONB DEFAULT '[]',
-        credentials      JSONB DEFAULT '[]',
-        "apiConnections" JSONB DEFAULT '[]',
+        connections      JSONB DEFAULT '[]',
         "dbConnections"  JSONB DEFAULT '[]',
         "dbType"         VARCHAR(50) NOT NULL DEFAULT 'sql',
         "createdAt"      TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -76,8 +75,7 @@ const ensureTablesExist = async (pool: Pool) => {
     await pool.query(`
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "allowedOrigin"     JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS exports             JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS credentials         JSONB DEFAULT '[]';
-      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "apiConnections"    JSONB DEFAULT '[]';
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS connections         JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "dbConnections"     JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "storageConnections" JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS workflow            JSONB;

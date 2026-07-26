@@ -6,6 +6,7 @@ import { isProjectMember } from '../../utils/auth';
 import { emitToUser } from '../../services/wsHub';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
+import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
 import crypto from 'crypto';
 
 function getDb() {
@@ -32,7 +33,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-      res.json({ connections: project.distributionConnections ?? [] });
+      res.json({ connections: sanitizeConnections(project.distributionConnections) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -42,7 +43,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId } = req.params;
-      const { name, target, credentialId, config, description } = req.body;
+      const { name, target, encryptedCredential, config, description } = req.body;
 
       if (!name || !target) return res.status(400).json({ message: 'name and target are required' });
 
@@ -54,7 +55,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
         id: crypto.randomUUID(),
         name,
         target,
-        credentialId,
+        encryptedCredential,
         config: config ?? {},
         description,
         projectId,
@@ -66,7 +67,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
         { $push: { distributionConnections: connection } },
       );
 
-      res.status(201).json({ connection });
+      res.status(201).json({ connection: sanitizeConnection(connection) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

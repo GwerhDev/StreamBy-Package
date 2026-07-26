@@ -134,19 +134,16 @@ export function exportRouter(config: StreamByConfig): Router {
           }
 
           let headers: Record<string, string> = {};
-          if (exportMetadata.credentialId) {
+          if (exportMetadata.encryptedCredential) {
             if (!isEncryptionKeySet()) {
               throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
             }
-            const credential = project.credentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
-            if (credential) {
-              const decryptedValue = decrypt(credential.encryptedValue);
-              const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : '';
-              headers = {
-                'Authorization': `${authPrefix}${decryptedValue}`,
-                'Content-Type': 'application/json',
-              };
-            }
+            const decryptedValue = decrypt(exportMetadata.encryptedCredential);
+            const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : '';
+            headers = {
+              'Authorization': `${authPrefix}${decryptedValue}`,
+              'Content-Type': 'application/json',
+            };
           }
 
           const externalApiData = await fetch(exportMetadata.apiUrl, { headers });
@@ -185,7 +182,7 @@ export function exportRouter(config: StreamByConfig): Router {
             createdAt: rawData?.createdAt,
             updatedAt: rawData?.updatedAt,
             type: exportMetadata.type,
-            credentialId: exportMetadata.credentialId,
+            hasCredential: !!exportMetadata.encryptedCredential,
             description: rawData?.description,
             fields: exportMetadata.fields,
           };
@@ -424,15 +421,11 @@ export function exportRouter(config: StreamByConfig): Router {
           data = rawData ? rawData.json : null;
         } else if (exportMetadata.type === 'externalApi') {
           let headers: Record<string, string> = {};
-          if (exportMetadata.credentialId) {
+          if (exportMetadata.encryptedCredential) {
             if (!isEncryptionKeySet()) {
               throw new Error('Encryption key is not set. Cannot use encrypted credentials.');
             }
-            const credential = project.credentials?.find((cred: any) => cred.id === exportMetadata.credentialId);
-            if (!credential) {
-              throw new Error(`Credential with ID ${exportMetadata.credentialId} not found.`);
-            }
-            const decryptedValue = decrypt(credential.encryptedValue);
+            const decryptedValue = decrypt(exportMetadata.encryptedCredential);
             const authPrefix = exportMetadata.prefix ? `${exportMetadata.prefix} ` : '';
             headers = {
               'Authorization': `${authPrefix}${decryptedValue}`,

@@ -7,7 +7,7 @@ import { runTranscriptionJob, runUpscaleJob, runGenerateAssetJob, buildPipelineS
 import { Auth } from '../../types';
 
 const AVAILABLE_NODE_TYPES = [
-  'dataSourceNode', 'jsonInputNode', 'apiConnectionNode',
+  'dataSourceNode', 'jsonInputNode', 'connectionNode',
   'processNode', 'filterNode',
   'ingestNode', 'transcodeNode', 'captionNode', 'thumbnailNode',
   'renderJobNode', 'formatConvertNode', 'lodNode', 'assetDependencyNode',

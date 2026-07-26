@@ -29,7 +29,7 @@ export async function classifyIntegrationId(
       kind: 'database',
       connection: {
         id: crypto.randomUUID(), name: BUILTIN_DB_DISPLAY[db.type] ?? db.type, dbType: db.type === 'sql' ? 'postgresql' : 'mongodb',
-        credentialId: '', projectId, createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
+        projectId, createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
       },
     };
   }
@@ -43,7 +43,7 @@ export async function classifyIntegrationId(
       kind: 'storage',
       connection: {
         id: crypto.randomUUID(), name: BUILTIN_STORAGE_DISPLAY[provider.type] ?? provider.type, type: provider.type,
-        credentialId: '', projectId, createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
+        projectId, createdAt: now, isBuiltin: true, integrationId: id, source: 'builtin',
       },
     };
   }
@@ -59,7 +59,7 @@ export async function classifyIntegrationId(
       kind: 'database',
       connection: {
         id: crypto.randomUUID(), name: integration.name, dbType: integration.provider,
-        credentialId: '', projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
+        projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
       },
     };
   }
@@ -67,7 +67,7 @@ export async function classifyIntegrationId(
     kind: 'storage',
     connection: {
       id: crypto.randomUUID(), name: integration.name, type: integration.provider,
-      credentialId: '', projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
+      projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
     },
   };
 }
