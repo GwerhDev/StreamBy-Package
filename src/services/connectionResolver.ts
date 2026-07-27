@@ -11,12 +11,17 @@ import { S3Adapter } from '../adapters/storage/s3';
 export type ResolvedDbClient = { client: Pool | MongoClient; type: 'sql' | 'nosql'; ephemeral: boolean };
 export type ResolveError = { error: string; status: number };
 
+// Matches by row id first; falls back to matching a builtin row by integrationId (the
+// config id, e.g. 'mongo') for nodes/connections saved before TCORE-69 gave builtin rows
+// their own generated id — same legacy-id class as connFilter in storage.ts.
 export function findDbConnection(project: any, connId: string): DbConnection | undefined {
-  return project.dbConnections?.find((c: DbConnection) => c.id === connId);
+  return project.dbConnections?.find((c: DbConnection) => c.id === connId)
+    ?? project.dbConnections?.find((c: DbConnection) => c.source === 'builtin' && c.integrationId === connId);
 }
 
 export function findStorageConnection(project: any, connId: string): StorageConnection | undefined {
-  return project.storageConnections?.find((c: StorageConnection) => c.id === connId);
+  return project.storageConnections?.find((c: StorageConnection) => c.id === connId)
+    ?? project.storageConnections?.find((c: StorageConnection) => c.source === 'builtin' && c.integrationId === connId);
 }
 
 // `connId` must be the `id` of a real row in project.dbConnections — never a bare
