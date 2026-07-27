@@ -85,6 +85,7 @@ export interface ProjectInfo {
   connections?: Connection[];
   dbConnections?: DbConnection[];
   storageConnections?: StorageConnection[];
+  integrationConnections?: IntegrationConnection[];
   pipelines?: PipelineRef[];
   // Set once by backfillBuiltinConnections after seeding built-in dbConnections/
   // storageConnections for a pre-BYOC project — guards against re-seeding a builtin an
@@ -141,6 +142,24 @@ export interface DatabaseCredential {
   main?: boolean;
 }
 
+export interface OAuthClientConfig {
+  clientId: string;
+  clientSecret: string;
+  // Full callback URL the provider redirects back to, e.g.
+  // 'https://api.nhexa.cl/streamby/user/integrations/oauth/jira/callback'. Required because
+  // StreamBy-Package is mounted at a host-chosen path prefix (Nhexa-API mounts at
+  // '/streamby') and has no reliable way to reconstruct its own public URL from req alone
+  // (proxies, custom domains) — the host must supply it explicitly, same reasoning as why
+  // canUseBuiltin is host-injected rather than inferred.
+  redirectUri: string;
+  // Where the callback finally sends the browser once token exchange finishes — a
+  // StreamBy-UI route. The backend appends a query param describing the outcome —
+  // `?connected=jira` on success, `?oauthError=<reason>` on failure — so the frontend can
+  // show a toast/status without needing its own polling or postMessage handshake.
+  successRedirectUrl: string;
+  failureRedirectUrl: string;
+}
+
 export interface StreamByConfig {
   storageProviders: StorageProvider[];
   authProvider: AuthProvider;
@@ -154,6 +173,14 @@ export interface StreamByConfig {
   // the package (e.g. Nhexa-API checking user_subscriptions). Absent = allow (default,
   // preserves pre-BYOC behavior for deploys that don't implement subscription gating).
   canUseBuiltin?: (auth: Auth, builtinId: string, kind: 'database' | 'storage') => boolean | Promise<boolean>;
+  // Registers this deploy as an OAuth CLIENT of Jira/Google (StreamBy is the client, NOT
+  // the provider). Absent per-provider = that provider's OAuth start/callback routes
+  // respond 503 ("not configured"), matching canUseBuiltin's "absent = safe default"
+  // convention rather than crashing at boot.
+  oauthProviders?: {
+    jira?: OAuthClientConfig;
+    google?: OAuthClientConfig;
+  };
 }
 
 export interface Notification {
@@ -203,18 +230,46 @@ export interface DbConnection {
   source?: 'builtin' | 'integration' | 'manual';
 }
 
-export type IntegrationKind = 'database' | 'storage';
+// A project-level connection to an account-level SERVICE integration (Claude/Jira/Google).
+// Unlike DbConnection/StorageConnection, this has no `isBuiltin`/`source: 'builtin'` variant
+// — there is no such thing as a built-in service integration (config.databases/
+// storageProviders have no service equivalent), so source is always 'integration'. Modeled
+// as a literal type (not a union with 'manual'/'builtin') to make that structurally clear
+// and to keep classifyIntegrationId's return type honest.
+export interface IntegrationConnection {
+  id: string;
+  name: string;
+  provider: ServiceProviderType;
+  projectId: string;
+  createdAt: Date;
+  description?: string;
+  integrationId: string;
+  source: 'integration';
+}
 
-// A user-registered (BYOC) database/storage credential — always the user's own, never a
-// copy of a built-in. Lives in the main db only (see createRouter.ts's mainDb block).
+export type IntegrationKind = 'database' | 'storage' | 'service';
+
+export type ServiceProviderType = 'claude' | 'jira' | 'google';
+
+// A user-registered (BYOC) database/storage credential, or a third-party service account
+// link (Claude/Jira/Google) — always the user's own, never a copy of a built-in. Lives in
+// the main db only (see createRouter.ts's mainDb block).
 export interface UserIntegration {
   id: string;
   userId: string;
   kind: IntegrationKind;
-  provider: ExternalDbType | StorageProviderType;
+  provider: ExternalDbType | StorageProviderType | ServiceProviderType;
   name: string;
   description?: string;
-  encryptedCredential: string;
+  // Non-OAuth credential (db/storage connection strings, Claude API key). Absent for
+  // jira/google, which use the three fields below instead.
+  encryptedCredential?: string;
+  // OAuth-only fields (jira/google). Each encrypted independently via the existing
+  // single-string encrypt()/decrypt() primitives — no new crypto, just three calls
+  // instead of one. Absent for database/storage/claude integrations.
+  encryptedAccessToken?: string;
+  encryptedRefreshToken?: string;
+  tokenExpiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }

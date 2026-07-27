@@ -55,9 +55,9 @@ export async function resolveDbConnectionClient(
   let connectionString: string;
   if (conn.source === 'integration') {
     if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
-    const credential = await getDecryptedIntegrationCredentialById(conn.integrationId);
-    if (!credential) return { error: 'Integration not found', status: 400 };
-    connectionString = credential as string;
+    const resolved = await getDecryptedIntegrationCredentialById(conn.integrationId, config);
+    if (!resolved) return { error: 'Integration not found', status: 400 };
+    connectionString = resolved.credential as string;
   } else {
     if (!isEncryptionKeySet()) return { error: 'Encryption key is not set', status: 500 };
     if (!conn.encryptedCredential) return { error: 'Connection has no stored credential', status: 400 };
@@ -110,9 +110,9 @@ export async function resolveStorageAdapter(
   if (conn.source === 'integration') {
     if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
     try {
-      const s3Config = await getDecryptedIntegrationCredentialById(conn.integrationId);
-      if (!s3Config) return { error: 'Integration not found', status: 400 };
-      return new S3Adapter(s3Config as any);
+      const resolved = await getDecryptedIntegrationCredentialById(conn.integrationId, config);
+      if (!resolved) return { error: 'Integration not found', status: 400 };
+      return new S3Adapter(resolved.credential as any);
     } catch (e: any) {
       return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
     }

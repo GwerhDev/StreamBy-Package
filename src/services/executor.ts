@@ -2,6 +2,8 @@ import { NodeSchema, StreamByConfig, Auth } from '../types';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
 import { queryRecordsInternal, queryRecordByIdInternal } from './dbConnection';
 import { resolveDbConnectionClient, releaseDbClient, resolveStorageAdapter } from './connectionResolver';
+import { getDecryptedIntegrationCredentialById } from './userIntegration';
+import { buildServiceAuthHeaders } from './oauthClient';
 import { createJob } from './jobQueue';
 import {
   runIngestJob,
@@ -167,6 +169,49 @@ export async function executeExport(
 
       const response = await fetch(connection.apiUrl, { method: connection.method || 'GET', headers });
       if (!response.ok) throw new Error(`Connection fetch failed: ${response.statusText}`);
+      dataResults.push(await response.json());
+
+    } else if (node.type === 'integrationConnectionNode') {
+      // Generic action over a project-level IntegrationConnection (Claude/Jira/Google) — the
+      // node's data carries the endpoint/method/body to invoke, same shape family as
+      // connectionNode's apiUrl/method, but the auth header comes from the resolved
+      // account-level integration credential instead of a static per-connection secret.
+      // Diverges from connectionNode's silent-skip: a missing connection/credential throws
+      // NodeExecutionError (matching dataSourceNode/ingestNode's intentional pattern), since
+      // a silently-skipped service action would produce a workflow that "succeeds" while
+      // quietly missing the one thing the node exists to do.
+      const connectionId = node.data?.connectionId as string | undefined;
+      if (!connectionId) {
+        throw new NodeExecutionError(
+          node.id, node.type,
+          `Node '${node.id}' (${node.type}) has no integration connection — connect one on the node.`,
+        );
+      }
+      const connection = (project.integrationConnections ?? []).find((c: any) => c.id === connectionId);
+      if (!connection) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration connection not found on this project.`);
+      }
+
+      const resolved = await getDecryptedIntegrationCredentialById(connection.integrationId, config);
+      if (!resolved) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration credential could not be resolved — it may have been disconnected.`);
+      }
+
+      const endpoint = node.data?.endpoint as string | undefined;
+      if (!endpoint) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}) has no endpoint configured.`);
+      }
+      const method = (node.data?.method as string | undefined) ?? 'GET';
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...buildServiceAuthHeaders(connection.provider, resolved.credential as string),
+      };
+
+      const body = node.data?.body ? JSON.stringify(node.data.body) : undefined;
+      const response = await fetch(endpoint, { method, headers, body });
+      if (!response.ok) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration action failed (${response.statusText}).`);
+      }
       dataResults.push(await response.json());
     }
   }

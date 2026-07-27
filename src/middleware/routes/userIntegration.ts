@@ -1,17 +1,20 @@
 import { Router, Request, Response } from 'express';
-import { Auth, ExternalDbType, IntegrationKind, StorageProviderType, StreamByConfig } from '../../types';
+import { Auth, ExternalDbType, IntegrationKind, ServiceProviderType, StorageProviderType, StreamByConfig } from '../../types';
 import { assertBuiltinAccess, BUILTIN_DB_DISPLAY, BUILTIN_STORAGE_DISPLAY } from '../../utils/builtinAccess';
 import {
   createUserIntegration,
   deleteUserIntegration,
+  InvalidCredentialUpdateError,
+  isOAuthServiceProvider,
   listUserIntegrations,
   updateUserIntegration,
 } from '../../services/userIntegration';
 import { sanitizeUserIntegration } from '../../utils/sanitize';
 
-const VALID_KINDS: IntegrationKind[] = ['database', 'storage'];
+const VALID_KINDS: IntegrationKind[] = ['database', 'storage', 'service'];
 const VALID_DB_PROVIDERS: ExternalDbType[] = ['postgresql', 'mongodb'];
 const VALID_STORAGE_PROVIDERS: StorageProviderType[] = ['s3', 'gcs', 'r2', 'azure'];
+const VALID_SERVICE_PROVIDERS: ServiceProviderType[] = ['claude', 'jira', 'google'];
 
 interface PoolEntry {
   id: string;
@@ -63,9 +66,17 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
       if (!kind || !VALID_KINDS.includes(kind)) {
         return res.status(400).json({ message: `kind must be one of: ${VALID_KINDS.join(', ')}` });
       }
-      const validProviders: string[] = kind === 'database' ? VALID_DB_PROVIDERS : VALID_STORAGE_PROVIDERS;
+      const validProviders: string[] = kind === 'database' ? VALID_DB_PROVIDERS : kind === 'storage' ? VALID_STORAGE_PROVIDERS : VALID_SERVICE_PROVIDERS;
       if (!provider || !validProviders.includes(provider)) {
         return res.status(400).json({ message: `provider must be one of: ${validProviders.join(', ')}` });
+      }
+      // jira/google have no upfront credential to supply — they can only be linked via the
+      // OAuth consent flow, which mints the token itself. Claude (API key) goes through the
+      // normal path below unchanged.
+      if (kind === 'service' && isOAuthServiceProvider(provider)) {
+        return res.status(400).json({
+          message: `Provider '${provider}' requires OAuth — start at GET /user/integrations/oauth/${provider}/start instead of POST /user/integrations`,
+        });
       }
       if (!name) return res.status(400).json({ message: 'name is required' });
       if (credential === undefined || credential === null) {
@@ -77,6 +88,9 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
       });
       res.status(201).json({ data: sanitizeUserIntegration(integration) });
     } catch (err: any) {
+      if (err instanceof InvalidCredentialUpdateError) {
+        return res.status(400).json({ message: err.message });
+      }
       res.status(500).json({ message: 'Failed to create integration', details: err.message });
     }
   });
@@ -94,6 +108,9 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
 
       res.json({ data: sanitizeUserIntegration(updated) });
     } catch (err: any) {
+      if (err instanceof InvalidCredentialUpdateError) {
+        return res.status(400).json({ message: err.message });
+      }
       res.status(500).json({ message: 'Failed to update integration', details: err.message });
     }
   });

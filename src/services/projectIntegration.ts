@@ -1,11 +1,12 @@
 import crypto from 'crypto';
 import { getModel } from '../models/manager';
-import { Auth, DbConnection, StorageConnection, StreamByConfig } from '../types';
+import { Auth, DbConnection, StorageConnection, IntegrationConnection, ExternalDbType, StorageProviderType, ServiceProviderType, StreamByConfig } from '../types';
 import { assertBuiltinAccess, isBuiltinDb, isBuiltinStorageId, BUILTIN_DB_DISPLAY, BUILTIN_STORAGE_DISPLAY } from '../utils/builtinAccess';
 
 type ClassifyResult =
   | { kind: 'database'; connection: DbConnection }
   | { kind: 'storage'; connection: StorageConnection }
+  | { kind: 'service'; connection: IntegrationConnection }
   | { error: string; status: number };
 
 // Classifies a client-supplied integrationId (builtin db, builtin storage, or a user's own
@@ -58,16 +59,26 @@ export async function classifyIntegrationId(
     return {
       kind: 'database',
       connection: {
-        id: crypto.randomUUID(), name: integration.name, dbType: integration.provider,
+        id: crypto.randomUUID(), name: integration.name, dbType: integration.provider as ExternalDbType,
         projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
       },
     };
   }
+  if (integration.kind === 'storage') {
+    return {
+      kind: 'storage',
+      connection: {
+        id: crypto.randomUUID(), name: integration.name, type: integration.provider as StorageProviderType,
+        projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
+      },
+    };
+  }
+  // kind === 'service' — the only remaining IntegrationKind value.
   return {
-    kind: 'storage',
+    kind: 'service',
     connection: {
-      id: crypto.randomUUID(), name: integration.name, type: integration.provider,
-      projectId, createdAt: now, isBuiltin: false, integrationId: id, source: 'integration',
+      id: crypto.randomUUID(), name: integration.name, provider: integration.provider as ServiceProviderType,
+      projectId, createdAt: now, integrationId: id, source: 'integration',
     },
   };
 }

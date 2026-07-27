@@ -18,6 +18,7 @@ import { connectionRouter } from './routes/connection';
 import { dbConnectionRouter } from './routes/dbConnection';
 import { storageConnectionRouter } from './routes/storageConnection';
 import { userIntegrationRouter } from './routes/userIntegration';
+import { oauthRouter } from './routes/oauth';
 import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
 import { mediaRouter } from './routes/media';
@@ -105,6 +106,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(dbConnectionRouter(config));
   router.use(storageConnectionRouter(config));
   router.use(userIntegrationRouter(config));
+  router.use(oauthRouter(config));
   router.use(notificationRouter(config));
   router.use(subscriptionRouter(config));
   router.use(mediaRouter(config));

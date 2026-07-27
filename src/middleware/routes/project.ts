@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { DbConnection, StorageConnection, StreamByConfig, Auth } from '../../types';
+import { DbConnection, StorageConnection, IntegrationConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
@@ -103,12 +103,14 @@ export function projectRouter(config: StreamByConfig): Router {
       // builtin id. Any invalid id rejects the whole request (no project is created).
       const dbConnections: DbConnection[] = [];
       const storageConnections: StorageConnection[] = [];
+      const integrationConnections: IntegrationConnection[] = [];
       if (Array.isArray(integrationIds)) {
         for (const id of integrationIds as string[]) {
           const result = await classifyIntegrationId(id, auth, config, '');
           if ('error' in result) return res.status(result.status).json({ message: result.error });
           if (result.kind === 'database') dbConnections.push(result.connection);
-          else storageConnections.push(result.connection);
+          else if (result.kind === 'storage') storageConnections.push(result.connection);
+          else integrationConnections.push(result.connection);
         }
       }
 
@@ -123,13 +125,15 @@ export function projectRouter(config: StreamByConfig): Router {
         members: [{ userId: auth.userId, username: user.username, role: "admin", status: "active", archived: false }],
         dbConnections: [],
         storageConnections: [],
+        integrationConnections: [],
       });
 
       const newProjectId = newProject._id || newProject.id;
-      if (dbConnections.length || storageConnections.length) {
+      if (dbConnections.length || storageConnections.length || integrationConnections.length) {
         const stamped = await Project.update({ _id: newProjectId }, {
           dbConnections: dbConnections.map(c => ({ ...c, projectId: newProjectId })),
           storageConnections: storageConnections.map(c => ({ ...c, projectId: newProjectId })),
+          integrationConnections: integrationConnections.map(c => ({ ...c, projectId: newProjectId })),
         });
         if (stamped) newProject = stamped;
       }
@@ -468,7 +472,7 @@ export function projectRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const alreadyConnected = [...(project.dbConnections ?? []), ...(project.storageConnections ?? [])]
+      const alreadyConnected = [...(project.dbConnections ?? []), ...(project.storageConnections ?? []), ...(project.integrationConnections ?? [])]
         .some((c: any) => c.integrationId === integrationId);
       if (alreadyConnected) return res.status(400).json({ message: 'This integration is already connected to the project' });
 
@@ -477,7 +481,9 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const updated = result.kind === 'database'
         ? await Project.update({ _id: projectId }, { $push: { dbConnections: result.connection } })
-        : await Project.update({ _id: projectId }, { $push: { storageConnections: result.connection } });
+        : result.kind === 'storage'
+          ? await Project.update({ _id: projectId }, { $push: { storageConnections: result.connection } })
+          : await Project.update({ _id: projectId }, { $push: { integrationConnections: result.connection } });
       if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
 
       res.status(201).json({ data: result.connection, project: sanitizeProject(updated) });
@@ -503,11 +509,14 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const dbConn = (project.dbConnections ?? []).find((c: any) => c.integrationId === integrationId);
       const storageConn = (project.storageConnections ?? []).find((c: any) => c.integrationId === integrationId);
-      if (!dbConn && !storageConn) return res.status(404).json({ message: 'Integration not connected to this project' });
+      const integrationConn = (project.integrationConnections ?? []).find((c: any) => c.integrationId === integrationId);
+      if (!dbConn && !storageConn && !integrationConn) return res.status(404).json({ message: 'Integration not connected to this project' });
 
       const updated = dbConn
         ? await Project.update({ _id: projectId }, { $pull: { dbConnections: { id: dbConn.id } } })
-        : await Project.update({ _id: projectId }, { $pull: { storageConnections: { id: storageConn.id } } });
+        : storageConn
+          ? await Project.update({ _id: projectId }, { $pull: { storageConnections: { id: storageConn.id } } })
+          : await Project.update({ _id: projectId }, { $pull: { integrationConnections: { id: integrationConn!.id } } });
       if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
 
       res.status(200).json({ message: 'Integration removed', project: sanitizeProject(updated) });
