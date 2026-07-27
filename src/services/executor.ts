@@ -1,9 +1,7 @@
-import { MongoClient } from 'mongodb';
-import { Pool } from 'pg';
-import { NodeSchema, StreamByConfig } from '../types';
-import { getConnection } from '../adapters/database/connectionManager';
+import { NodeSchema, StreamByConfig, Auth } from '../types';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
 import { queryRecordsInternal, queryRecordByIdInternal } from './dbConnection';
+import { resolveDbConnectionClient, releaseDbClient, resolveStorageAdapter } from './connectionResolver';
 import { createJob } from './jobQueue';
 import {
   runIngestJob,
@@ -90,6 +88,20 @@ function getTarget(nodes: ExecutionNode[], edges: ExecutionEdge[], sourceId: str
   return edge ? (nodes.find(n => n.id === edge.target) ?? null) : null;
 }
 
+export class NodeExecutionError extends Error {
+  constructor(public nodeId: string, public nodeType: string, message: string) {
+    super(message);
+    this.name = 'NodeExecutionError';
+  }
+}
+
+// Export execution is public (gated by allowedOrigin, not user identity — see
+// export.ts:339) — there is no real Auth to pass through. This sentinel satisfies
+// resolveDbConnectionClient's signature without adding a gate that never existed;
+// canUseBuiltin gating is for connection *management* by a user, not for serving an
+// already-published export.
+const SYSTEM_AUTH: Auth = { userId: 'system', username: 'system', role: 'admin' };
+
 export async function executeExport(
   nodeSchema: NodeSchema,
   project: any,
@@ -114,25 +126,31 @@ export async function executeExport(
       const tableName = (node.data?.tableName || node.data?.subtitle || node.data?.label) as string | undefined;
       if (!tableName) continue;
 
+      // dataSourceNode always declares its own database connection explicitly (persistence:
+      // 'database' in types/nodePersistence.ts) — a project has no notion of a "default"
+      // connection, since a project can have many database/storage/API providers connected.
       const connectionId = node.data?.connectionId as string | undefined;
-      const recordId     = node.data?.recordId     as string | undefined;
+      if (!connectionId) {
+        throw new NodeExecutionError(
+          node.id, node.type,
+          `Node '${node.id}' (${node.type}) has no database connection — connect one on the node.`,
+        );
+      }
+      const recordId = node.data?.recordId as string | undefined;
 
       const projectIdentifier = project._id?.toString() ?? project.id;
-      const fetchData = async (client: Pool | MongoClient, type: 'sql' | 'nosql') =>
-        recordId
-          ? queryRecordByIdInternal(client, type, tableName, recordId, projectIdentifier)
-          : queryRecordsInternal(client, type, tableName, 500, 0, projectIdentifier);
-
-      if (connectionId) {
-        const { client, type } = getConnection(connectionId);
-        dataResults.push(await fetchData(client as Pool | MongoClient, type));
-      } else {
-        // legacy fallback for nodes saved before connectionId was introduced
-        const targetDb = config.databases?.find((db: any) => db.type === project.dbType && db.main)
-          ?? config.databases?.find((db: any) => db.type === project.dbType);
-        if (!targetDb) throw new Error(`No database connection for type ${project.dbType}`);
-        const { client, type } = getConnection(targetDb.id);
-        dataResults.push(await fetchData(client as Pool | MongoClient, type));
+      const resolved = await resolveDbConnectionClient(project, connectionId, config, SYSTEM_AUTH);
+      if ('error' in resolved) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): ${resolved.error}`);
+      }
+      try {
+        dataResults.push(
+          recordId
+            ? await queryRecordByIdInternal(resolved.client, resolved.type, tableName, recordId, projectIdentifier)
+            : await queryRecordsInternal(resolved.client, resolved.type, tableName, 500, 0, projectIdentifier),
+        );
+      } finally {
+        await releaseDbClient(resolved);
       }
 
     } else if (node.type === 'connectionNode') {
@@ -202,6 +220,20 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'thumbnail' };
 
     } else if (processNode.type === 'ingestNode' && fileId) {
+      // ingestNode always declares its own storage connection explicitly (persistence:
+      // 'storage' in types/nodePersistence.ts) — a project has no notion of a "default"
+      // connection, since a project can have many database/storage/API providers connected.
+      const storageConnectionId = nodeData.storageConnectionId as string | undefined;
+      if (!storageConnectionId) {
+        throw new NodeExecutionError(
+          processNode.id, processNode.type,
+          `Node '${processNode.id}' (${processNode.type}) has no storage connection — connect one on the node.`,
+        );
+      }
+      const storageResolved = await resolveStorageAdapter(project, storageConnectionId, config, SYSTEM_AUTH);
+      if ('error' in storageResolved) {
+        throw new NodeExecutionError(processNode.id, processNode.type, `Node '${processNode.id}' (${processNode.type}): ${storageResolved.error}`);
+      }
       const job = createJob('ingest', systemUserId, projectId, nodeData);
       setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
       payload = { ...payload, jobId: job.jobId, jobType: 'ingest' };

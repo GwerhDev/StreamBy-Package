@@ -90,6 +90,24 @@ export interface ProjectInfo {
   // storageConnections for a pre-BYOC project — guards against re-seeding a builtin an
   // admin has since disconnected on purpose.
   builtinBackfilledAt?: Date;
+  workflow?: Workflow;
+}
+
+// Where a given node type's execution output actually lands. Used to validate, at
+// execution time, that a node has an explicit connectionId/storageConnectionId of its
+// own — never enforced at build/save time, and never resolved via any project-level
+// fallback (a project can have many database/storage/API providers connected at once).
+export type NodePersistence = 'database' | 'storage' | 'both' | 'none';
+
+export interface Workflow {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  projectId: string;
+  nodeSchema: NodeSchema | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export type ConnectionMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';

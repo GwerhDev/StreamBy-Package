@@ -3,13 +3,11 @@ import { StreamByConfig, StorageAdapter, Auth, StorageConnection } from '../../t
 import { deleteProjectImage } from '../../services/file';
 import { getPresignedProjectImageUrl } from '../../services/presign';
 import { createStorageProvider } from '../../providers/storage';
-import { S3Adapter } from '../../adapters/storage/s3';
 import { getModel } from '../../models/manager';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { isProjectMember } from '../../utils/auth';
-import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 import { assertBuiltinAccess } from '../../utils/builtinAccess';
-import { getDecryptedIntegrationCredentialById } from '../../services/userIntegration';
+import { resolveStorageAdapter } from '../../services/connectionResolver';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 
@@ -74,45 +72,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     return { projectId, ...connMatch, ...(extra ?? {}) };
   }
 
-  async function resolveConnAdapter(
-    connId: string,
-    project: any,
-    auth: Auth,
-  ): Promise<StorageAdapter | { error: string; status: number }> {
-    const conn: StorageConnection | undefined = findStorageConn(project, connId);
-    if (!conn) return { error: 'Storage connection not found', status: 404 };
-
-    if (conn.source === 'builtin') {
-      const builtinId = conn.integrationId!;
-      if (!(await assertBuiltinAccess(auth, builtinId, config, 'storage'))) {
-        return { error: 'Access to this built-in storage is not permitted', status: 403 };
-      }
-      const provider = config.storageProviders.find(p => p.id === builtinId);
-      if (!provider) return { error: 'Storage provider not found', status: 404 };
-      return provider.type === 's3' ? new S3Adapter(provider.config) : adapter;
-    }
-
-    if (conn.source === 'integration') {
-      if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
-      try {
-        const s3Config = await getDecryptedIntegrationCredentialById(conn.integrationId);
-        if (!s3Config) return { error: 'Integration not found', status: 400 };
-        return new S3Adapter(s3Config as any);
-      } catch (e: any) {
-        return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
-      }
-    }
-
-    if (!isEncryptionKeySet()) return { error: 'Encryption key not set', status: 500 };
-    if (!conn.encryptedCredential) return { error: 'Connection has no stored credential', status: 400 };
-
-    try {
-      const s3Config = JSON.parse(decrypt(conn.encryptedCredential));
-      return new S3Adapter(s3Config);
-    } catch (e: any) {
-      return { error: `Failed to initialize storage adapter: ${e.message}`, status: 500 };
-    }
-  }
+  const resolveConnAdapter = (connId: string, project: any, auth: Auth) =>
+    resolveStorageAdapter(project, connId, { ...config, adapter }, auth);
 
   router.get('/upload-project-image-url/:id', async (req: Request, res: Response) => {
     try {
