@@ -1,5 +1,7 @@
 # @streamby/core
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+
 Middleware framework for building storage-agnostic media APIs.  
 Part of the [StreamBy](https://streamby.nhexa.cl) ecosystem by TerminalCore Labs.
 
@@ -279,5 +281,9 @@ Visit us [here](https://terminalcore.cl)
 
 ## 📟 License
 
-[MIT](./LICENSE)
+Copyright (C) 2026 TerminalCore Labs
+
+Licensed under the [GNU Affero General Public License v3.0](./LICENSE) (AGPL-3.0-only).
+
+> **Note for consumers:** unlike most installable packages, this one is intentionally AGPL rather than MIT. AGPL's copyleft applies to any project that depends on it -- if you install `@streamby/core`, your own project must also be licensed under AGPL-3.0 (or a compatible copyleft license). Confirm this is acceptable for your use case before adding this dependency.
 
