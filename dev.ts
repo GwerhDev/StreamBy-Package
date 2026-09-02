@@ -11,7 +11,6 @@ dotenv.config();
 const config = {
   port: process.env.PORT || 4000,
   dummyId: process.env.DUMMY_ID,
-  awsSecret: process.env.AWS_SECRET,
   awsBucket: process.env.AWS_BUCKET,
   awsAccessKey: process.env.AWS_ACCESS_KEY,
   awsSecretKey: process.env.AWS_SECRET_KEY,
