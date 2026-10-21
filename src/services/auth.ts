@@ -2,8 +2,17 @@ import { Auth } from '../types';
 import { Request, Response, NextFunction } from 'express';
 import { StreamByConfig } from '../types';
 
+// The one route open without a session: a project's public export, read
+// (GET /:projectId/export/:exportName, see routes/export). Exactly that path -- not any path
+// that has an "export" segment somewhere.
+const PUBLIC_EXPORT = /^\/[^/]+\/export\/[^/]+\/?$/;
+const READ_METHODS = ['GET', 'HEAD', 'OPTIONS'];
+
+export const isPublicRoute = (method: string, path: string): boolean =>
+  READ_METHODS.includes(method.toUpperCase()) && PUBLIC_EXPORT.test(path);
+
 export const authenticate = (config: StreamByConfig) => async (req: Request, res: Response, next: NextFunction) => {
-  if (req.path.includes('/export/')) {
+  if (isPublicRoute(req.method, req.path)) {
     return next();
   }
 

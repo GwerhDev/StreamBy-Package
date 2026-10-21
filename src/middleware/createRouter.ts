@@ -93,10 +93,12 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     initWsHub(config.websocket.server, config);
   }
 
-  router.use(userRouter(config));
+  // /auth answers whether there's a session (it reads it itself); everything after needs one,
+  // but for the public export route (see authenticate).
   router.use(authRouter(config));
   router.use(authenticate(config));
   router.use(ensureSubscription);
+  router.use(userRouter(config));
   router.use(exportRouter(config));
   router.use(memberRouter(config));
   router.use(storageRouter(config));
