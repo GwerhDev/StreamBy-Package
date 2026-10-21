@@ -20,6 +20,16 @@
   the token.
 - New dependencies: `@modelcontextprotocol/sdk` and `zod`.
 
+### Fixed
+
+- **Projects can be made with PostgreSQL as the main database.** The `projects` table that
+  StreamBy creates at startup was missing columns the routes write: `public`, `category`,
+  `integrationConnections`, `distributionConnections` and `renderFarmConnections`.
+  - Making a project failed with `column "public" does not exist`.
+  - Adding service, distribution or render farm connections failed too.
+  - They're added at startup now, only where they're missing; databases that already have
+    them aren't changed.
+
 ## 0.35.0
 
 ### Added
