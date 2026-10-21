@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import { getModel } from '../models/manager';
-import { IntegrationKind, ServiceProviderType, StreamByConfig, UserIntegration } from '../types';
+import { IntegrationKind, ProjectInfo, ServiceProviderType, StreamByConfig, UserIntegration } from '../types';
 import { encrypt, decrypt, isEncryptionKeySet } from '../utils/encryption';
+import { activeMemberOf } from '../utils/auth';
 import { refreshTokens } from './oauthClient';
 
 const OAUTH_SERVICE_PROVIDERS = new Set<string>(['jira', 'google']);
@@ -182,9 +183,17 @@ export async function getDecryptedIntegrationCredential(userId: string, integrat
 // stored on the connection itself. `config` is required (not just for OAuth's sake) so a
 // near-expiry jira/google token can be refreshed using the host-injected client
 // credentials in config.oauthProviders.
-export async function getDecryptedIntegrationCredentialById(integrationId: string, config: StreamByConfig): Promise<ResolvedCredential | null> {
+// A member's own integration, used by a project it was connected to: it resolves only while its
+// owner is an active member of that project. A project its owner isn't in (never was, left it,
+// or a connection pointing at someone else's integration) never gets the credential.
+export async function getDecryptedIntegrationCredentialById(
+  integrationId: string,
+  config: StreamByConfig,
+  project: Pick<ProjectInfo, 'members'>,
+): Promise<ResolvedCredential | null> {
   const UserIntegrationModel = getModel('user_integrations');
   const integration = await UserIntegrationModel.findOne({ id: integrationId }) as UserIntegration | null;
+  if (!integration || !activeMemberOf(project, integration.userId)) return null;
   return resolveCredential(integration, config);
 }
 

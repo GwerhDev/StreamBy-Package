@@ -55,7 +55,7 @@ export async function resolveDbConnectionClient(
   let connectionString: string;
   if (conn.source === 'integration') {
     if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
-    const resolved = await getDecryptedIntegrationCredentialById(conn.integrationId, config);
+    const resolved = await getDecryptedIntegrationCredentialById(conn.integrationId, config, project);
     if (!resolved) return { error: 'Integration not found', status: 400 };
     connectionString = resolved.credential as string;
   } else {
@@ -110,7 +110,7 @@ export async function resolveStorageAdapter(
   if (conn.source === 'integration') {
     if (!conn.integrationId) return { error: 'Connection is missing its integrationId', status: 500 };
     try {
-      const resolved = await getDecryptedIntegrationCredentialById(conn.integrationId, config);
+      const resolved = await getDecryptedIntegrationCredentialById(conn.integrationId, config, project);
       if (!resolved) return { error: 'Integration not found', status: 400 };
       return new S3Adapter(resolved.credential as any);
     } catch (e: any) {

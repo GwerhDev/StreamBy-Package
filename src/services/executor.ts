@@ -1,7 +1,7 @@
 import { NodeSchema, StreamByConfig, Auth } from '../types';
 import { decrypt, isEncryptionKeySet } from '../utils/encryption';
 import { queryRecordsInternal, queryRecordByIdInternal } from './dbConnection';
-import { resolveDbConnectionClient, releaseDbClient, resolveStorageAdapter } from './connectionResolver';
+import { resolveDbConnectionClient, releaseDbClient, resolveStorageAdapter, findDbConnection } from './connectionResolver';
 import { getDecryptedIntegrationCredentialById } from './userIntegration';
 import { buildServiceAuthHeaders } from './oauthClient';
 import { createJob } from './jobQueue';
@@ -14,6 +14,7 @@ import {
 import { runRenderJob, runFormatConvertJob, runLodJob } from './vfxProcessor';
 import { runTranscriptionJob, runUpscaleJob, runGenerateAssetJob, buildPipelineSuggestion } from './aiProcessor';
 import { createStorageProvider } from '../providers/storage';
+import { isServiceEndpoint } from '../utils/serviceEndpoints';
 
 interface FilterCondition { field: string; op: string; value: string; }
 interface FilterNodeConfig {
@@ -97,17 +98,36 @@ export class NodeExecutionError extends Error {
   }
 }
 
-// Export execution is public (gated by allowedOrigin, not user identity — see
-// export.ts:339) — there is no real Auth to pass through. This sentinel satisfies
-// resolveDbConnectionClient's signature without adding a gate that never existed;
-// canUseBuiltin gating is for connection *management* by a user, not for serving an
-// already-published export.
+// Export execution has no user behind it (a public export is read without a session -- see
+// routes/export) -- there is no real Auth to pass through. This sentinel satisfies
+// resolveDbConnectionClient's signature; canUseBuiltin gating is for connection *management*
+// by a user, not for serving an already-published export.
 const SYSTEM_AUTH: Auth = { userId: 'system', username: 'system', role: 'admin' };
+
+// Nodes that start a job (transcoding, rendering, generating...): work, and cost, on the
+// server or a provider, for whoever asks.
+const JOB_NODES = new Set([
+  'transcodeNode', 'captionNode', 'thumbnailNode', 'ingestNode', 'renderJobNode', 'formatConvertNode',
+  'lodNode', 'transcriptionNode', 'upscaleNode', 'proceduralAssetNode',
+]);
+
+export interface ExecuteExportOptions {
+  // Read without a session (the public export route), the default: only nodes that read data
+  // run -- static JSON, the server's built-in databases and storage, the project's own
+  // connections. Never a node using the credential of someone's account (a Claude/Jira/Google
+  // or BYOC integration) nor one that starts a job: anyone could make it spend what isn't theirs.
+  public?: boolean;
+}
+
+const notPublic = (node: { id: string; type: string }) => new NodeExecutionError(
+  node.id, node.type, `Node '${node.id}' (${node.type}) can't run in a public export.`,
+);
 
 export async function executeExport(
   nodeSchema: NodeSchema,
   project: any,
   config: StreamByConfig,
+  { public: isPublic = true }: ExecuteExportOptions = {},
 ): Promise<any> {
   const nodes = nodeSchema.nodes as ExecutionNode[];
   const edges = nodeSchema.edges as ExecutionEdge[];
@@ -138,6 +158,7 @@ export async function executeExport(
           `Node '${node.id}' (${node.type}) has no database connection — connect one on the node.`,
         );
       }
+      if (isPublic && findDbConnection(project, connectionId)?.source === 'integration') throw notPublic(node);
       const recordId = node.data?.recordId as string | undefined;
 
       const projectIdentifier = project._id?.toString() ?? project.id;
@@ -180,6 +201,7 @@ export async function executeExport(
       // NodeExecutionError (matching dataSourceNode/ingestNode's intentional pattern), since
       // a silently-skipped service action would produce a workflow that "succeeds" while
       // quietly missing the one thing the node exists to do.
+      if (isPublic) throw notPublic(node);
       const connectionId = node.data?.connectionId as string | undefined;
       if (!connectionId) {
         throw new NodeExecutionError(
@@ -192,15 +214,20 @@ export async function executeExport(
         throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration connection not found on this project.`);
       }
 
-      const resolved = await getDecryptedIntegrationCredentialById(connection.integrationId, config);
-      if (!resolved) {
-        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration credential could not be resolved — it may have been disconnected.`);
-      }
-
       const endpoint = node.data?.endpoint as string | undefined;
       if (!endpoint) {
         throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}) has no endpoint configured.`);
       }
+      // Checked before the credential is even resolved: it's only ever sent to its provider.
+      if (!isServiceEndpoint(connection.provider, endpoint)) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): ${endpoint} is not a ${connection.provider} endpoint.`);
+      }
+
+      const resolved = await getDecryptedIntegrationCredentialById(connection.integrationId, config, project);
+      if (!resolved) {
+        throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration credential could not be resolved — it may have been disconnected.`);
+      }
+
       const method = (node.data?.method as string | undefined) ?? 'GET';
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -208,7 +235,8 @@ export async function executeExport(
       };
 
       const body = node.data?.body ? JSON.stringify(node.data.body) : undefined;
-      const response = await fetch(endpoint, { method, headers, body });
+      // A redirect would carry the credential's headers on to wherever it points.
+      const response = await fetch(endpoint, { method, headers, body, redirect: 'error' });
       if (!response.ok) {
         throw new NodeExecutionError(node.id, node.type, `Node '${node.id}' (${node.type}): integration action failed (${response.statusText}).`);
       }
@@ -228,6 +256,7 @@ export async function executeExport(
   while (processNode) {
     const nodeData = processNode.data ?? {};
     const fileId = nodeData.fileId as string | undefined;
+    if (isPublic && JOB_NODES.has(processNode.type)) throw notPublic(processNode);
 
     if (processNode.type === 'transcodeNode' && fileId) {
       const job = createJob('transcode', systemUserId, projectId, nodeData);

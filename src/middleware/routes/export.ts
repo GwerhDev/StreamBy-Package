@@ -401,7 +401,8 @@ export function exportRouter(config: StreamByConfig): Router {
       let data: any;
 
       if (exportMetadata.nodeSchema) {
-        data = await executeExport(exportMetadata.nodeSchema, project, config);
+        // Read without a session: only the nodes that read data run (see executeExport).
+        data = await executeExport(exportMetadata.nodeSchema, project, config, { public: true });
         return res.json(data ?? null);
       }
 

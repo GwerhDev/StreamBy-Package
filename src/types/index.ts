@@ -72,6 +72,8 @@ export interface ProjectInfo {
     role: 'viewer' | 'editor' | 'admin';
     userId: string;
     archived?: boolean;
+    // 'pending' until the invitation (or the request to join) is accepted.
+    status?: 'active' | 'pending';
   }[];
   description?: string;
   exports?: {
