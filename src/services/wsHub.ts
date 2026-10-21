@@ -16,6 +16,12 @@ export function initWsHub(wss: WebSocketServer, config: StreamByConfig): void {
         ws.close(1008, 'Unauthorized');
         return;
       }
+      // The WebSocket is the browser session's: it gets every event of its user, whatever the
+      // project, so an API token (scoped to some projects, maybe read-only) never opens it.
+      if (auth.apiToken) {
+        ws.close(1008, "API tokens can't open the WebSocket");
+        return;
+      }
       userId = auth.userId;
     } catch (err) {
       console.error('❌ WS auth error:', err);
