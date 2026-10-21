@@ -87,11 +87,6 @@ const ensureTablesExist = async (pool: Pool) => {
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "integrationConnections"  JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "distributionConnections" JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "renderFarmConnections"   JSONB DEFAULT '[]';
-      -- Reverted: a project has no notion of a "default" database/storage connection —
-      -- each dataSourceNode/ingestNode always declares its own connection explicitly.
-      ALTER TABLE streamby.projects DROP COLUMN IF EXISTS "defaultDatabaseId";
-      ALTER TABLE streamby.projects DROP COLUMN IF EXISTS "defaultStorageId";
-      ALTER TABLE streamby.projects DROP COLUMN IF EXISTS "defaultConnectionsBackfilledAt";
     `);
 
     // Ensure dbType exists with a non-null default
