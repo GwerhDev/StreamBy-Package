@@ -100,6 +100,55 @@ createStreamByRouter({
 
 ---
 
+## 🎫 API tokens
+
+Agents and services work with StreamBy as a user through API tokens, without the user's
+browser session. A user manages their own tokens (`GET`, `POST` and
+`DELETE /streamby/user/api-tokens`, only with a session). Each token has:
+
+- **an access level**: `read` (only reads) or `write` (reads and writes);
+- **the projects it reaches**: a list of project ids, or `'*'` for every project the user is a
+  member of, including ones they join later;
+- **an expiry**: 7, 30, 90 or 365 days, or none.
+
+A token is `sbt_` followed by 32 random bytes. It's shown once, when it's made. Only its
+SHA-256 hash is stored, with a short prefix to tell it apart.
+
+Requests send it as `Authorization: Bearer sbt_...`. Your `authProvider` resolves it with
+`resolveApiToken` and returns its owner, with the token's scope in `apiToken`:
+
+```ts
+import { createStreamByRouter, resolveApiToken, API_TOKEN_PREFIX } from '@streamby/core';
+
+createStreamByRouter({
+  // ...
+  authProvider: async (req) => {
+    const bearer = req.headers.authorization?.replace(/^Bearer /, '');
+    if (bearer?.startsWith(API_TOKEN_PREFIX)) {
+      const resolved = await resolveApiToken(bearer); // null once revoked or expired
+      if (!resolved) throw new Error('Invalid API token');
+      const user = await findUser(resolved.userId);   // your own user lookup
+      return { userId: user.id, username: user.username, role: user.role, apiToken: resolved.scope };
+    }
+    // ...your session-based authentication
+  },
+});
+```
+
+A request made with a token reaches only what the token's scope allows:
+
+- a `read` token can't write;
+- a project outside the token's projects answers 404, and the project list shows only the
+  token's projects;
+- a token can't manage tokens;
+- outside a project, a token can only make a few reads (`/auth`, `/projects`, `/jobs/:jobId`,
+  `/user/subscription`, `/users/search`).
+
+The owner's role in each project still applies on top of that. A token never does more than
+its owner can, and it stops reaching a project as soon as its owner leaves it.
+
+---
+
 ## 👥 Project roles
 
 What a user can do in a project depends on their role in that project, as an active member

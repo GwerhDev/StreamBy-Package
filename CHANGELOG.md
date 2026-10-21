@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **API tokens**, so agents and services can work with StreamBy as a user without the user's
+  browser session (see the README):
+  - `GET`, `POST` and `DELETE /user/api-tokens` let a user list, make and revoke their own
+    tokens. These routes need a session.
+  - Each token has a scope: `read` or `write`, and the projects it reaches (a list, or `'*'`
+    for all of the user's projects). It expires in 7, 30, 90 or 365 days, or never.
+  - Only a token's hash is stored, in the new `api_tokens` table, which is created at startup.
+  - `resolveApiToken` (exported) is for your `authProvider`: it turns `Bearer sbt_...` into
+    the token's owner and scope, which you return as `Auth.apiToken`.
+  - A request made with a token reaches only the token's scope, and never more than its
+    owner can do.
+
 ## 0.34.0
 
 ### ⚠️ Migration and deploy
