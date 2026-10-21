@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createJob } from '../../services/jobQueue';
 import { runTranscriptionJob, runUpscaleJob, runGenerateAssetJob, buildPipelineSuggestion } from '../../services/aiProcessor';
 import { Auth } from '../../types';
@@ -31,7 +31,7 @@ export function aiRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('transcription', auth.userId, projectId, { fileId, model, sourceLanguage, outputFormats, provider, credentialId });
 
@@ -56,7 +56,7 @@ export function aiRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('upscale', auth.userId, projectId, { fileId, scale, model, mode, credentialId });
 
@@ -81,7 +81,7 @@ export function aiRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('generate-asset', auth.userId, projectId, { assetType, provider, prompt, seed, credentialId });
 

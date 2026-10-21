@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { ObjectId } from 'mongodb';
 
 export function workflowRouter(config: StreamByConfig): Router {
@@ -38,7 +38,7 @@ export function workflowRouter(config: StreamByConfig): Router {
 
       const projectId = req.params.id;
       const project = await Project.findOne({ _id: projectId });
-      if (!project || !isProjectMember(project, auth.userId)) {
+      if (!project || !canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 

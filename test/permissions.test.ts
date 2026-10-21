@@ -100,6 +100,46 @@ describe('changing a project and its connections', () => {
   });
 });
 
+// Every write to a project's content, across its routers: an editor's or an admin's.
+describe('writing to a project', () => {
+  const WRITES: [string, string, object?][] = [
+    ['post', '/projects/p1/exports', { name: 'e', collectionName: 'c' }],
+    ['delete', '/projects/p1/exports/e1'],
+    ['patch', '/projects/p1/storage/files/f1', { displayName: 'x' }],
+    ['delete', '/projects/p1/storage/files/f1'],
+    ['get', '/projects/p1/storage/images/upload-url?fileName=a.png&contentType=image/png'],
+    ['post', '/projects/p1/production/sequences', { name: 's' }],
+    ['post', '/projects/p1/reviews', { assetId: 'a', assetVersionId: 'v1' }],
+    ['put', '/projects/p1/assets/a1/rights', { license: 'cc' }],
+    ['patch', '/projects/p1/workflow', { nodes: [], edges: [] }],
+    ['post', '/projects/p1/jobs/ingest', { fileId: 'f1' }],
+    ['post', '/projects/p1/jobs/render', { fileId: 'f1' }],
+    ['post', '/projects/p1/render-farm-connections', { name: 'f', provider: 'p', apiUrl: 'https://x.example.com' }],
+    ['post', '/projects/p1/pipelines', { name: 'p' }],
+  ];
+  const call = (user: string, [method, path, body]: [string, string, object?]) =>
+    (as(user) as any)[method](path).send(body ?? {});
+
+  it('is turned down for a viewer, and someone pending', async () => {
+    for (const write of WRITES) {
+      for (const user of ['vic', 'pat']) {
+        expect((await call(user, write)).status, `${user} ${write[0]} ${write[1]}`).toBe(403);
+      }
+    }
+  });
+
+  it('is let through for an editor', async () => {
+    for (const write of WRITES) {
+      expect((await call('eli', write)).status, `${write[0]} ${write[1]}`).not.toBe(403);
+    }
+  });
+
+  // Archiving is a member's own list, not the project.
+  it('still lets a viewer archive the project in their list', async () => {
+    expect((await as('vic').patch('/projects/p1/archive')).status).not.toBe(403);
+  });
+});
+
 describe("seeing a job", () => {
   it("is for whoever started it, or a member of its project", async () => {
     const job = createJob('ingest', 'vic', 'p1', {});

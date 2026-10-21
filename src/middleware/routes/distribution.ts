@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { MongoClient } from 'mongodb';
 import { StreamByConfig, DistributionConnection, QcReportRecord, DeliveryTarget } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { emitToUser } from '../../services/wsHub';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
@@ -55,7 +55,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const connection: DistributionConnection = {
         id: crypto.randomUUID(),
@@ -85,7 +85,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
       const { projectId, connectionId } = req.params;
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       await Project.update(
         { _id: projectId },
@@ -110,7 +110,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const exportDoc = await Export.findOne({ id: exportId, projectId });
       if (!exportDoc) return res.status(404).json({ message: 'Deliverable not found' });
@@ -194,7 +194,7 @@ export function distributionRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });

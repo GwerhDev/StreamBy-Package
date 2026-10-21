@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createExport, updateExport, deleteExport } from '../../services/export';
 import { executeExport } from '../../services/executor';
 import { getConnection } from '../../adapters/database/connectionManager';
@@ -260,7 +260,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const exportType = useConnections ? 'externalApi' : 'json';
 
       const project = await Project.findOne({ _id: projectId });
-      if (!project || !isProjectMember(project, auth.userId)) {
+      if (!project || !canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -286,7 +286,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const { name, description, isPrivate, allowedOrigin, devMode, devPorts, useConnections, useCredentials, nodeSchema } = req.body;
 
       const project = await Project.findOne({ _id: projectId });
-      if (!project || !isProjectMember(project, auth.userId)) {
+      if (!project || !canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -318,7 +318,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const { id: projectId, export_id: exportId } = req.params;
 
       const project = await Project.findOne({ _id: projectId });
-      if (!project || !isProjectMember(project, auth.userId)) {
+      if (!project || !canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 

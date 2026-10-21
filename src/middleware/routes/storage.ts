@@ -131,7 +131,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       if (!adapter.getPresignedUploadUrl) {
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
@@ -212,7 +212,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -237,7 +237,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -318,7 +318,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
@@ -455,7 +455,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -480,7 +480,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
@@ -583,7 +583,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const conn = findStorageConn(project, connId);
       const isBuiltin = conn?.source === 'builtin';
@@ -637,7 +637,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFoldersCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -677,7 +677,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFoldersCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -712,7 +712,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const foldersCollection = getRawFoldersCollection();
       if (!foldersCollection) return res.status(500).json({ message: 'Database not available' });
@@ -749,7 +749,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       if (folderId != null) {
         const foldersCollection = getRawFoldersCollection();

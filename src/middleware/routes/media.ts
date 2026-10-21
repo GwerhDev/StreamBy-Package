@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createJob, getJob } from '../../services/jobQueue';
 import {
   runIngestJob,
@@ -60,7 +60,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('ingest', auth.userId, projectId, { fileId });
 
@@ -84,7 +84,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('transcode', auth.userId, projectId, {
         fileId, codec, resolution, outputFormat, bitrate, audioCodec,
@@ -111,7 +111,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('thumbnail', auth.userId, projectId, { fileId, timecode, resolution, strategy });
 
@@ -134,7 +134,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('caption', auth.userId, projectId, { fileId, sourceLanguage, outputFormat, provider });
 
@@ -179,7 +179,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const col = getMetadataCollection();
       if (!col) return res.status(500).json({ message: 'Database not available' });

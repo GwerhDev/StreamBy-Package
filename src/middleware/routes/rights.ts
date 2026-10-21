@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { MongoClient } from 'mongodb';
 import { StreamByConfig } from '../../types';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { getModel } from '../../models/manager';
 import { Auth } from '../../types';
@@ -42,7 +42,7 @@ export function rightsRouter(_config: StreamByConfig): Router {
       const { projectId, assetId } = req.params;
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });

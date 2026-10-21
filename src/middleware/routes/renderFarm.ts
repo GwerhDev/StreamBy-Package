@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createJob, getJob } from '../../services/jobQueue';
 import { runRenderJob, runFormatConvertJob, runLodJob, resolveAssetDependencyGraph } from '../../services/vfxProcessor';
 import { Auth } from '../../types';
@@ -45,7 +45,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const connection = {
         id: crypto.randomUUID(),
@@ -75,7 +75,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
       const { projectId, connectionId } = req.params;
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       await Project.update(
         { _id: projectId },
@@ -100,7 +100,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('render', auth.userId, projectId, { fileId, renderer, renderFarmConnectionId, frameRange, resolution, samples, outputFormat });
 
@@ -124,7 +124,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('format-convert', auth.userId, projectId, { fileId, inputFormat, outputFormat, applyTransforms, embedTextures });
 
@@ -148,7 +148,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
       const job = createJob('lod', auth.userId, projectId, { fileId, levels, reductionRatios, algorithm, outputFormat });
 
