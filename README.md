@@ -102,20 +102,49 @@ createStreamByRouter({
 
 ## 🎫 API tokens
 
-Agents and services work with StreamBy as a user through API tokens, without the user's
-browser session. A user manages their own tokens (`GET`, `POST` and
-`DELETE /streamby/user/api-tokens`, only with a session). Each token has:
+Agents and services work with StreamBy through API tokens, without a browser session. There
+are two kinds:
 
-- **an access level**: `read` (only reads) or `write` (reads and writes);
-- **the projects it reaches**: a list of project ids, or `'*'` for every project the user is a
-  member of, including ones they join later;
-- **an expiry**: 7, 30, 90 or 365 days, or none.
+- **A user's token** acts as its user. The user manages their own (`GET`, `POST` and
+  `DELETE /streamby/user/api-tokens`). It reaches a list of the user's projects, or `'*'` for
+  every project they're a member of, including ones they join later. It never does more than
+  its user can: their role in each project still applies.
+- **A project's token** acts on its project alone, as the project's, not as whoever made it:
+  it keeps working after they leave the project, for permanent integrations (CI, services, the
+  project's agents). Only the project's admins list, make and revoke them (`GET`, `POST` and
+  `DELETE /streamby/projects/:id/api-tokens`), and each one records who made it. When they
+  leave, the project's admins are notified that it still works. Deleting the project ends
+  its tokens.
 
-A token is `sbt_` followed by 32 random bytes. It's shown once, when it's made. Only its
-SHA-256 hash is stored, with a short prefix to tell it apart.
+Tokens are managed only with a session: a token can't manage tokens.
+
+Each token has a name, **its permissions**, and **an expiry** (7, 30, 90 or 365 days, or
+none). It's `sbt_` followed by 32 random bytes, shown once, when it's made. Only its SHA-256
+hash is stored, with a short prefix to tell it apart.
+
+**Permissions**
+
+| Resource | Permissions | Covers |
+|---|---|---|
+| Project | `project:read`, `project:update`, `project:delete` | The project, its settings and its connections (API, database, storage, distribution, render farm), integrations and allowed origins. |
+| Members | `members:read`, `members:manage` | Listing members; inviting, changing and removing them, and searching users. |
+| Assets | `assets:read`, `assets:write`, `assets:delete` | Files and folders, upload URLs, metadata, versions, reviews and annotations, QC reports. |
+| Production | `production:read`, `production:write`, `production:delete` | Sequences, shots and tasks. |
+| Workflow | `workflow:read`, `workflow:write` | The workflow and its pipelines. |
+| Exports | `exports:read`, `exports:write` | The project's exports. |
+| Rights | `rights:read`, `rights:write` | Assets' rights. |
+| Jobs | `jobs:read`, `jobs:run` | Following jobs; starting them (transcoding, rendering, AI, publishing a deliverable). |
+| Account | `projects:create` | Creating projects. A user's token only; the token reaches what it creates. |
+
+`PROJECT_PERMISSIONS` and `ACCOUNT_PERMISSIONS` are exported. A route no permission covers
+(the user's notifications, integrations and tokens, Explore, accepting an invitation) isn't
+reachable with a token.
+
+**Resolving a token**
 
 Requests send it as `Authorization: Bearer sbt_...`. Your `authProvider` resolves it with
-`resolveApiToken` and returns its owner, with the token's scope in `apiToken`:
+`resolveApiToken`, and returns its `userId` with the token's scope in `apiToken`. A project's
+token isn't a user: its `userId` is the token's own (on its project), and it goes by its name.
 
 ```ts
 import { createStreamByRouter, resolveApiToken, API_TOKEN_PREFIX } from 'streamby-core';
@@ -127,6 +156,9 @@ createStreamByRouter({
     if (bearer?.startsWith(API_TOKEN_PREFIX)) {
       const resolved = await resolveApiToken(bearer); // null once revoked or expired
       if (!resolved) throw new Error('Invalid API token');
+      if (resolved.scope.kind === 'project') {
+        return { userId: resolved.userId, username: resolved.name, role: 'viewer', apiToken: resolved.scope };
+      }
       const user = await findUser(resolved.userId);   // your own user lookup
       return { userId: user.id, username: user.username, role: user.role, apiToken: resolved.scope };
     }
@@ -135,17 +167,9 @@ createStreamByRouter({
 });
 ```
 
-A request made with a token reaches only what the token's scope allows:
-
-- a `read` token can't write;
-- a project outside the token's projects answers 404, and the project list shows only the
-  token's projects;
-- a token can't manage tokens;
-- outside a project, a token can only make a few reads (`/auth`, `/projects`, `/jobs/:jobId`,
-  `/user/subscription`, `/users/search`).
-
-The owner's role in each project still applies on top of that. A token never does more than
-its owner can, and it stops reaching a project as soon as its owner leaves it.
+A request made with a token goes through only when its route's permission is among the
+token's (otherwise 403), and a project outside the token's projects answers 404; the project
+list shows only the token's projects.
 
 ---
 
@@ -156,24 +180,34 @@ StreamBy serves an [MCP](https://modelcontextprotocol.io) server at `POST /strea
 projects with an API token (see above). It takes only an API token; a browser session gets 401.
 
 Each tool calls StreamBy's own REST API with the caller's token. So it reaches exactly what the
-token's scope and its owner's role in each project allow, and a write is saved just like one
-made from the UI, which shows it when it loads the project.
+token allows (and, for a user's token, what its user's role in each project allows), and a
+change is saved just like one made from the UI, which shows it when it loads the project.
 
 **Tools**
 
-- **Reading**, with any token:
-  - `list_projects`, `get_project`;
-  - `list_assets` (by category, optionally in one storage connection, and filtered by name),
-    `get_asset_metadata`, `get_asset_rights`;
-  - `get_workflow`, `list_pipelines`, `get_pipeline`, `list_exports`, `get_export`;
-  - `get_job`;
-  - `list_sequences`, `list_shots`, `list_tasks`.
-- **Writing**, listed only for a `write` token, and allowed only where its owner is an editor or
-  an admin:
-  - `update_asset_metadata`, `set_asset_rights`;
-  - `create_pipeline`, `update_pipeline`;
-  - `create_sequence`, `update_sequence`, `create_shot`, `update_shot`, `create_task`,
-    `update_task`.
+A token sees only the tools whose permissions it has.
+
+| Tools | Permissions |
+|---|---|
+| `list_projects` | any token |
+| `get_project` | `project:read` |
+| `create_project` | `projects:create` |
+| `delete_project` | `project:delete` |
+| `list_assets` (by category, optionally in one storage connection, and filtered by name), `get_asset_metadata` | `assets:read` |
+| `update_asset_metadata` | `assets:write` |
+| `delete_asset` | `assets:delete` |
+| `get_asset_rights` / `set_asset_rights` | `rights:read` / `rights:write` |
+| `get_workflow`, `list_pipelines`, `get_pipeline` | `workflow:read` |
+| `create_pipeline`, `update_pipeline` | `workflow:write` |
+| `list_exports` | `project:read` and `exports:read` |
+| `get_export` | `exports:read` |
+| `get_job` | `jobs:read` |
+| `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
+| `create_sequence`, `update_sequence`, `create_shot`, `update_shot`, `create_task`, `update_task` | `production:write` |
+| `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
+
+The tools that delete are marked as destructive (`destructiveHint`), so a client can ask before
+running them.
 
 **Limits and audit**
 
@@ -181,8 +215,9 @@ made from the UI, which shows it when it loads the project.
   answers 429 with `Retry-After`. Each instance counts its own requests. Change the limit with
   `mcp.rateLimit`.
 - Every tool call is recorded in the `mcp_audit` table, created at startup in the main database.
-  Each row has the user, the token's id, the project, the tool, whether it went through, the
-  status, the error and the duration. A row never includes the arguments or the token.
+  Each row has the user (a project's token: the token itself), the token's id, the project, the
+  tool, whether it went through, the status, the error and the duration. A row never includes
+  the arguments or the token.
 
 ```ts
 createStreamByRouter({
@@ -197,8 +232,9 @@ createStreamByRouter({
 
 ### Connecting from Claude Code
 
-Make an API token in StreamBy (Settings → Security → Personal API tokens), and keep it in an
-environment variable, never in a file:
+Make an API token in StreamBy, with only the permissions the agent needs: your own
+(Settings → Security → Personal API tokens), or a project's (in the project, Settings → API
+Tokens). Keep it in an environment variable, never in a file:
 
 ```bash
 export STREAMBY_TOKEN=sbt_...
@@ -223,8 +259,8 @@ environment:
 
 Claude Desktop runs local (stdio) servers from `claude_desktop_config.json`. Reach StreamBy
 through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), passing the token in its
-`env`. This file holds it in plain text, so use a token with only the scope you need, and
-an expiry:
+`env`. This file holds it in plain text, so use a token with only the permissions you need,
+and an expiry:
 
 ```json
 {
