@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { ObjectId } from 'mongodb';
 import { StreamByConfig, Auth, StorageConnection, StorageConnectionType } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { assertBuiltinAccess } from '../../utils/builtinAccess';
 import { sanitizeConnection } from '../../utils/sanitize';
 import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
@@ -40,9 +40,6 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
   router.post('/projects/:id/connections/storage', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const { name, type, credential, integrationId, description } = req.body;
       if (!name || !type) {
@@ -60,7 +57,7 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: req.params.id });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
       let encryptedCredential: string | undefined;
       if (integrationId) {
@@ -97,13 +94,10 @@ export function storageConnectionRouter(config: StreamByConfig): Router {
     try {
       const { connId } = req.params;
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const project = await Project.findOne({ _id: req.params.id });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
       const conn = project.storageConnections?.find((c: StorageConnection) => c.id === connId);
       if (!conn) return res.status(404).json({ message: 'Storage connection not found' });

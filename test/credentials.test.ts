@@ -62,10 +62,17 @@ describe('getDecryptedIntegrationCredentialById', () => {
     expect(resolved?.credential).toBe(CLAUDE_KEY);
   });
 
-  it("never resolves it for a project its owner isn't in, left, or hasn't joined yet", async () => {
-    for (const members of [[member('beto')], [member('ana', { archived: true }), member('beto')], [member('ana', { status: 'pending' })]]) {
+  // Leaving a project takes the member out of it.
+  it("never resolves it for a project its owner isn't in (never was, or left) or hasn't joined yet", async () => {
+    for (const members of [[member('beto')], [member('ana', { status: 'pending' }), member('beto')]]) {
       expect(await getDecryptedIntegrationCredentialById('claude-ana', {} as any, projectWith(members))).toBeNull();
     }
+  });
+
+  // A member's archived flag is only them having archived the project in their own list.
+  it('still resolves it for an owner who archived the project in their list', async () => {
+    const resolved = await getDecryptedIntegrationCredentialById('claude-ana', {} as any, projectWith([member('ana', { archived: true })]));
+    expect(resolved?.credential).toBe(CLAUDE_KEY);
   });
 });
 
@@ -92,7 +99,7 @@ describe('executeExport', () => {
     });
 
     it("doesn't run once its owner left the project", async () => {
-      await expect(run(claudeNode('https://api.anthropic.com/v1/messages'), projectWith([member('ana', { archived: true }), member('beto')]), false))
+      await expect(run(claudeNode('https://api.anthropic.com/v1/messages'), projectWith([member('beto')]), false))
         .rejects.toThrow(/could not be resolved/);
       expect(fetchMock).not.toHaveBeenCalled();
     });

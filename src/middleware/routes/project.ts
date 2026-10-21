@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { DbConnection, StorageConnection, IntegrationConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { sanitizeProject } from '../../utils/sanitize';
@@ -77,9 +77,6 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ error: 'Freemium users cannot create projects' });
       }
 
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const { name, description, image, allowedOrigin, public: isPublic = true, category, integrationIds } = req.body;
 
@@ -224,9 +221,6 @@ export function projectRouter(config: StreamByConfig): Router {
   router.patch('/projects/:id', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const updates = req.body;
@@ -241,7 +235,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Missing updates payload' });
       }
 
-      if (!isProjectMember(project, auth.userId)) {
+      if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -275,8 +269,9 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!isProjectMember(project, auth.userId)) {
-        return res.status(403).json({ message: 'Unauthorized project access' });
+      // Only an admin of the project deletes it.
+      if (!isProjectAdmin(project, auth.userId)) {
+        return res.status(403).json({ message: 'Only a project admin can delete it' });
       }
 
       await Project.useDbType(project.dbType).delete({ _id: projectId });
@@ -393,9 +388,6 @@ export function projectRouter(config: StreamByConfig): Router {
   router.post('/projects/:id/image', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const { imageUrl } = req.body;
@@ -409,7 +401,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!isProjectMember(project, auth.userId)) {
+      if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -428,9 +420,6 @@ export function projectRouter(config: StreamByConfig): Router {
   router.patch('/projects/:id/origins', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const { origins } = req.body;
@@ -441,7 +430,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!isProjectMember(project, auth.userId)) {
+      if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -460,9 +449,6 @@ export function projectRouter(config: StreamByConfig): Router {
   router.post('/projects/:id/integrations', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const { integrationId } = req.body;
@@ -470,7 +456,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
       const alreadyConnected = [...(project.dbConnections ?? []), ...(project.storageConnections ?? []), ...(project.integrationConnections ?? [])]
         .some((c: any) => c.integrationId === integrationId);
@@ -496,16 +482,13 @@ export function projectRouter(config: StreamByConfig): Router {
   router.delete('/projects/:id/integrations/:integrationId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const { integrationId } = req.params;
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
       const dbConn = (project.dbConnections ?? []).find((c: any) => c.integrationId === integrationId);
       const storageConn = (project.storageConnections ?? []).find((c: any) => c.integrationId === integrationId);

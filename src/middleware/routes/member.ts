@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnectedIds, getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { createNotification } from '../../services/notification';
@@ -61,9 +61,6 @@ export function memberRouter(config: StreamByConfig): Router {
   router.post('/projects/:id/members', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin') {
-        return res.status(403).json({ message: 'Only admins can invite members' });
-      }
 
       const projectId = req.params.id;
       const { userId, role } = req.body;
@@ -79,7 +76,7 @@ export function memberRouter(config: StreamByConfig): Router {
       if (!project) {
         return res.status(404).json({ message: 'Project not found' });
       }
-      if (!isProjectMember(project, auth.userId)) {
+      if (!isProjectAdmin(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -130,9 +127,6 @@ export function memberRouter(config: StreamByConfig): Router {
   router.patch('/projects/:id/members/:userId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin') {
-        return res.status(403).json({ message: 'Only admins can update member roles' });
-      }
 
       const projectId = req.params.id;
       const targetUserId = req.params.userId;
@@ -146,7 +140,7 @@ export function memberRouter(config: StreamByConfig): Router {
       if (!project) {
         return res.status(404).json({ message: 'Project not found' });
       }
-      if (!isProjectMember(project, auth.userId)) {
+      if (!isProjectAdmin(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -360,9 +354,6 @@ export function memberRouter(config: StreamByConfig): Router {
   router.delete('/projects/:id/members/:userId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin') {
-        return res.status(403).json({ message: 'Only admins can remove members' });
-      }
 
       const projectId = req.params.id;
       const targetUserId = req.params.userId;
@@ -375,7 +366,7 @@ export function memberRouter(config: StreamByConfig): Router {
       if (!project) {
         return res.status(404).json({ message: 'Project not found' });
       }
-      if (!isProjectMember(project, auth.userId)) {
+      if (!isProjectAdmin(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 

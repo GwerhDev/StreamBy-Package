@@ -32,10 +32,21 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
   const Project = getModel('projects');
 
   // GET /jobs/:jobId — poll job status
-  router.get('/jobs/:jobId', (req: Request, res: Response) => {
-    const job = getJob(req.params.jobId);
-    if (!job) return res.status(404).json({ message: 'Job not found' });
-    res.json({ job });
+  // Only for whoever started it, or a member of its project: someone else's job is as if it
+  // didn't exist.
+  router.get('/jobs/:jobId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const job = getJob(req.params.jobId);
+      if (!job) return res.status(404).json({ message: 'Job not found' });
+      if (job.userId !== auth.userId) {
+        const project = await Project.findOne({ _id: job.projectId });
+        if (!isProjectMember(project, auth.userId)) return res.status(404).json({ message: 'Job not found' });
+      }
+      res.json({ job });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch job', details: err.message });
+    }
   });
 
   // POST /projects/:projectId/jobs/ingest — queue an ingest job for an already-uploaded file

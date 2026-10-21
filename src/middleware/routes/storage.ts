@@ -5,7 +5,7 @@ import { getPresignedProjectImageUrl } from '../../services/presign';
 import { createStorageProvider } from '../../providers/storage';
 import { getModel } from '../../models/manager';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { assertBuiltinAccess } from '../../utils/builtinAccess';
 import { resolveStorageAdapter } from '../../services/connectionResolver';
 import { MongoClient, ObjectId } from 'mongodb';
@@ -78,10 +78,12 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   router.get('/upload-project-image-url/:id', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') return res.status(403).json({ message: 'Permission denied' });
 
       const projectId = req.params.id;
       if (!projectId) return res.status(400).json({ message: 'Missing projectId' });
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Permission denied' });
 
       const response = await getPresignedProjectImageUrl(adapter, projectId);
       res.status(200).json({ ...response, message: 'Presigned URL generated successfully' });
@@ -93,10 +95,12 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   router.delete('/delete-project-image-url/:id', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') return res.status(403).json({ message: 'Permission denied' });
 
       const projectId = req.params.id;
       if (!projectId) return res.status(400).json({ message: 'Missing projectId' });
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Permission denied' });
 
       await deleteProjectImage(adapter, projectId);
       const updated = await Project.update({ _id: projectId }, { image: '' });

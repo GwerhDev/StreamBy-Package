@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth, ConnectionMethod } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectMember } from '../../utils/auth';
 import { addConnection, updateConnection, deleteConnection } from '../../services/connection';
 import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
 
@@ -36,9 +36,6 @@ export function connectionRouter(config: StreamByConfig): Router {
   router.post('/projects/:id/connections', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const { name, apiUrl, method, description, token, prefix } = req.body;
@@ -56,7 +53,7 @@ export function connectionRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!isProjectMember(project, auth.userId)) {
+      if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -79,9 +76,6 @@ export function connectionRouter(config: StreamByConfig): Router {
   router.patch('/projects/:id/connections/:connectionId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const { id: projectId, connectionId } = req.params;
       const { name, apiUrl, method, description, token, prefix } = req.body;
@@ -93,7 +87,7 @@ export function connectionRouter(config: StreamByConfig): Router {
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
 
-      if (!isProjectMember(project, auth.userId)) {
+      if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
@@ -160,9 +154,6 @@ export function connectionRouter(config: StreamByConfig): Router {
   router.delete('/projects/:id/connections/:connectionId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      if (auth.role !== 'admin' && auth.role !== 'editor') {
-        return res.status(403).json({ message: 'Permission denied' });
-      }
 
       const projectId = req.params.id;
       const { connectionId } = req.params;
@@ -172,7 +163,7 @@ export function connectionRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!isProjectMember(project, auth.userId)) {
+      if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
