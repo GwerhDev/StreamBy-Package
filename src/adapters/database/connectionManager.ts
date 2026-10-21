@@ -154,6 +154,25 @@ const ensureTablesExist = async (pool: Pool) => {
       CREATE INDEX IF NOT EXISTS user_integrations_userid_idx ON streamby.user_integrations ("userId");
     `);
     console.log('✅ "user_integrations" table ensured to exist.');
+
+    // API tokens: only their hash is kept (see services/apiTokens). Main db only, like
+    // user_integrations above.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS streamby.api_tokens (
+        id            TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        "userId"      VARCHAR(255) NOT NULL,
+        name          VARCHAR(255) NOT NULL,
+        prefix        VARCHAR(32) NOT NULL,
+        hash          CHAR(64) NOT NULL UNIQUE,
+        access        VARCHAR(10) NOT NULL,
+        "projectIds"  JSONB NOT NULL,
+        "createdAt"   TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        "expiresAt"   TIMESTAMP WITH TIME ZONE,
+        "lastUsedAt"  TIMESTAMP WITH TIME ZONE
+      );
+      CREATE INDEX IF NOT EXISTS api_tokens_userid_idx ON streamby.api_tokens ("userId");
+    `);
+    console.log('✅ "api_tokens" table ensured to exist.');
   } catch (error) {
     console.error('❌ Error ensuring tables exist:', error);
   }

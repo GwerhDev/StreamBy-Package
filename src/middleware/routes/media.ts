@@ -13,6 +13,7 @@ import { createStorageProvider } from '../../providers/storage';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { MongoClient } from 'mongodb';
+import { scopeReachesProject } from '../../services/auth';
 
 function getMetadataCollection() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -39,6 +40,8 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
       const auth = (req as any).auth as Auth;
       const job = getJob(req.params.jobId);
       if (!job) return res.status(404).json({ message: 'Job not found' });
+      // With an API token, only a job of a project it reaches.
+      if (!scopeReachesProject(auth.apiToken, job.projectId)) return res.status(404).json({ message: 'Job not found' });
       if (job.userId !== auth.userId) {
         const project = await Project.findOne({ _id: job.projectId });
         if (!isProjectMember(project, auth.userId)) return res.status(404).json({ message: 'Job not found' });

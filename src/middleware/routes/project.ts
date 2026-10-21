@@ -6,6 +6,7 @@ import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { sanitizeProject } from '../../utils/sanitize';
 import { classifyIntegrationId } from '../../services/projectIntegration';
+import { scopeReachesProject } from '../../services/auth';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -34,6 +35,8 @@ export function projectRouter(config: StreamByConfig): Router {
         .filter(project => {
           const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
           if (!currentUserMember || currentUserMember.status !== 'active') return false;
+          // With an API token, only the projects it reaches.
+          if (!scopeReachesProject(auth.apiToken, (project._id ?? project.id)?.toString())) return false;
 
           if (filterArchived !== undefined) {
             return (currentUserMember.archived || false) === filterArchived;

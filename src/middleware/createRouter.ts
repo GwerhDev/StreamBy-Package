@@ -6,7 +6,8 @@ import { initConnections } from '../adapters/database/connectionManager';
 import { backfillBuiltinConnections } from '../services/backfillBuiltinConnections';
 import { reencryptStoredCredentials } from '../services/reencryptCredentials';
 import { initWsHub } from '../services/wsHub';
-import { authenticate } from '../services/auth';
+import { authenticate, enforceApiTokenScope } from '../services/auth';
+import { apiTokenRouter } from './routes/apiToken';
 import { setEncryptionKey } from '../utils/encryption';
 import { authRouter } from './routes/auth';
 import { userRouter } from './routes/user';
@@ -95,6 +96,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       registerModel('users', [mainDb.id], 'users', 'accounts');
       registerModel('user_subscriptions', [mainDb.id], 'user_subscriptions', 'streamby');
       registerModel('user_integrations', [mainDb.id], 'user_integrations', streambySchema);
+      registerModel('api_tokens', [mainDb.id], 'api_tokens', streambySchema);
     }
   }
 
@@ -106,8 +108,10 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   // but for the public export route (see authenticate).
   router.use(authRouter(config));
   router.use(authenticate(config));
+  router.use(enforceApiTokenScope);
   router.use(ensureSubscription);
   router.use(userRouter(config));
+  router.use(apiTokenRouter(config));
   router.use(exportRouter(config));
   router.use(memberRouter(config));
   router.use(storageRouter(config));

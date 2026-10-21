@@ -207,6 +207,19 @@ export interface Auth {
   username: string;
 
   role: 'viewer' | 'editor' | 'admin';
+  // Set when the request was made with an API token (see services/apiTokens): it reaches only
+  // what the token's scope does, on top of what its owner can.
+  apiToken?: ApiTokenScope;
+}
+
+export type ApiTokenAccess = 'read' | 'write';
+
+export interface ApiTokenScope {
+  tokenId: string;
+  // 'read': only reads (GET); 'write': reads and writes.
+  access: ApiTokenAccess;
+  // The projects it reaches, or '*': every project its owner is a member of.
+  projectIds: string[] | '*';
 }
 
 export type AuthProvider = (req: Request) => Promise<Auth>;
