@@ -1,20 +1,37 @@
 # Changelog
 
-## Unreleased
+## 0.35.0
 
 ### Added
 
 - **API tokens**, so agents and services can work with StreamBy as a user without the user's
-  browser session (see the README):
+  browser session. The README has the details.
   - `GET`, `POST` and `DELETE /user/api-tokens` let a user list, make and revoke their own
-    tokens. These routes need a session.
-  - Each token has a scope: `read` or `write`, and the projects it reaches (a list, or `'*'`
-    for all of the user's projects). It expires in 7, 30, 90 or 365 days, or never.
-  - Only a token's hash is stored, in the new `api_tokens` table, which is created at startup.
-  - `resolveApiToken` (exported) is for your `authProvider`: it turns `Bearer sbt_...` into
-    the token's owner and scope, which you return as `Auth.apiToken`.
-  - A request made with a token reaches only the token's scope, and never more than its
-    owner can do.
+    tokens. These routes need a session: a token can't manage tokens.
+  - A token is `sbt_` followed by 32 random bytes. It's shown once, when it's made.
+  - **Scope:** each token is `read` (only reads) or `write` (reads and writes). It reaches a
+    list of projects, or `'*'` for every project its owner is a member of, including ones they
+    join later. It expires in 7, 30, 90 or 365 days, or never.
+  - A request made with a token reaches only its scope:
+    - a `read` token can't write;
+    - a project outside its scope answers 404, and the project list and jobs show only its
+      projects;
+    - outside a project, it can only make a few reads.
+
+    The owner's role in each project still applies on top, so a token never does more than
+    its owner can, and it stops reaching a project once its owner leaves it.
+  - **`resolveApiToken`** (exported, with `API_TOKEN_PREFIX`) is for the host's
+    `authProvider`. It turns `Authorization: Bearer sbt_...` into the token's owner and scope,
+    or `null` once the token is revoked or expired. The `authProvider` returns the scope as
+    `Auth.apiToken`. Without it, a token would have all of its owner's access.
+  - **New table: `api_tokens`.** It's created at startup in the main database, and it keeps
+    only each token's SHA-256 hash, never the token itself.
+
+### Security
+
+- A connection authenticated with an API token can't open the WebSocket. It's closed with
+  code 1008. The WebSocket belongs to the browser session and receives every event of its
+  user, from any project.
 
 ## 0.34.0
 
