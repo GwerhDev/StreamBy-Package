@@ -36,7 +36,7 @@ describe('initWsHub', () => {
   });
 
   it("doesn't let an API token open it, nor sends it its owner's events", async () => {
-    const scope = { tokenId: 't1', access: 'read', projectIds: ['p1'] };
+    const scope = { tokenId: 't1', kind: 'user', permissions: ['project:read'], projectIds: ['p1'] };
     const { messages, closed } = await connect({ userId: 'token-owner', username: 'o', role: 'viewer', apiToken: scope });
     expect(await closed).toEqual({ code: 1008, reason: "API tokens can't open the WebSocket" });
     emitToUser('token-owner', { type: 'notification', id: 'n1' });

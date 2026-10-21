@@ -14,25 +14,30 @@ const errorText = (body: unknown, status: number) => {
   return typeof message === 'string' ? message : `StreamBy answered ${status}`;
 };
 
+/** The tools an API token may use: those whose every permission it has. */
+export const toolsFor = (scope: Auth['apiToken']) =>
+  TOOLS.filter(tool => tool.permissions.every(p => !!scope?.permissions.includes(p)));
+
 /**
- * An MCP server for one request of `auth` (an API token's owner): its tools, the writing ones
- * only for a token with write access. Each tool call goes to the REST API through `api`, and is
- * recorded in the audit log.
+ * An MCP server for one request made with an API token (`auth`): only the tools its permissions
+ * allow. Each tool call goes to the REST API through `api`, and is recorded in the audit log.
  */
 export function createMcpServer(auth: Auth, api: ApiCaller, config: StreamByConfig, version: string): McpServer {
   const server = new McpServer({ name: MCP_SERVER_NAME, version });
-  const canWrite = auth.apiToken?.access === 'write';
+  // A project's token acts on its project: what it does there is the project's.
+  const tokenProject = auth.apiToken?.kind === 'project' && Array.isArray(auth.apiToken.projectIds)
+    ? auth.apiToken.projectIds[0] ?? null
+    : null;
 
-  for (const tool of TOOLS) {
-    if (tool.write && !canWrite) continue;
+  for (const tool of toolsFor(auth.apiToken)) {
     server.registerTool(tool.name, {
       title: tool.title,
       description: tool.description,
       inputSchema: tool.input,
-      annotations: { readOnlyHint: !tool.write, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: !tool.write, destructiveHint: !!tool.destructive, openWorldHint: false },
     }, async (args: any) => {
       const started = Date.now();
-      const projectId = tool.projectOf?.(args) ?? null;
+      const projectId = tool.projectOf?.(args) ?? tokenProject;
       let status: number | null = null;
       try {
         const answer = await api(tool.call(args));

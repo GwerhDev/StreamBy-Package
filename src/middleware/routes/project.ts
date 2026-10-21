@@ -1,12 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { DbConnection, StorageConnection, IntegrationConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
-import { canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
+import { activeMemberOf, canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { sanitizeProject } from '../../utils/sanitize';
 import { classifyIntegrationId } from '../../services/projectIntegration';
 import { scopeReachesProject } from '../../services/auth';
+import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -33,8 +34,8 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const projects = allProjects
         .filter(project => {
-          const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
-          if (!currentUserMember || currentUserMember.status !== 'active') return false;
+          const currentUserMember = activeMemberOf(project, auth.userId?.toString());
+          if (!currentUserMember) return false;
           // With an API token, only the projects it reaches.
           if (!scopeReachesProject(auth.apiToken, (project._id ?? project.id)?.toString())) return false;
 
@@ -129,6 +130,8 @@ export function projectRouter(config: StreamByConfig): Router {
       });
 
       const newProjectId = newProject._id || newProject.id;
+      // A token that made it reaches it.
+      if (auth.apiToken?.kind === 'user') await addProjectToApiToken(auth.apiToken.tokenId, String(newProjectId));
       if (dbConnections.length || storageConnections.length || integrationConnections.length) {
         const stamped = await Project.update({ _id: newProjectId }, {
           dbConnections: dbConnections.map(c => ({ ...c, projectId: newProjectId })),
@@ -278,6 +281,8 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       await Project.useDbType(project.dbType).delete({ _id: projectId });
+      // Its tokens have nothing left to reach.
+      await deleteProjectApiTokens(String(projectId));
 
       const allProjects = await Project.find({});
       const projects = allProjects

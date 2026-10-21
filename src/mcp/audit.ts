@@ -2,8 +2,9 @@ import crypto from 'crypto';
 import { getModel } from '../models/manager';
 import { StreamByConfig } from '../types';
 
-// Every MCP tool call, kept: who (the token's owner and the token), on which project, which
-// tool, and how it went. Never its arguments' values nor the token itself.
+// Every MCP tool call, kept: who (the token, and its owner -- a project's token is its own
+// principal, on its project), on which project, which tool, and how it went. Never its
+// arguments' values nor the token itself.
 export interface McpAuditEntry {
   userId: string;
   tokenId: string;

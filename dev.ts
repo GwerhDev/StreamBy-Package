@@ -39,7 +39,9 @@ async function main() {
       if (bearer?.startsWith(API_TOKEN_PREFIX)) {
         const resolved = await resolveApiToken(bearer);
         if (!resolved) throw new Error('Invalid API token');
-        return { userId: resolved.userId, username: 'dev-user', role: 'admin', apiToken: resolved.scope };
+        // A project's token is no user: it goes by its name.
+        const username = resolved.scope.kind === 'project' ? resolved.name : 'dev-user';
+        return { userId: resolved.userId, username, role: 'admin', apiToken: resolved.scope };
       }
       return {
         userId: config.dummyId || 'dummy-user-id',

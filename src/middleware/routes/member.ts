@@ -5,6 +5,7 @@ import { isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnectedIds, getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { createNotification } from '../../services/notification';
+import { projectApiTokensMadeBy } from '../../services/apiTokens';
 
 const VALID_ROLES = ['viewer', 'editor', 'admin'] as const;
 type MemberRole = typeof VALID_ROLES[number];
@@ -383,6 +384,20 @@ export function memberRouter(config: StreamByConfig): Router {
         await sqlAdapter.delete(connection as any, 'project_members', { projectId, userId: targetUserId }, 'streamby');
       } else {
         await Project.update({ _id: projectId }, { $pull: { members: { userId: targetUserId } } });
+      }
+
+      // A project's tokens they made keep working: its admins should know.
+      const tokens = await projectApiTokensMadeBy(projectId, targetUserId);
+      if (tokens.length) {
+        const names = tokens.map(t => `"${t.name}"`).join(', ');
+        const admins = (project.members ?? []).filter((m: any) =>
+          m.role === 'admin' && m.status === 'active' && m.userId?.toString() !== targetUserId?.toString());
+        await Promise.all(admins.map((admin: any) => createNotification(
+          admin.userId.toString(),
+          'api_token_creator_left',
+          `${tokens.length === 1 ? 'An API token' : `${tokens.length} API tokens`} of "${project.name}" (${names}) made by a member who left keep working until revoked`,
+          { projectId, tokenIds: tokens.map(t => t.id) },
+        ).catch(() => { /* the removal stands; only the notice is missed */ })));
       }
 
       res.status(200).json({ message: 'Member removed successfully' });

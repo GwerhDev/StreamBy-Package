@@ -1,3 +1,4 @@
+import type { ApiTokenPermission, ProjectPermission, AccountPermission } from '../services/apiTokenPermissions';
 import { Request } from 'express';
 import type { WebSocketServer } from 'ws';
 
@@ -216,17 +217,21 @@ export interface Auth {
 
   role: 'viewer' | 'editor' | 'admin';
   // Set when the request was made with an API token (see services/apiTokens): it reaches only
-  // what the token's scope does, on top of what its owner can.
+  // what the token's permissions and projects do -- a user's token never more than its owner.
   apiToken?: ApiTokenScope;
 }
 
-export type ApiTokenAccess = 'read' | 'write';
+export type { ApiTokenPermission, ProjectPermission, AccountPermission };
+
+// 'user': a user's, acting as them. 'project': a project's, acting on it alone, whoever made it.
+export type ApiTokenKind = 'user' | 'project';
 
 export interface ApiTokenScope {
   tokenId: string;
-  // 'read': only reads (GET); 'write': reads and writes.
-  access: ApiTokenAccess;
-  // The projects it reaches, or '*': every project its owner is a member of.
+  kind: ApiTokenKind;
+  permissions: ApiTokenPermission[];
+  // The projects it reaches, or '*': every project its owner is a member of. A project's token
+  // reaches its project only.
   projectIds: string[] | '*';
 }
 

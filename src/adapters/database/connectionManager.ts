@@ -157,21 +157,34 @@ const ensureTablesExist = async (pool: Pool) => {
     console.log('✅ "user_integrations" table ensured to exist.');
 
     // API tokens: only their hash is kept (see services/apiTokens). Main db only, like
-    // user_integrations above.
+    // user_integrations above. A table from before tokens had a kind and permissions gets the
+    // new columns; its old tokens no longer work (they have no kind) and aren't listed.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS streamby.api_tokens (
-        id            TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
-        "userId"      VARCHAR(255) NOT NULL,
-        name          VARCHAR(255) NOT NULL,
-        prefix        VARCHAR(32) NOT NULL,
-        hash          CHAR(64) NOT NULL UNIQUE,
-        access        VARCHAR(10) NOT NULL,
-        "projectIds"  JSONB NOT NULL,
-        "createdAt"   TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        "expiresAt"   TIMESTAMP WITH TIME ZONE,
-        "lastUsedAt"  TIMESTAMP WITH TIME ZONE
+        id                TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        kind              VARCHAR(10),
+        "userId"          VARCHAR(255) NOT NULL,
+        "createdByName"   VARCHAR(255),
+        name              VARCHAR(255) NOT NULL,
+        prefix            VARCHAR(32) NOT NULL,
+        hash              CHAR(64) NOT NULL UNIQUE,
+        permissions       JSONB NOT NULL DEFAULT '[]',
+        "projectIds"      JSONB NOT NULL,
+        "createdAt"       TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        "expiresAt"       TIMESTAMP WITH TIME ZONE,
+        "lastUsedAt"      TIMESTAMP WITH TIME ZONE
       );
+      ALTER TABLE streamby.api_tokens ADD COLUMN IF NOT EXISTS kind VARCHAR(10);
+      ALTER TABLE streamby.api_tokens ADD COLUMN IF NOT EXISTS "createdByName" VARCHAR(255);
+      ALTER TABLE streamby.api_tokens ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]';
+      DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = 'streamby' AND table_name = 'api_tokens' AND column_name = 'access') THEN
+          ALTER TABLE streamby.api_tokens ALTER COLUMN access DROP NOT NULL;
+        END IF;
+      END $$;
       CREATE INDEX IF NOT EXISTS api_tokens_userid_idx ON streamby.api_tokens ("userId");
+      CREATE INDEX IF NOT EXISTS api_tokens_kind_idx ON streamby.api_tokens (kind);
     `);
     console.log('✅ "api_tokens" table ensured to exist.');
 
