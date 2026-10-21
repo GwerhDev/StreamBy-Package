@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.37.0
+
+### ⚠️ Breaking changes
+
+- **API tokens have permissions, not an access level.** The tokens made before this version no
+  longer work, and aren't listed: make new ones. There's no migration. The `api_tokens` table
+  gets its new columns at startup (`kind`, `permissions`, `createdByName`), and its old
+  `access` column becomes optional; nothing else is changed.
+- **`ApiTokenScope` changed.** It has `kind` (`'user'` or `'project'`) and `permissions`,
+  instead of `access`. `ApiTokenAccess` is gone.
+- **`createApiToken`** takes who makes the token (`{ kind, userId, username, projectId }`), and
+  `permissions` instead of `access`. `listApiTokens` and `revokeApiToken` are now
+  `listUserApiTokens` and `revokeUserApiToken`.
+- **The host's `authProvider` must handle a project's token** (see the README): it isn't a
+  user, so it must not be looked up as one. `resolveApiToken` returns its `name` to go by.
+
+### Added
+
+- **Permissions** for tokens, by resource and action: `project`, `members`, `assets`,
+  `production`, `workflow`, `exports`, `rights` and `jobs`, each with `read` and its writes
+  (`update`, `write`, `manage`, `delete` or `run`), and `projects:create` for the account.
+  Every route a token reaches needs its own permission; a route no permission covers isn't
+  reachable with a token. A user's token is still limited by its user's role in each project.
+  `PROJECT_PERMISSIONS` and `ACCOUNT_PERMISSIONS` are exported.
+- **Projects' tokens**, at `GET`, `POST` and `DELETE /projects/:id/api-tokens`, managed by the
+  project's admins only. They act on their project alone, with their permissions, and keep
+  working after whoever made them leaves it; the project's admins are notified when that
+  happens (`api_token_creator_left`). Deleting a project ends its tokens.
+- **`projects:create`**: a user's token with it creates projects, and reaches the ones it
+  creates.
+- **MCP tools** `create_project`, `delete_project`, `delete_asset`, `delete_sequence`,
+  `delete_shot` and `delete_task`. Each tool needs its permissions and is listed only for a
+  token that has them; the ones that delete are marked as destructive.
+
 ## 0.36.0
 
 ### Added
