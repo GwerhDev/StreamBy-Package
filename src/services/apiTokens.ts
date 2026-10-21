@@ -22,16 +22,18 @@ export interface ApiTokenRecord {
   // sha256 of the whole token: the token itself is never stored.
   hash: string;
   access: ApiTokenAccess;
-  // The projects it reaches: their ids, or '*' for every project its owner is a member of
-  // (those joined later included).
-  projectIds: string[] | '*';
+  // The projects it reaches, as stored: their ids, or ['*'] for every project its owner is a
+  // member of (those joined later included). Always a list, so it's valid JSON in SQL.
+  projectIds: string[];
   createdAt: Date;
   expiresAt: Date | null;
   lastUsedAt: Date | null;
 }
 
 /** What a token's owner sees of it. */
-export type ApiTokenInfo = Omit<ApiTokenRecord, 'hash' | 'userId'>;
+export type ApiTokenInfo = Omit<ApiTokenRecord, 'hash' | 'userId' | 'projectIds'> & { projectIds: string[] | '*' };
+
+const ALL_PROJECTS = '*';
 
 export class ApiTokenError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -44,14 +46,14 @@ const infoOf = ({ hash: _hash, userId: _userId, ...info }: ApiTokenRecord): ApiT
   projectIds: parseProjectIds(info.projectIds),
 });
 
-// Kept as JSON in SQL (an array, or "*").
+// As stored (a list, read back from SQL JSON as a list or its text): ['*'] is every project.
 const parseProjectIds = (value: unknown): string[] | '*' => {
-  if (value === '*' || value === '"*"') return '*';
-  if (Array.isArray(value)) return value.map(String);
   if (typeof value === 'string') {
-    try { return parseProjectIds(JSON.parse(value)); } catch { /* fall through */ }
+    try { return parseProjectIds(JSON.parse(value)); } catch { return []; }
   }
-  return [];
+  if (!Array.isArray(value)) return [];
+  const ids = value.map(String);
+  return ids.includes(ALL_PROJECTS) ? '*' : ids;
 };
 
 const mainDbType = (config: StreamByConfig) => config.databases?.find(db => db.main)?.type ?? 'nosql';
@@ -73,7 +75,7 @@ export async function createApiToken(
   const name = typeof input.name === 'string' ? input.name.trim() : '';
   if (!name) throw new ApiTokenError('A token needs a name.');
   if (input.access !== 'read' && input.access !== 'write') throw new ApiTokenError("access must be 'read' or 'write'.");
-  if (input.projectIds !== '*' && (!Array.isArray(input.projectIds) || !input.projectIds.length || !input.projectIds.every(id => typeof id === 'string' && id))) {
+  if (input.projectIds !== '*' && (!Array.isArray(input.projectIds) || !input.projectIds.length || !input.projectIds.every(id => typeof id === 'string' && id && id !== ALL_PROJECTS))) {
     throw new ApiTokenError("projectIds must be '*' or a list of project ids.");
   }
   if (input.expiresInDays !== null && !(API_TOKEN_EXPIRY_DAYS as readonly number[]).includes(input.expiresInDays)) {
@@ -89,7 +91,7 @@ export async function createApiToken(
     prefix: token.slice(0, PREFIX_SHOWN),
     hash: hashOf(token),
     access: input.access,
-    projectIds: input.projectIds === '*' ? '*' : [...new Set(input.projectIds)],
+    projectIds: input.projectIds === '*' ? [ALL_PROJECTS] : [...new Set(input.projectIds)],
     createdAt: now,
     expiresAt: input.expiresInDays === null ? null : new Date(now.getTime() + input.expiresInDays * 86_400_000),
     lastUsedAt: null,

@@ -104,6 +104,15 @@ describe('making a token', () => {
     expect((await asUser('vic').get('/user/api-tokens')).body.apiTokens).toEqual([]);
   });
 
+  // Stored as a list (valid JSON in SQL), ['*'] being every project; a list can't ask for it.
+  it("keeps the projects it reaches as a list, and takes '*' only as every project", async () => {
+    await makeToken({ access: 'read', projectIds: '*' });
+    await makeToken({ access: 'read', projectIds: ['p1'] });
+    expect(store.api_tokens.map(t => t.projectIds)).toEqual([['*'], ['p1']]);
+    expect((await asUser('eli').post('/user/api-tokens', { name: 'x', access: 'read', projectIds: ['*'] })).status).toBe(400);
+    await expect(createApiToken('eli', { name: 'x', access: 'read', projectIds: ['*'], expiresInDays: 7 }, { databases: [] } as any)).rejects.toThrow();
+  });
+
   it('reaches only projects its owner is in', async () => {
     const res = await asUser('eli').post('/user/api-tokens', { name: 'x', access: 'read', projectIds: ['p1', 'p3'] });
     expect(res.status).toBe(400);
