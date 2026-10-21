@@ -1,4 +1,4 @@
-# @streamby/core
+# streamby-core
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
@@ -9,7 +9,7 @@ Part of the [StreamBy](https://streamby.nhexa.cl) ecosystem by TerminalCore Labs
 
 ## 🚀 What is it?
 
-`@streamby/core` is a plug-and-play middleware for Express (or compatible frameworks) that enables file uploads, listings and **multi-project access** over services like:
+`streamby-core` is a plug-and-play middleware for Express (or compatible frameworks) that enables file uploads, listings and **multi-project access** over services like:
 
 - ✅ AWS S3
 - ✅ Google Cloud Storage (soon)
@@ -23,7 +23,7 @@ It's designed to be installed inside your existing API as a library — **no nee
 ## 📦 Installation
 
 ```bash
-npm install @streamby/core ws
+npm install streamby-core ws
 npm install -D @types/ws
 ```
 
@@ -35,7 +35,7 @@ npm install -D @types/ws
 import http from 'http';
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { createStreamByRouter } from '@streamby/core';
+import { createStreamByRouter } from 'streamby-core';
 
 const app = express();
 const server = http.createServer(app);
@@ -118,7 +118,7 @@ Requests send it as `Authorization: Bearer sbt_...`. Your `authProvider` resolve
 `resolveApiToken` and returns its owner, with the token's scope in `apiToken`:
 
 ```ts
-import { createStreamByRouter, resolveApiToken, API_TOKEN_PREFIX } from '@streamby/core';
+import { createStreamByRouter, resolveApiToken, API_TOKEN_PREFIX } from 'streamby-core';
 
 createStreamByRouter({
   // ...
@@ -169,7 +169,7 @@ nor one that starts a job.
 
 ## 🗄️ Database Schema Setup
 
-`@streamby/core` requires a pre-configured database schema for its internal operations. It does not manage database connections directly; instead, it expects the host application to provide initialized connection instances. This ensures full control and flexibility for the host environment.
+`streamby-core` requires a pre-configured database schema for its internal operations. It does not manage database connections directly; instead, it expects the host application to provide initialized connection instances. This ensures full control and flexibility for the host environment.
 
 The library will only interact with the specified schema and will not touch other schemas in your database. The `reset` option is opt-in and will only drop and recreate the specified `streamby` schema if explicitly set to `true`.
 
@@ -177,7 +177,7 @@ The library will only interact with the specified schema and will not touch othe
 
 ```ts
 import { Pool } from "pg";
-import { setupStreambyPg } from "@streamby/core/pg/setup"; // Adjust path as per your package structure
+import { setupStreambyPg } from "streamby-core/pg/setup"; // Adjust path as per your package structure
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -190,7 +190,7 @@ await setupStreambyPg({ pool, schema: "streamby", reset: false });
 
 ```ts
 import { MongoClient } from "mongodb";
-import { setupStreambyMongo } from "@streamby/core/mongo/setup"; // Adjust path as per your package structure
+import { setupStreambyMongo } from "streamby-core/mongo/setup"; // Adjust path as per your package structure
 
 const client = new MongoClient(process.env.MONGO_URL!);
 
@@ -203,7 +203,7 @@ await setupStreambyMongo({ client, dbName: "streamby" });
 
 ```ts
 import express from 'express';
-import { createStreamByRouter } from '@streamby/core';
+import { createStreamByRouter } from 'streamby-core';
 
 const app = express();
 
@@ -264,7 +264,7 @@ Unit tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.co
 
 ## 🗺️ API Endpoints
 
-Here's a summary of the key API endpoints provided by `@streamby/core`:
+Here's a summary of the key API endpoints provided by `streamby-core`:
 
 ### `GET /streamby/projects`
 
@@ -379,5 +379,5 @@ Copyright (C) 2026 TerminalCore Labs
 
 Licensed under the [GNU Affero General Public License v3.0](./LICENSE) (AGPL-3.0-only).
 
-> **Note for consumers:** unlike most installable packages, this one is intentionally AGPL rather than MIT. AGPL's copyleft applies to any project that depends on it -- if you install `@streamby/core`, your own project must also be licensed under AGPL-3.0 (or a compatible copyleft license). Confirm this is acceptable for your use case before adding this dependency.
+> **Note for consumers:** unlike most installable packages, this one is intentionally AGPL rather than MIT. AGPL's copyleft applies to any project that depends on it -- if you install `streamby-core`, your own project must also be licensed under AGPL-3.0 (or a compatible copyleft license). Confirm this is acceptable for your use case before adding this dependency.
 
