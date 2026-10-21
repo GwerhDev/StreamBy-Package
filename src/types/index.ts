@@ -167,7 +167,11 @@ export interface StreamByConfig {
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
   adapter?: StorageAdapter;
+  // The key stored credentials are encrypted with (64 hex characters), and the previous ones
+  // they may still be in: rotating is putting the new key here and the old one in
+  // encryptPreviousKeys -- what's stored is re-encrypted with the new one at startup.
   encrypt?: string;
+  encryptPreviousKeys?: string[];
   websocket?: {
     server: WebSocketServer;
   };

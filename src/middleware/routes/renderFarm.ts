@@ -7,6 +7,7 @@ import { runRenderJob, runFormatConvertJob, runLodJob, resolveAssetDependencyGra
 import { Auth } from '../../types';
 import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
 import crypto from 'crypto';
+import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
 
 export function renderFarmRouter(_config: StreamByConfig): Router {
   const router = Router();
@@ -31,7 +32,12 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId } = req.params;
-      const { name, provider, apiUrl, encryptedCredential, description } = req.body;
+      const { name, provider, apiUrl, credential: credentialValue, encryptedCredential: legacyCredential, description } = req.body;
+      // The credential, as given (`encryptedCredential` was its old name: it was always the
+      // value itself), stored encrypted.
+      const credential = credentialValue ?? legacyCredential;
+      if (credential && !isEncryptionKeySet()) return res.status(500).json({ message: 'Encryption key is not set' });
+      const encryptedCredential = credential ? encrypt(String(credential)) : undefined;
 
       if (!name || !provider || !apiUrl) {
         return res.status(400).json({ message: 'name, provider and apiUrl are required' });

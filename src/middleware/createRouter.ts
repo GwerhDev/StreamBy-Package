@@ -4,6 +4,7 @@ import { registerModel } from '../models/manager';
 import { createStorageProvider } from '../providers/storage';
 import { initConnections } from '../adapters/database/connectionManager';
 import { backfillBuiltinConnections } from '../services/backfillBuiltinConnections';
+import { reencryptStoredCredentials } from '../services/reencryptCredentials';
 import { initWsHub } from '../services/wsHub';
 import { authenticate } from '../services/auth';
 import { setEncryptionKey } from '../utils/encryption';
@@ -34,7 +35,7 @@ import { pipelineRouter } from './routes/pipeline';
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
-  if (config.encrypt) setEncryptionKey(config.encrypt);
+  if (config.encrypt) setEncryptionKey(config.encrypt, config.encryptPreviousKeys);
 
   // Establish DB connections asynchronously (Postgres/Mongo + schema migrations).
   // Until they're ready, HOLD incoming requests instead of letting them through —
@@ -49,6 +50,14 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     .then(() => backfillBuiltinConnections(config))
     .catch((err) => {
       console.error('❌ StreamBy: failed to backfill built-in connections:', err);
+    })
+    .then(() => reencryptStoredCredentials())
+    .then(({ updated, failed }) => {
+      if (updated) console.log(`✅ StreamBy: re-encrypted the credentials of ${updated} record(s).`);
+      if (failed) console.error(`❌ StreamBy: ${failed} stored credential(s) could not be decrypted with the configured keys; left as they are.`);
+    })
+    .catch((err) => {
+      console.error('❌ StreamBy: failed to re-encrypt stored credentials:', err);
     })
     .finally(() => {
       ready = true;

@@ -8,6 +8,7 @@ import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
 import crypto from 'crypto';
+import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -43,7 +44,12 @@ export function distributionRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId } = req.params;
-      const { name, target, encryptedCredential, config, description } = req.body;
+      const { name, target, credential: credentialValue, encryptedCredential: legacyCredential, config, description } = req.body;
+      // The credential, as given (`encryptedCredential` was its old name: it was always the
+      // value itself), stored encrypted.
+      const credential = credentialValue ?? legacyCredential;
+      if (credential && !isEncryptionKeySet()) return res.status(500).json({ message: 'Encryption key is not set' });
+      const encryptedCredential = credential ? encrypt(String(credential)) : undefined;
 
       if (!name || !target) return res.status(400).json({ message: 'name and target are required' });
 
