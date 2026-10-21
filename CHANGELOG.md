@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **MCP server** at `POST /mcp`, for agents such as Claude Code to work with StreamBy projects
+  with an API token (see the README).
+  - It takes only an API token.
+  - Its tools call the REST API with that token, so they reach exactly what the token and its
+    owner can, and writes are saved as the UI's are.
+  - **Reading tools:** projects, assets with their metadata and rights, workflow, pipelines,
+    exports, jobs, and production sequences, shots and tasks.
+  - **Writing tools**, listed only for `write` tokens: asset metadata and rights, pipelines,
+    sequences, shots and tasks.
+- **`mcp.rateLimit`** (default 120 requests a minute per token; past it, 429 with
+  `Retry-After`) and **`mcp.apiBaseUrl`** in the router config.
+- **New table: `mcp_audit`.** It's created at startup in the main database. Every tool call is
+  recorded there, with the user, token, project, tool and result, but never the arguments nor
+  the token.
+- New dependencies: `@modelcontextprotocol/sdk` and `zod`.
+
 ## 0.35.0
 
 ### Added

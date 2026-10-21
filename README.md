@@ -149,6 +149,99 @@ its owner can, and it stops reaching a project as soon as its owner leaves it.
 
 ---
 
+## 🤖 MCP server
+
+StreamBy serves an [MCP](https://modelcontextprotocol.io) server at `POST /streamby/mcp`
+(Streamable HTTP, stateless). Agents such as Claude Code use it to read and work on StreamBy
+projects with an API token (see above). It takes only an API token; a browser session gets 401.
+
+Each tool calls StreamBy's own REST API with the caller's token. So it reaches exactly what the
+token's scope and its owner's role in each project allow, and a write is saved just like one
+made from the UI, which shows it when it loads the project.
+
+**Tools**
+
+- **Reading**, with any token:
+  - `list_projects`, `get_project`;
+  - `list_assets` (by category, optionally in one storage connection, and filtered by name),
+    `get_asset_metadata`, `get_asset_rights`;
+  - `get_workflow`, `list_pipelines`, `get_pipeline`, `list_exports`, `get_export`;
+  - `get_job`;
+  - `list_sequences`, `list_shots`, `list_tasks`.
+- **Writing**, listed only for a `write` token, and allowed only where its owner is an editor or
+  an admin:
+  - `update_asset_metadata`, `set_asset_rights`;
+  - `create_pipeline`, `update_pipeline`;
+  - `create_sequence`, `update_sequence`, `create_shot`, `update_shot`, `create_task`,
+    `update_task`.
+
+**Limits and audit**
+
+- Each token can make at most 120 requests a minute (a sliding window). Past that, StreamBy
+  answers 429 with `Retry-After`. Each instance counts its own requests. Change the limit with
+  `mcp.rateLimit`.
+- Every tool call is recorded in the `mcp_audit` table, created at startup in the main database.
+  Each row has the user, the token's id, the project, the tool, whether it went through, the
+  status, the error and the duration. A row never includes the arguments or the token.
+
+```ts
+createStreamByRouter({
+  // ...
+  mcp: {
+    rateLimit: { requests: 120, windowMs: 60_000 }, // the default
+    // apiBaseUrl: 'http://127.0.0.1:3000/streamby', // where tools reach the REST API;
+    //   by default this same process, at the request's local port and mount path
+  },
+});
+```
+
+### Connecting from Claude Code
+
+Make an API token in StreamBy (Settings → Security → Personal API tokens), and keep it in an
+environment variable, never in a file:
+
+```bash
+export STREAMBY_TOKEN=sbt_...
+```
+
+Add the server to your project's `.mcp.json`. Claude Code expands `${STREAMBY_TOKEN}` from the
+environment:
+
+```json
+{
+  "mcpServers": {
+    "streamby": {
+      "type": "http",
+      "url": "https://your-host/streamby/mcp",
+      "headers": { "Authorization": "Bearer ${STREAMBY_TOKEN}" }
+    }
+  }
+}
+```
+
+### Connecting from Claude Desktop
+
+Claude Desktop runs local (stdio) servers from `claude_desktop_config.json`. Reach StreamBy
+through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), passing the token in its
+`env`. This file holds it in plain text, so use a token with only the scope you need, and
+an expiry:
+
+```json
+{
+  "mcpServers": {
+    "streamby": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://your-host/streamby/mcp", "--header", "Authorization:${STREAMBY_AUTH}"],
+      "env": { "STREAMBY_AUTH": "Bearer sbt_..." }
+    }
+  }
+}
+```
+
+The claude.ai connector needs OAuth, which isn't available yet: it's for API tokens only for now.
+
+---
+
 ## 👥 Project roles
 
 What a user can do in a project depends on their role in that project, as an active member
