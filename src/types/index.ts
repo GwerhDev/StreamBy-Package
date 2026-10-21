@@ -172,6 +172,14 @@ export interface StreamByConfig {
   // encryptPreviousKeys -- what's stored is re-encrypted with the new one at startup.
   encrypt?: string;
   encryptPreviousKeys?: string[];
+  // The MCP server (POST /mcp), for agents with an API token.
+  mcp?: {
+    // Requests per API token: at most `requests` in any `windowMs` (default 120 a minute).
+    rateLimit?: { requests: number; windowMs: number };
+    // Where its tools reach the REST API (this router's mount). Default: this same process,
+    // at the request's local port and mount path.
+    apiBaseUrl?: string;
+  };
   websocket?: {
     server: WebSocketServer;
   };

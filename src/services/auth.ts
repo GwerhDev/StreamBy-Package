@@ -37,6 +37,8 @@ export const scopeReachesProject = (scope: Auth['apiToken'], projectId: string):
 export const enforceApiTokenScope = (req: Request, res: Response, next: NextFunction) => {
   const scope = ((req as any).auth as Auth | undefined)?.apiToken;
   if (!scope) return next();
+  // The MCP server handles a token itself: its tools call the routes here, each one checked.
+  if (req.path === '/mcp') return next();
   if (/^\/user\/api-tokens(\/|$)/.test(req.path)) {
     return res.status(403).json({ error: 'API tokens are managed with a session, not with a token' });
   }

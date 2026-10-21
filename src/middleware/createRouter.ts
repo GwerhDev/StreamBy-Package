@@ -8,6 +8,7 @@ import { reencryptStoredCredentials } from '../services/reencryptCredentials';
 import { initWsHub } from '../services/wsHub';
 import { authenticate, enforceApiTokenScope } from '../services/auth';
 import { apiTokenRouter } from './routes/apiToken';
+import { mcpRouter } from './routes/mcp';
 import { setEncryptionKey } from '../utils/encryption';
 import { authRouter } from './routes/auth';
 import { userRouter } from './routes/user';
@@ -97,6 +98,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       registerModel('user_subscriptions', [mainDb.id], 'user_subscriptions', 'streamby');
       registerModel('user_integrations', [mainDb.id], 'user_integrations', streambySchema);
       registerModel('api_tokens', [mainDb.id], 'api_tokens', streambySchema);
+      registerModel('mcp_audit', [mainDb.id], 'mcp_audit', streambySchema);
     }
   }
 
@@ -112,6 +114,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(ensureSubscription);
   router.use(userRouter(config));
   router.use(apiTokenRouter(config));
+  router.use(mcpRouter(config));
   router.use(exportRouter(config));
   router.use(memberRouter(config));
   router.use(storageRouter(config));

@@ -173,6 +173,24 @@ const ensureTablesExist = async (pool: Pool) => {
       CREATE INDEX IF NOT EXISTS api_tokens_userid_idx ON streamby.api_tokens ("userId");
     `);
     console.log('✅ "api_tokens" table ensured to exist.');
+
+    // The MCP server's audit log: every tool call (see mcp/audit). Main db only.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS streamby.mcp_audit (
+        id            TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+        "userId"      VARCHAR(255) NOT NULL,
+        "tokenId"     VARCHAR(255) NOT NULL,
+        "projectId"   VARCHAR(255),
+        tool          VARCHAR(100) NOT NULL,
+        ok            BOOLEAN NOT NULL,
+        status        INTEGER,
+        error         TEXT,
+        "durationMs"  INTEGER NOT NULL,
+        "createdAt"   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS mcp_audit_token_idx ON streamby.mcp_audit ("tokenId", "createdAt");
+    `);
+    console.log('✅ "mcp_audit" table ensured to exist.');
   } catch (error) {
     console.error('❌ Error ensuring tables exist:', error);
   }

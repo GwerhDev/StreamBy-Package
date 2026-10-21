@@ -5,6 +5,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { StreamByConfig } from './src/types';
 import { createStreamByRouter } from './src/middleware/createRouter';
+import { resolveApiToken, API_TOKEN_PREFIX } from './src/services/apiTokens';
 
 dotenv.config();
 
@@ -31,7 +32,15 @@ async function main() {
   }));
 
   const streambyConfig: StreamByConfig = {
+    // The dev user, or an API token's owner with its scope (as a host's authProvider does), so
+    // the MCP server can be tried locally.
     authProvider: async (req) => {
+      const bearer = req.headers.authorization?.replace(/^Bearer /, '');
+      if (bearer?.startsWith(API_TOKEN_PREFIX)) {
+        const resolved = await resolveApiToken(bearer);
+        if (!resolved) throw new Error('Invalid API token');
+        return { userId: resolved.userId, username: 'dev-user', role: 'admin', apiToken: resolved.scope };
+      }
       return {
         userId: config.dummyId || 'dummy-user-id',
         username: 'dev-user',
