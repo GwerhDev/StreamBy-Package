@@ -61,7 +61,7 @@ app.use('/streamby', express.json(), createStreamByRouter({
       },
     },
   ],
-  encrypt: process.env.STREAMBY_ENCRYPTION_KEY,
+  encrypt: process.env.STREAMBY_ENCRYPTION_KEY, // 64 hex characters; see "Encryption and key rotation"
   websocket: { server: wss },
 }));
 
@@ -70,6 +70,51 @@ server.listen(3000);
 
 > **Important:** use `http.createServer(app)` and pass `server.listen()` instead of `app.listen()`.  
 > This is required so the `WebSocketServer` shares the same port as the HTTP server.
+
+---
+
+## 🔑 Encryption and key rotation
+
+Credentials stored by StreamBy (connection secrets, export credentials, user integrations,
+distribution and render farm credentials) are encrypted with the key you pass as `encrypt`:
+32 bytes, written as 64 hexadecimal characters. Each stored value records the id of the key
+that encrypted it (a fingerprint, never the key itself), so you can rotate the key:
+
+1. Generate a new key, for example with `openssl rand -hex 32`.
+2. Pass the new key as `encrypt` and the previous one in `encryptPreviousKeys`.
+3. Restart. Values encrypted with a previous key still decrypt, and at startup StreamBy
+   re-encrypts all of them with the new key.
+4. Once that's done (the startup log says how many records it re-encrypted, and none are left
+   on the old key), you can remove the old key from `encryptPreviousKeys`.
+
+```ts
+createStreamByRouter({
+  // ...
+  encrypt: process.env.STREAMBY_ENCRYPTION_KEY,               // the current key
+  encryptPreviousKeys: [process.env.STREAMBY_PREVIOUS_KEY!],  // only while rotating
+});
+```
+
+> Upgrading from a version before 0.34.0: deploy with your current key first, and rotate only
+> after that deploy (see the [changelog](CHANGELOG.md)).
+
+---
+
+## 👥 Project roles
+
+What a user can do in a project depends on their role in that project, as an active member
+(an invitation counts once it's accepted). It never depends on the platform role your
+`authProvider` returns.
+
+| Role | Can |
+|---|---|
+| `viewer` | See the project and its content, and archive the project in their own list. |
+| `editor` | Everything a viewer can, plus change the project: its details, connections, exports, files and folders, workflow, pipelines, production, reviews, rights, and start jobs. |
+| `admin` | Everything an editor can, plus manage the project's members and delete the project. |
+
+A project's public exports (`GET /streamby/:projectId/export/:exportName`) are read without a
+session. They only run nodes that read data: never a node that uses an account's credential,
+nor one that starts a job.
 
 ---
 
