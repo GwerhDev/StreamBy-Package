@@ -104,7 +104,9 @@ describe('the MCP server', () => {
 
     const production = await connect(await tokenFor('eli', ['production:read', 'production:write'], ['p1']));
     const names = (await production.listTools()).tools.map(t => t.name);
-    expect(names).toEqual(expect.arrayContaining(['list_shots', 'create_shot', 'update_task']));
+    expect(names).toEqual(expect.arrayContaining(['list_shots', 'update_shot', 'update_task']));
+    // Making production data needs workflow:write too (its node may have to be added).
+    expect(names).not.toContain('create_shot');
     expect(names).not.toContain('get_project');
     expect(names).not.toContain('delete_shot');
     expect(names).not.toContain('create_pipeline');

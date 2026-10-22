@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Auth, StreamByConfig } from '../types';
 import { TOOLS, ToolCall } from './tools';
 import { recordMcpCall } from './audit';
+import { ensureWorkflowNode } from './workflowNodes';
 
 export const MCP_SERVER_NAME = 'streamby';
 
@@ -40,6 +41,17 @@ export function createMcpServer(auth: Auth, api: ApiCaller, config: StreamByConf
       const projectId = tool.projectOf?.(args) ?? tokenProject;
       let status: number | null = null;
       try {
+        // What the workflow needs first, as a user would add it.
+        if (tool.workflowNode) {
+          const refused = await ensureWorkflowNode(tool.workflowNode, tool.projectOf?.(args), auth, api);
+          if (refused) {
+            await recordMcpCall({
+              userId: auth.userId, tokenId: auth.apiToken!.tokenId, projectId, tool: tool.name,
+              ok: false, status: null, error: refused, durationMs: Date.now() - started,
+            }, config);
+            return { isError: true, content: [{ type: 'text' as const, text: refused }] };
+          }
+        }
         const answer = await api(tool.call(args));
         status = answer.status;
         const ok = status >= 200 && status < 300;
