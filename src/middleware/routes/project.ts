@@ -8,6 +8,8 @@ import { sanitizeProject } from '../../utils/sanitize';
 import { classifyIntegrationId } from '../../services/projectIntegration';
 import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
+import { nosqlDb } from '../../utils/nosqlDb';
+import { deleteProductionData } from '../../services/production';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -218,7 +220,10 @@ export function projectRouter(config: StreamByConfig): Router {
       }));
 
       const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, connections: project.connections || [], exports });
-      res.json({ project: sanitized, message: 'Project fetched successfully' });
+      // Whether it has production data, for its Production section to show even without a
+      // production node in its workflow.
+      const hasProductionData = !!(await nosqlDb()?.collection('production_sequences').findOne({ projectId }));
+      res.json({ project: { ...sanitized, hasProductionData }, message: 'Project fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch project', details: err.message });
     }
@@ -281,8 +286,9 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       await Project.useDbType(project.dbType).delete({ _id: projectId });
-      // Its tokens have nothing left to reach.
+      // Its tokens have nothing left to reach, and its production data nothing to belong to.
       await deleteProjectApiTokens(String(projectId));
+      await deleteProductionData(String(projectId));
 
       const allProjects = await Project.find({});
       const projects = allProjects

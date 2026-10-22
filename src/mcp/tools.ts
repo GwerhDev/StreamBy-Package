@@ -37,19 +37,21 @@ const byProject = ({ projectId }: { projectId: string }) => projectId;
 
 const CATEGORIES = ['images', 'audios', 'videos', '3d-models'] as const;
 
+const STATUSES = ['todo', 'in_progress', 'review', 'done'] as const;
+
 const shotFields = {
   description: z.string().optional(),
-  status: z.string().optional().describe('Its status, as the project uses them'),
-  assignedTo: z.string().optional().describe("The assignee's user id"),
+  status: z.enum(STATUSES).optional(),
+  assignedTo: z.array(z.string()).optional().describe("The assignees' user ids: members of the project"),
   assetId: z.string().optional(),
   exportId: z.string().optional(),
   dueDate: z.string().optional().describe('An ISO 8601 date'),
   order: z.number().optional(),
 };
 const taskFields = {
-  status: z.string().optional(),
-  priority: z.string().optional(),
-  assignedTo: z.string().optional().describe("The assignee's user id"),
+  status: z.enum(STATUSES).optional(),
+  priority: z.enum(['low', 'medium', 'high']).optional(),
+  assignedTo: z.string().optional().describe("The assignee's user id: a member of the project"),
   dueDate: z.string().optional().describe('An ISO 8601 date'),
   notes: z.string().optional(),
 };

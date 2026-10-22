@@ -7,12 +7,16 @@ import { getModel } from '../../models/manager';
 import { Auth } from '../../types';
 import crypto from 'crypto';
 import { deleteDeliverablesOf } from '../../services/deliverables';
+import { checkProductionFields } from '../../services/productionFields';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
   if (!ids.length) return null;
   return (getConnection(ids[0]).client as MongoClient).db();
 }
+
+const SHOT_FIELDS = ['name', 'description', 'status', 'assignees', 'assetId', 'exportId', 'dueDate', 'order'] as const;
+const TASK_FIELDS = ['name', 'status', 'priority', 'assignee', 'dueDate', 'notes'] as const;
 
 export function productionRouter(_config: StreamByConfig): Router {
   const router = Router();
@@ -46,12 +50,13 @@ export function productionRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId } = req.params;
-      const { name, description, order } = req.body;
-      if (!name) return res.status(400).json({ message: 'name is required' });
-
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+
+      const checked = checkProductionFields(req.body, ['name', 'description', 'order'], project, { creating: true });
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const { values } = checked;
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
@@ -60,9 +65,9 @@ export function productionRouter(_config: StreamByConfig): Router {
       const sequence = {
         id: crypto.randomUUID(),
         projectId,
-        name,
-        description: description ?? null,
-        order: order ?? 0,
+        name: values.name,
+        description: values.description ?? null,
+        order: values.order ?? 0,
         createdBy: auth.userId,
         createdAt: now,
         updatedAt: now,
@@ -86,11 +91,9 @@ export function productionRouter(_config: StreamByConfig): Router {
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
-      const { name, description, order } = req.body;
-      const $set: Record<string, any> = { updatedAt: new Date() };
-      if (name !== undefined) $set.name = name;
-      if (description !== undefined) $set.description = description;
-      if (order !== undefined) $set.order = order;
+      const checked = checkProductionFields(req.body, ['name', 'description', 'order'], project);
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const $set: Record<string, any> = { ...checked.values, updatedAt: new Date() };
 
       const result = await db.collection('production_sequences').findOneAndUpdate(
         { id: seqId, projectId },
@@ -116,9 +119,12 @@ export function productionRouter(_config: StreamByConfig): Router {
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
+      // With its shots, and their tasks and deliverables: nothing is left behind.
       const shotIds = (await db.collection('production_shots').find({ sequenceId: seqId, projectId }).toArray()).map(s => s.id);
-      await db.collection('production_sequences').deleteOne({ id: seqId, projectId });
+      const { deletedCount } = await db.collection('production_sequences').deleteOne({ id: seqId, projectId });
+      if (!deletedCount) return res.status(404).json({ message: 'Sequence not found' });
       await db.collection('production_shots').deleteMany({ sequenceId: seqId, projectId });
+      if (shotIds.length) await db.collection('production_tasks').deleteMany({ projectId, shotId: { $in: shotIds } });
       await deleteDeliverablesOf(projectId, { shotIds });
 
       res.json({ message: 'Sequence deleted' });
@@ -155,29 +161,33 @@ export function productionRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId, seqId } = req.params;
-      const { name, description, status, assignedTo, assetId, exportId, dueDate, order } = req.body;
-      if (!name) return res.status(400).json({ message: 'name is required' });
-
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
+      const checked = checkProductionFields(req.body, SHOT_FIELDS, project, { creating: true });
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const { values } = checked;
+
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
+      if (!(await db.collection('production_sequences').findOne({ id: seqId, projectId }))) {
+        return res.status(404).json({ message: 'Sequence not found' });
+      }
 
       const now = new Date();
       const shot = {
         id: crypto.randomUUID(),
         sequenceId: seqId,
         projectId,
-        name,
-        description: description ?? null,
-        order: order ?? 0,
-        status: status ?? 'todo',
-        assignedTo: assignedTo ?? [],
-        assetId: assetId ?? null,
-        exportId: exportId ?? null,
-        dueDate: dueDate ? new Date(dueDate) : null,
+        name: values.name,
+        description: values.description ?? null,
+        order: values.order ?? 0,
+        status: values.status ?? 'todo',
+        assignedTo: values.assignedTo ?? [],
+        assetId: values.assetId ?? null,
+        exportId: values.exportId ?? null,
+        dueDate: values.dueDate ?? null,
         createdBy: auth.userId,
         createdAt: now,
         updatedAt: now,
@@ -201,16 +211,9 @@ export function productionRouter(_config: StreamByConfig): Router {
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
-      const { name, description, status, assignedTo, assetId, exportId, dueDate, order } = req.body;
-      const $set: Record<string, any> = { updatedAt: new Date() };
-      if (name !== undefined) $set.name = name;
-      if (description !== undefined) $set.description = description;
-      if (status !== undefined) $set.status = status;
-      if (assignedTo !== undefined) $set.assignedTo = assignedTo;
-      if (assetId !== undefined) $set.assetId = assetId;
-      if (exportId !== undefined) $set.exportId = exportId;
-      if (dueDate !== undefined) $set.dueDate = dueDate ? new Date(dueDate) : null;
-      if (order !== undefined) $set.order = order;
+      const checked = checkProductionFields(req.body, SHOT_FIELDS, project);
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const $set: Record<string, any> = { ...checked.values, updatedAt: new Date() };
 
       const result = await db.collection('production_shots').findOneAndUpdate(
         { id: shotId, projectId },
@@ -274,27 +277,31 @@ export function productionRouter(_config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId, shotId } = req.params;
-      const { name, status, priority, assignedTo, dueDate, notes } = req.body;
-      if (!name) return res.status(400).json({ message: 'name is required' });
-
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
+      const checked = checkProductionFields(req.body, TASK_FIELDS, project, { creating: true });
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const { values } = checked;
+
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
+      if (!(await db.collection('production_shots').findOne({ id: shotId, projectId }))) {
+        return res.status(404).json({ message: 'Shot not found' });
+      }
 
       const now = new Date();
       const task = {
         id: crypto.randomUUID(),
         shotId,
         projectId,
-        name,
-        status: status ?? 'todo',
-        priority: priority ?? 'medium',
-        assignedTo: assignedTo ?? null,
-        dueDate: dueDate ? new Date(dueDate) : null,
-        notes: notes ?? null,
+        name: values.name,
+        status: values.status ?? 'todo',
+        priority: values.priority ?? 'medium',
+        assignedTo: values.assignedTo ?? null,
+        dueDate: values.dueDate ?? null,
+        notes: values.notes ?? null,
         createdBy: auth.userId,
         createdAt: now,
         updatedAt: now,
@@ -318,14 +325,9 @@ export function productionRouter(_config: StreamByConfig): Router {
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
-      const { name, status, priority, assignedTo, dueDate, notes } = req.body;
-      const $set: Record<string, any> = { updatedAt: new Date() };
-      if (name !== undefined) $set.name = name;
-      if (status !== undefined) $set.status = status;
-      if (priority !== undefined) $set.priority = priority;
-      if (assignedTo !== undefined) $set.assignedTo = assignedTo;
-      if (dueDate !== undefined) $set.dueDate = dueDate ? new Date(dueDate) : null;
-      if (notes !== undefined) $set.notes = notes;
+      const checked = checkProductionFields(req.body, TASK_FIELDS, project);
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const $set: Record<string, any> = { ...checked.values, updatedAt: new Date() };
 
       const result = await db.collection('production_tasks').findOneAndUpdate(
         { id: taskId, shotId, projectId },

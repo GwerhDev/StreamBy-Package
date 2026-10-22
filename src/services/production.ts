@@ -1,0 +1,10 @@
+import { nosqlDb } from '../utils/nosqlDb';
+
+/** A deleted project's sequences, shots, tasks and deliverables: only that project's. */
+export async function deleteProductionData(projectId: string): Promise<void> {
+  const db = nosqlDb();
+  if (!db || !projectId) return;
+  for (const name of ['production_tasks', 'production_shots', 'production_sequences', 'deliverables']) {
+    await db.collection(name).deleteMany({ projectId });
+  }
+}
