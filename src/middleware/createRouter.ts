@@ -33,6 +33,7 @@ import { productionRouter } from './routes/production';
 import { rightsRouter } from './routes/rights';
 import { workflowRouter } from './routes/workflow';
 import { pipelineRouter } from './routes/pipeline';
+import { deliverableRouter } from './routes/deliverable';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
@@ -136,6 +137,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(rightsRouter(config));
   router.use(workflowRouter(config));
   router.use(pipelineRouter(config));
+  router.use(deliverableRouter(config));
 
   return router;
 }

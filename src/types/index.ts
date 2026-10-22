@@ -48,10 +48,12 @@ export interface StorageAdapter {
   deleteProjectDirectory: (projectId: string) => Promise<any>;
   getPresignedUrl?: (contentType: string, projectId: string) => Promise<any>;
   getPresignedProjectImageUrl?: (projectId: string) => Promise<any>;
-  getPresignedUploadUrl?: (key: string, contentType: string) => Promise<string>;
+  // expiresIn: seconds the URL works (the adapter's default if not given).
+  getPresignedUploadUrl?: (key: string, contentType: string, expiresIn?: number) => Promise<string>;
   listFilesByCategory?: (projectId: string, category: string) => Promise<StorageFileInfo[]>;
   deleteFile?: (key: string) => Promise<void>;
-  getPresignedGetUrl?: (key: string) => Promise<string>;
+  // downloadName: the file is downloaded (not shown inline) with this name.
+  getPresignedGetUrl?: (key: string, expiresIn?: number, downloadName?: string) => Promise<string>;
 }
 
 export interface FieldDefinition {
@@ -180,6 +182,9 @@ export interface StreamByConfig {
     // Where its tools reach the REST API (this router's mount). Default: this same process,
     // at the request's local port and mount path.
     apiBaseUrl?: string;
+    // Seconds the signed storage URLs given to an API token work: to upload (default 15
+    // minutes) and to download (default 5 minutes).
+    signedUrlTtl?: { upload?: number; download?: number };
   };
   websocket?: {
     server: WebSocketServer;

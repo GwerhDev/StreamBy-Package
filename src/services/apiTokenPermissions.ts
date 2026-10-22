@@ -84,11 +84,16 @@ const RULES = [
   rule('read', `${P}/connections/storage/[^/]+/(files|folders)(/.+)?`, 'assets:read'),
   rule(['POST', 'PATCH'], `${P}/connections/storage/[^/]+/(files|folders)(/.+)?`, 'assets:write'),
   rule('delete', `${P}/connections/storage/[^/]+/(files|folders)/[^/]+`, 'assets:delete'),
-  rule('read', `${P}/assets/[^/]+/(metadata|versions|qc-report|dependency-graph)`, 'assets:read'),
+  rule('read', `${P}/assets/[^/]+/(metadata|versions|qc-report|dependency-graph|download-url)`, 'assets:read'),
   rule(['PATCH'], `${P}/assets/[^/]+/metadata`, 'assets:write'),
   rule(['POST'], `${P}/assets/[^/]+/qc-report`, 'assets:write'),
   rule('read', `${P}/(reviews(/[^/]+)?|assets/[^/]+/versions/[^/]+/annotations)`, 'assets:read'),
   rule(['POST', 'PATCH'], `${P}/(reviews(/[^/]+/decision)?|assets/[^/]+/versions/[^/]+/annotations(/[^/]+/resolve)?)`, 'assets:write'),
+
+  // Deliverables: an asset (or a version) delivered for a shot or an export.
+  rule('read', `${P}/deliverables`, 'assets:read'),
+  rule(['POST'], `${P}/deliverables`, 'assets:write'),
+  rule('delete', `${P}/deliverables/[^/]+`, 'assets:write'),
 
   // Rights.
   rule('read', `${P}/assets/[^/]+/rights`, 'rights:read'),

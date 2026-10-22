@@ -257,6 +257,99 @@ export const TOOLS = [
     call: ({ projectId, shotId, taskId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/production/shots/${enc(shotId)}/tasks/${enc(taskId)}`, body: defined(fields) }),
   }),
 
+  // ── Files: uploading, downloading, deliverables ──
+  // The file itself never goes through the conversation: these tools give a signed URL, and
+  // the user's own tool (Blender's or Godot's MCP, a script) uploads or downloads it directly.
+  tool({
+    name: 'list_asset_versions', title: "List an asset's versions", permissions: ['assets:read'],
+    description: "An asset's versions, newest first: each one's id, number, file name and when it was made. Any of them can be downloaded (get_asset_download_url).",
+    input: { projectId, assetId: id('asset') },
+    projectOf: byProject,
+    call: ({ projectId, assetId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/versions` }),
+    pick: (data) => (data?.versions ?? []).map((v: any) => ({
+      versionId: v.versionId, version: v.version, fileName: v.fileName ?? null, contentType: v.contentType ?? null, createdAt: v.createdAt,
+    })),
+  }),
+  tool({
+    name: 'request_asset_upload', title: 'Request an upload URL', permissions: ['assets:write'], write: true,
+    description: [
+      "Makes a new asset (or, with assetId, a new version of one) and gives a signed URL to upload its file to, as the UI does.",
+      "It doesn't upload anything: the file is sent by the tool that has it (for example Blender's MCP, running Python), with an HTTP PUT of its bytes to `upload.url` and the `upload.headers` given, before `expiresAt`.",
+      "The URL works for that file only. A new version keeps the earlier ones.",
+      "Categories: images, audios, videos, 3d-models (.glb, .gltf, .obj, .fbx, .stl, .ply); contentType must match it.",
+    ].join(' '),
+    input: {
+      projectId,
+      category: z.enum(CATEGORIES),
+      fileName: z.string().min(1).describe('The file name, with its extension (e.g. shot010_layout.glb)'),
+      contentType: z.string().min(1).describe('Its MIME type (e.g. model/gltf-binary, image/png, video/mp4)'),
+      assetId: z.string().optional().describe('An existing asset to upload a new version of; a new asset if not given'),
+      connectionId: z.string().optional().describe("A storage connection to store it in; the project's built-in storage if not given"),
+    },
+    projectOf: byProject,
+    call: ({ projectId, category, fileName, contentType, assetId, connectionId }) => {
+      const query = new URLSearchParams({ fileName, contentType, ...(connectionId && !assetId ? { category } : {}) });
+      const files = connectionId ? `/projects/${enc(projectId)}/connections/storage/${enc(connectionId)}` : `/projects/${enc(projectId)}/storage`;
+      const path = assetId
+        ? `${files}/files/${enc(assetId)}/replace-url`
+        : connectionId ? `${files}/upload-url` : `${files}/${category}/upload-url`;
+      return { method: 'GET', path: `${path}?${query}` };
+    },
+    pick: (data, { contentType }) => ({
+      assetId: data?.fileId,
+      ...(data?.versionId ? { versionId: data.versionId, version: data.version } : { version: 1 }),
+      upload: { method: 'PUT', url: data?.url, headers: { 'Content-Type': contentType } },
+      expiresAt: data?.expiresAt ?? null,
+    }),
+  }),
+  tool({
+    name: 'get_asset_download_url', title: 'Get a download URL', permissions: ['assets:read'],
+    description: "A short-lived signed URL to download an asset's file (its latest version, or the one given), for the tool that will use it (for example Blender's or Godot's MCP) to fetch with an HTTP GET before `expiresAt`. It works for that file only.",
+    input: { projectId, assetId: id('asset'), versionId: z.string().optional().describe('A version (list_asset_versions); the latest if not given') },
+    projectOf: byProject,
+    call: ({ projectId, assetId, versionId }) => ({
+      method: 'GET',
+      path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/download-url${versionId ? `?${new URLSearchParams({ versionId })}` : ''}`,
+    }),
+  }),
+  tool({
+    name: 'list_deliverables', title: 'List deliverables', permissions: ['assets:read'],
+    description: "A project's deliverables (assets delivered for a shot or an export), of one shot or export if given: each one's asset, version, note and what it's for.",
+    input: {
+      projectId,
+      shotId: z.string().optional().describe("A shot's id: only its deliverables"),
+      exportId: z.string().optional().describe("An export's id: only its deliverables"),
+    },
+    projectOf: byProject,
+    call: ({ projectId, shotId, exportId }) => {
+      const query = new URLSearchParams(defined({ shotId, exportId }) as Record<string, string>).toString();
+      return { method: 'GET', path: `/projects/${enc(projectId)}/deliverables${query ? `?${query}` : ''}` };
+    },
+    pick: (data) => data?.deliverables ?? [],
+  }),
+  tool({
+    name: 'mark_deliverable', title: 'Mark a deliverable', permissions: ['assets:write'], write: true,
+    description: "Marks an asset (or one of its versions) as a deliverable of a production shot or of an export, as shown in the shot's panel in the UI. Give shotId or exportId, one of them. Upload the file first (request_asset_upload).",
+    input: {
+      projectId,
+      assetId: id('asset'),
+      versionId: z.string().optional().describe('A version of it; without one, the asset as it is (its latest version)'),
+      shotId: z.string().optional().describe("The shot it's delivered for"),
+      exportId: z.string().optional().describe("The export it's delivered for"),
+      note: z.string().max(1000).optional(),
+    },
+    projectOf: byProject,
+    call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/deliverables`, body: defined(fields) }),
+    pick: (data) => data?.deliverable,
+  }),
+  tool({
+    name: 'remove_deliverable', title: 'Remove a deliverable', permissions: ['assets:write'], write: true,
+    description: 'Unmarks a deliverable. Its asset stays where it is.',
+    input: { projectId, deliverableId: id('deliverable') },
+    projectOf: byProject,
+    call: ({ projectId, deliverableId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}/deliverables/${enc(deliverableId)}` }),
+  }),
+
   // ── Projects ──
   tool({
     name: 'create_project', title: 'Create a project', permissions: ['projects:create'], write: true,

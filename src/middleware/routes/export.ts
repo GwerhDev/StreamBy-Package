@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { deleteDeliverablesOf } from '../../services/deliverables';
 import { StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
@@ -329,6 +330,7 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       await deleteExport(config, projectId, exportId, project.dbType);
+      await deleteDeliverablesOf(projectId, { exportId });
 
       res.status(200).json({ message: 'Export deleted successfully' });
     } catch (err: any) {

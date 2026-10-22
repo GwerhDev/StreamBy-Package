@@ -10,6 +10,9 @@ import { assertBuiltinAccess } from '../../utils/builtinAccess';
 import { resolveStorageAdapter } from '../../services/connectionResolver';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
+import { signedUrlTtl } from '../../services/signedUrls';
+import { addVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions } from '../../services/assetVersions';
+import { deleteDeliverablesOf } from '../../services/deliverables';
 
 type StorageCategory = 'images' | 'audios' | 'videos' | '3d-models';
 
@@ -143,7 +146,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const collection = getRawFilesCollection();
       if (collection) {
-        await collection.insertOne({
+        const fileDoc = {
           _id: new ObjectId(),
           fileId,
           projectId,
@@ -153,11 +156,14 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
           contentType,
           uploadedBy: auth.userId,
           createdAt: new Date(),
-        });
+        };
+        await collection.insertOne(fileDoc);
+        await recordFirstVersion(fileDoc);
       }
 
-      const url = await adapter.getPresignedUploadUrl(storageKey, contentType);
-      res.json({ url, fileId, storageKey, displayName: fileName });
+      const expiresIn = signedUrlTtl(auth, config, 'upload');
+      const url = await adapter.getPresignedUploadUrl(storageKey, contentType, expiresIn);
+      res.json({ url, fileId, storageKey, displayName: fileName, ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate upload URL', details: err.message });
     }
@@ -175,7 +181,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -191,10 +197,13 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
       }
 
-      const url = await adapter.getPresignedUploadUrl(fileDoc.storageKey, contentType);
-      await collection.updateOne({ fileId, projectId }, { $set: { contentType, updatedAt: new Date() } });
+      // A new version, in a file of its own: the earlier ones are kept.
+      const version = await addVersion(fileDoc as any, { fileName, contentType, userId: auth.userId });
+      const expiresIn = signedUrlTtl(auth, config, 'upload');
+      const url = await adapter.getPresignedUploadUrl(version.storageKey, contentType, expiresIn);
+      await collection.updateOne({ fileId, projectId }, { $set: { storageKey: version.storageKey, contentType, updatedAt: new Date() } });
 
-      res.json({ url, storageKey: fileDoc.storageKey, fileId });
+      res.json({ url, storageKey: version.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }
@@ -245,7 +254,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const fileDoc = await collection.findOne({ fileId, projectId });
       if (!fileDoc) return res.status(404).json({ message: 'File not found' });
 
-      if (adapter.deleteFile) await adapter.deleteFile(fileDoc.storageKey);
+      await deleteAsset(fileDoc, adapter);
       await collection.deleteOne({ fileId, projectId });
 
       res.json({ message: 'File deleted successfully' });
@@ -267,7 +276,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find({ projectId }).sort({ createdAt: -1 }).limit(12).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter)));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter, signedUrlTtl(auth, config, 'download'))));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch latest files', details: err.message });
@@ -291,10 +300,56 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find({ projectId, category }).sort({ createdAt: -1 }).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter)));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter, signedUrlTtl(auth, config, 'download'))));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list files', details: err.message });
+    }
+  });
+
+  // A short-lived URL to download an asset, or one of its versions, wherever it's stored
+  // (the built-in storage or one of the project's storage connections). It's for that file
+  // only, and downloads it with its name.
+  router.get('/projects/:projectId/assets/:fileId/download-url', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, fileId } = req.params;
+      const { versionId } = req.query as { versionId?: string };
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFilesCollection();
+      if (!collection) return res.status(500).json({ message: 'Database not available' });
+      const fileDoc = await collection.findOne({ fileId, projectId });
+      if (!fileDoc) return res.status(404).json({ message: 'File not found' });
+
+      let storageKey: string = fileDoc.storageKey;
+      let fileName: string = fileDoc.displayName;
+      let contentType: string | undefined = fileDoc.contentType;
+      let version: number | undefined;
+      if (versionId) {
+        const found = await findVersion(projectId, fileId, versionId);
+        if (!found) return res.status(404).json({ message: 'Version not found' });
+        storageKey = found.storageKey;
+        fileName = found.fileName ?? fileName;
+        contentType = found.contentType ?? contentType;
+        version = found.version;
+      }
+
+      // Its storage connection's adapter; files stored before connections had their own row
+      // (no connection, or the built-in provider's id) are in the default storage.
+      const connId: string | undefined = fileDoc.storageConnectionId;
+      const fileAdapter = connId && findStorageConn(project, connId) ? await resolveConnAdapter(connId, project, auth) : adapter;
+      if ('error' in fileAdapter) return res.status(fileAdapter.status).json({ message: fileAdapter.error });
+      if (!fileAdapter.getPresignedGetUrl) return res.status(501).json({ message: 'Storage adapter does not support download URLs' });
+
+      const expiresIn = signedUrlTtl(auth, config, 'download') ?? 3600;
+      const url = await fileAdapter.getPresignedGetUrl(storageKey, expiresIn, fileName);
+      res.json({ url, fileId, fileName, contentType: contentType ?? null, ...(version ? { versionId, version } : {}), ...expiry(expiresIn) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to generate download URL', details: err.message });
     }
   });
 
@@ -330,7 +385,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const collection = getRawFilesCollection();
       if (collection) {
-        await collection.insertOne({
+        const fileDoc = {
           _id: new ObjectId(),
           fileId,
           projectId,
@@ -341,11 +396,14 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
           contentType,
           uploadedBy: auth.userId,
           createdAt: new Date(),
-        });
+        };
+        await collection.insertOne(fileDoc);
+        await recordFirstVersion(fileDoc);
       }
 
-      const url = await connAdapter.getPresignedUploadUrl(storageKey, contentType);
-      res.json({ url, fileId, storageKey, displayName: fileName });
+      const expiresIn = signedUrlTtl(auth, config, 'upload');
+      const url = await connAdapter.getPresignedUploadUrl(storageKey, contentType, expiresIn);
+      res.json({ url, fileId, storageKey, displayName: fileName, ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate upload URL', details: err.message });
     }
@@ -367,7 +425,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find(connFilter(projectId, connId, project)).sort({ createdAt: -1 }).limit(12).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter)));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter, signedUrlTtl(auth, config, 'download'))));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch latest files', details: err.message });
@@ -394,7 +452,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find(connFilter(projectId, connId, project, { category })).sort({ createdAt: -1 }).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter)));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter, signedUrlTtl(auth, config, 'download'))));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list files', details: err.message });
@@ -413,7 +471,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
 
       const collection = getRawFilesCollection();
       if (!collection) return res.status(500).json({ message: 'Database not available' });
@@ -431,13 +489,16 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
       }
 
-      const url = await connAdapter.getPresignedUploadUrl(fileDoc.storageKey, contentType);
+      // A new version, in a file of its own: the earlier ones are kept.
+      const version = await addVersion(fileDoc as any, { fileName, contentType, userId: auth.userId });
+      const expiresIn = signedUrlTtl(auth, config, 'upload');
+      const url = await connAdapter.getPresignedUploadUrl(version.storageKey, contentType, expiresIn);
       await collection.updateOne(
         connFilter(projectId, connId, project, { fileId }),
-        { $set: { contentType, updatedAt: new Date() } },
+        { $set: { storageKey: version.storageKey, contentType, updatedAt: new Date() } },
       );
 
-      res.json({ url, storageKey: fileDoc.storageKey, fileId });
+      res.json({ url, storageKey: version.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }
@@ -491,7 +552,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const fileDoc = await collection.findOne(connFilter(projectId, connId, project, { fileId }));
       if (!fileDoc) return res.status(404).json({ message: 'File not found' });
 
-      if (connAdapter.deleteFile) await connAdapter.deleteFile(fileDoc.storageKey);
+      await deleteAsset(fileDoc, connAdapter);
       await collection.deleteOne(connFilter(projectId, connId, project, { fileId }));
 
       res.json({ message: 'File deleted successfully' });
@@ -799,10 +860,10 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   return router;
 }
 
-async function resolveFileUrl(file: any, adapter: StorageAdapter): Promise<any> {
+async function resolveFileUrl(file: any, adapter: StorageAdapter, expiresIn?: number): Promise<any> {
   let url: string | null = null;
   if (adapter.getPresignedGetUrl) {
-    try { url = await adapter.getPresignedGetUrl(file.storageKey); } catch { /* leave null */ }
+    try { url = await adapter.getPresignedGetUrl(file.storageKey, expiresIn); } catch { /* leave null */ }
   }
   return {
     id: file.fileId,
@@ -815,4 +876,17 @@ async function resolveFileUrl(file: any, adapter: StorageAdapter): Promise<any> 
     folderId: file.folderId ?? null,
     url,
   };
+}
+
+// When a signed URL stops working, for a client to know (only when it's short-lived).
+const expiry = (expiresIn: number | undefined) =>
+  expiresIn ? { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() } : {};
+
+// An asset's files (every version), its versions and its deliverables. Its record is the
+// caller's to delete.
+async function deleteAsset(fileDoc: any, adapter: StorageAdapter): Promise<void> {
+  const keys = await versionStorageKeys(fileDoc.projectId, fileDoc.fileId, fileDoc.storageKey);
+  if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key);
+  await deleteVersions(fileDoc.projectId, fileDoc.fileId);
+  await deleteDeliverablesOf(fileDoc.projectId, { assetId: fileDoc.fileId });
 }

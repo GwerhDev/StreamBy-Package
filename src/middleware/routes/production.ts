@@ -6,6 +6,7 @@ import { getConnection, getConnectedIds } from '../../adapters/database/connecti
 import { getModel } from '../../models/manager';
 import { Auth } from '../../types';
 import crypto from 'crypto';
+import { deleteDeliverablesOf } from '../../services/deliverables';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -115,8 +116,10 @@ export function productionRouter(_config: StreamByConfig): Router {
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
+      const shotIds = (await db.collection('production_shots').find({ sequenceId: seqId, projectId }).toArray()).map(s => s.id);
       await db.collection('production_sequences').deleteOne({ id: seqId, projectId });
       await db.collection('production_shots').deleteMany({ sequenceId: seqId, projectId });
+      await deleteDeliverablesOf(projectId, { shotIds });
 
       res.json({ message: 'Sequence deleted' });
     } catch (err: any) {
@@ -235,6 +238,7 @@ export function productionRouter(_config: StreamByConfig): Router {
 
       await db.collection('production_shots').deleteOne({ id: shotId, projectId });
       await db.collection('production_tasks').deleteMany({ shotId, projectId });
+      await deleteDeliverablesOf(projectId, { shotIds: [shotId] });
 
       res.json({ message: 'Shot deleted' });
     } catch (err: any) {

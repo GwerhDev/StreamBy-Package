@@ -74,14 +74,18 @@ export class S3Adapter implements StorageAdapter {
     return { url, publicUrl };
   }
 
-  async getPresignedGetUrl(key: string): Promise<string> {
-    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
-    return await getSignedUrl(this.s3, command, { expiresIn: 86400 });
+  async getPresignedGetUrl(key: string, expiresIn = 86400, downloadName?: string): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ...(downloadName ? { ResponseContentDisposition: contentDisposition(downloadName) } : {}),
+    });
+    return await getSignedUrl(this.s3, command, { expiresIn });
   }
 
-  async getPresignedUploadUrl(key: string, contentType: string): Promise<string> {
+  async getPresignedUploadUrl(key: string, contentType: string, expiresIn = 3600): Promise<string> {
     const command = new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType });
-    return await getSignedUrl(this.s3, command, { expiresIn: 3600 });
+    return await getSignedUrl(this.s3, command, { expiresIn });
   }
 
   async deleteFile(key: string): Promise<void> {
@@ -131,3 +135,9 @@ export class S3Adapter implements StorageAdapter {
     return ext ? (mimeMap[ext] || 'application/octet-stream') : 'application/octet-stream';
   }
 }
+
+// An attachment with its name: ASCII in `filename`, the full name in `filename*` (RFC 6266).
+const contentDisposition = (name: string) => {
+  const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+};

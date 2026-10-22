@@ -75,7 +75,9 @@ export async function runIngestJob(
     updateJob(jobId, { stage: 'creating-version', progress: 70 });
 
     const versionsCol = getVersionsCollection();
-    if (versionsCol) {
+    // Its upload already recorded the version it's in; only an asset from before versions
+    // were kept gets one here.
+    if (versionsCol && !(await versionsCol.findOne({ assetId: fileId, projectId, storageKey: fileDoc.storageKey }))) {
       const existing = await versionsCol.countDocuments({ assetId: fileId, projectId });
       await versionsCol.insertOne({
         _id: new ObjectId(),
