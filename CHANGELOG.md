@@ -48,6 +48,11 @@
   it (404 otherwise).
 - The MCP tools for shots take `assignedTo` as a list of user ids, as the API does, and their
   statuses and priorities are listed in their schema.
+- **The MCP tools take the path a user does.** `create_sequence`, `create_shot` and
+  `create_task` first add a production node (a Shot node) to the project's workflow when it
+  has none, as dropping one on the canvas does, and make nothing if it can't be added. So they
+  need `workflow:write` as well as `production:write`. Each tool's description says where its
+  result shows in the UI.
 
 ### Fixed
 

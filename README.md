@@ -203,10 +203,17 @@ A token sees only the tools whose permissions it has.
 | `get_export` | `exports:read` |
 | `get_job` | `jobs:read` |
 | `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
-| `create_sequence`, `update_sequence`, `create_shot`, `update_shot`, `create_task`, `update_task` | `production:write` |
+| `update_sequence`, `update_shot`, `update_task` | `production:write` |
+| `create_sequence`, `create_shot`, `create_task` | `production:write` and `workflow:write` |
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
 | `request_asset_upload`, `mark_deliverable`, `remove_deliverable` | `assets:write` |
+
+The tools take the path a user does in the UI, and each one's description says where its
+result shows there. Production data lives under a production node of the project's workflow:
+if the workflow has none yet, `create_sequence`, `create_shot` and `create_task` first add a
+Shot node to it, as dropping one on the canvas does (so they need `workflow:write`), and make
+nothing if it can't be added.
 
 The tools that delete are marked as destructive (`destructiveHint`), so a client can ask before
 running them.
