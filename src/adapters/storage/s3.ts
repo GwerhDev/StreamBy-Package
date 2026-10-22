@@ -1,4 +1,4 @@
-import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3Config, StorageAdapter, StorageFileInfo } from '../../types';
 
@@ -86,6 +86,11 @@ export class S3Adapter implements StorageAdapter {
   async getPresignedUploadUrl(key: string, contentType: string, expiresIn = 3600): Promise<string> {
     const command = new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType });
     return await getSignedUrl(this.s3, command, { expiresIn });
+  }
+
+  async copyFile(from: string, to: string): Promise<void> {
+    const source = `${this.bucket}/${from.split('/').map(encodeURIComponent).join('/')}`;
+    await this.s3.send(new CopyObjectCommand({ Bucket: this.bucket, CopySource: source, Key: to }));
   }
 
   async deleteFile(key: string): Promise<void> {

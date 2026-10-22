@@ -42,15 +42,25 @@ vi.mock('../src/services/backfillBuiltinConnections', () => ({ backfillBuiltinCo
 const { createStreamByRouter } = await import('../src/middleware/createRouter');
 const { resolveApiToken, createApiToken, API_TOKEN_PREFIX } = await import('../src/services/apiTokens');
 
-// The storage: signed URLs that say what they're for and how long they work.
+// The storage, in memory: its files by key, and signed URLs that say what they're for and how
+// long they work. `put` and `get` stand for a client using them.
+const objects = new Map<string, string>();
 const deleted: string[] = [];
-const adapter = {
+const failures = { copy: false };
+const adapter: Record<string, any> = {
   getPresignedUploadUrl: async (key: string, contentType: string, expiresIn?: number) =>
     `https://storage.test/put/${key}?type=${encodeURIComponent(contentType)}&expires=${expiresIn ?? 'default'}`,
   getPresignedGetUrl: async (key: string, expiresIn?: number, downloadName?: string) =>
     `https://storage.test/get/${key}?expires=${expiresIn ?? 'default'}${downloadName ? `&name=${encodeURIComponent(downloadName)}` : ''}`,
-  deleteFile: async (key: string) => { deleted.push(key); },
+  copyFile: async (from: string, to: string) => {
+    if (failures.copy || !objects.has(from)) throw new Error('copy failed');
+    objects.set(to, objects.get(from)!);
+  },
+  deleteFile: async (key: string) => { deleted.push(key); objects.delete(key); },
 };
+const keyOf = (url: string) => new URL(url).pathname.replace(/^\/(put|get)\//, '');
+const put = (url: string, content: string) => objects.set(keyOf(url), content);
+const get = (url: string) => objects.get(keyOf(url));
 
 const authProvider = async (req: any) => {
   const bearer = req.headers.authorization?.replace(/^Bearer /, '');
@@ -85,6 +95,8 @@ const uploadModel = (who = eli, name = 'shot010.glb') =>
 beforeEach(() => {
   mongo.db = new FakeDb();
   deleted.length = 0;
+  objects.clear();
+  failures.copy = false;
   for (const k of Object.keys(store)) delete store[k];
   store.projects = [{
     _id: 'p1', id: 'p1', name: 'Portfolio', dbType: 'sql',
@@ -119,22 +131,62 @@ describe('uploading', () => {
     expect(mongo.db.docs('storage_files')).toEqual([]);
   });
 
-  it('a new version goes to a file of its own; the earlier ones are kept', async () => {
+  const replace = (fileId: string, fileName = 'shot010_v2.glb', who = eli) =>
+    who.get(`/projects/p1/storage/files/${fileId}/replace-url?${query({ fileName, contentType: 'model/gltf-binary' })}`);
+
+  it("a new version goes to the asset's own key, so its URL doesn't change; the earlier one is archived", async () => {
     const first = (await uploadModel()).body;
-    const res = await eli.get(`/projects/p1/storage/files/${first.fileId}/replace-url?${query({ fileName: 'shot010_v2.glb', contentType: 'model/gltf-binary' })}`);
+    put(first.url, 'v1 bytes');
+    const urlBefore = (await eli.get('/projects/p1/storage/3d-models')).body.data[0].url;
+
+    const res = await replace(first.fileId);
     expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ fileId: first.fileId, version: 2 });
-    expect(res.body.storageKey).not.toBe(first.storageKey);
-    expect(res.body.storageKey).toBe(first.storageKey.replace(/\.glb$/, '.v2.glb'));
-    expect(mongo.db.docs('storage_files')[0].storageKey).toBe(res.body.storageKey);
-    expect(mongo.db.docs('asset_versions').map((v: any) => [v.version, v.storageKey])).toEqual([[1, first.storageKey], [2, res.body.storageKey]]);
+    expect(res.body).toMatchObject({ fileId: first.fileId, version: 2, storageKey: first.storageKey });
+    expect(keyOf(res.body.url)).toBe(first.storageKey);
+    put(res.body.url, 'v2 bytes');
+
+    const archived = first.storageKey.replace(/\.glb$/, '.v1.glb');
+    expect(objects.get(archived)).toBe('v1 bytes');
+    expect(mongo.db.docs('storage_files')[0].storageKey).toBe(first.storageKey);
+    expect((await eli.get('/projects/p1/storage/3d-models')).body.data[0].url).toBe(urlBefore);
+    expect(get(urlBefore)).toBe('v2 bytes');
+    expect(mongo.db.docs('asset_versions').map((v: any) => [v.version, v.storageKey])).toEqual([[1, archived], [2, first.storageKey]]);
+
+    // A third: version 2 is archived in turn, and the asset's key is the new one again.
+    put((await replace(first.fileId, 'v3.glb')).body.url, 'v3 bytes');
+    expect(objects.get(first.storageKey.replace(/\.glb$/, '.v2.glb'))).toBe('v2 bytes');
+    expect(get(urlBefore)).toBe('v3 bytes');
+  });
+
+  it("if the current version can't be archived, nothing is replaced and no URL is given", async () => {
+    const first = (await uploadModel()).body;
+    put(first.url, 'v1 bytes');
+    failures.copy = true;
+    const res = await replace(first.fileId);
+    expect(res.status).toBe(502);
+    expect(res.body.url).toBeUndefined();
+    expect(objects.get(first.storageKey)).toBe('v1 bytes');
+    expect(mongo.db.docs('asset_versions').map((v: any) => [v.version, v.storageKey])).toEqual([[1, first.storageKey]]);
+  });
+
+  it("a storage that can't copy keeps no versions, and replaces nothing", async () => {
+    const first = (await uploadModel()).body;
+    const copyFile = adapter.copyFile;
+    delete adapter.copyFile;
+    try {
+      expect((await replace(first.fileId)).status).toBe(501);
+    } finally {
+      adapter.copyFile = copyFile;
+    }
   });
 
   it('an asset from before versions were kept gets its first one when it gets a second', async () => {
     mongo.db.collection('storage_files').docs.push({ fileId: 'old', projectId: 'p1', category: 'images', storageKey: 'p1/images/old.png', displayName: 'old.png', contentType: 'image/png' });
+    objects.set('p1/images/old.png', 'old bytes');
     const res = await eli.get(`/projects/p1/storage/files/old/replace-url?${query({ fileName: 'new.png', contentType: 'image/png' })}`);
     expect(res.body.version).toBe(2);
-    expect(mongo.db.docs('asset_versions').map((v: any) => v.storageKey)).toEqual(['p1/images/old.png', 'p1/images/old.v2.png']);
+    expect(mongo.db.docs('asset_versions').map((v: any) => v.storageKey)).toEqual(['p1/images/old.v1.png', 'p1/images/old.png']);
+    expect(objects.get('p1/images/old.v1.png')).toBe('old bytes');
   });
 
   it("a viewer can't upload a new version", async () => {
@@ -145,17 +197,27 @@ describe('uploading', () => {
 });
 
 describe('downloading', () => {
-  it('the latest version, or the one asked for, with its name', async () => {
+  it('the current version, or an earlier one by its id, with its name', async () => {
     const first = (await uploadModel()).body;
-    const second = (await eli.get(`/projects/p1/storage/files/${first.fileId}/replace-url?${query({ fileName: 'shot010_v2.glb', contentType: 'model/gltf-binary' })}`)).body;
+    put(first.url, 'v1 bytes');
+    put((await eli.get(`/projects/p1/storage/files/${first.fileId}/replace-url?${query({ fileName: 'shot010_v2.glb', contentType: 'model/gltf-binary' })}`)).body.url, 'v2 bytes');
+
     const latest = await eli.get(`/projects/p1/assets/${first.fileId}/download-url`);
     expect(latest.status).toBe(200);
-    expect(latest.body.url).toContain(`/get/${second.storageKey}?`);
-    const v1Id = mongo.db.docs('asset_versions')[0].versionId;
+    expect(get(latest.body.url)).toBe('v2 bytes');
+    const v1Id = mongo.db.docs('asset_versions').find((v: any) => v.version === 1).versionId;
     const v1 = await eli.get(`/projects/p1/assets/${first.fileId}/download-url?versionId=${v1Id}`);
     expect(v1.body).toMatchObject({ version: 1, fileName: 'shot010.glb' });
-    expect(v1.body.url).toBe(`https://storage.test/get/${first.storageKey}?expires=3600&name=shot010.glb`);
+    expect(get(v1.body.url)).toBe('v1 bytes');
+    expect(v1.body.url).toMatch(/expires=3600&name=shot010\.glb$/);
     expect((await eli.get(`/projects/p1/assets/${first.fileId}/download-url?versionId=nope`)).status).toBe(404);
+  });
+
+  it("not for someone outside the project", async () => {
+    const { fileId } = (await uploadModel()).body;
+    const res = await as({ user: 'stranger' }).get(`/projects/p1/assets/${fileId}/download-url`);
+    expect(res.status).toBe(403);
+    expect(res.body.url).toBeUndefined();
   });
 
   it('with a token, a URL of minutes; without assets:read, none', async () => {
@@ -232,12 +294,16 @@ describe('deliverables', () => {
   });
 });
 
-it('deleting an asset deletes every version of its file, and its deliverables', async () => {
+it("deleting an asset deletes every key of its file (its own and its versions'), and its deliverables", async () => {
   const first = (await uploadModel()).body;
-  const second = (await eli.get(`/projects/p1/storage/files/${first.fileId}/replace-url?${query({ fileName: 'v2.glb', contentType: 'model/gltf-binary' })}`)).body;
+  put(first.url, 'v1');
+  mongo.db.collection('storage_files').docs.push({ fileId: 'other', projectId: 'p1', category: '3d-models', storageKey: 'p1/3d-models/other.glb' });
+  objects.set('p1/3d-models/other.glb', 'other');
+  put((await eli.get(`/projects/p1/storage/files/${first.fileId}/replace-url?${query({ fileName: 'v2.glb', contentType: 'model/gltf-binary' })}`)).body.url, 'v2');
   await eli.post('/projects/p1/deliverables', { assetId: first.fileId, shotId: 's1' });
   expect((await eli.delete(`/projects/p1/storage/files/${first.fileId}`)).status).toBe(200);
-  expect(deleted.sort()).toEqual([first.storageKey, second.storageKey].sort());
+  expect(deleted.sort()).toEqual([first.storageKey, first.storageKey.replace(/\.glb$/, '.v1.glb')].sort());
+  expect([...objects.keys()]).toEqual(['p1/3d-models/other.glb']);
   expect(mongo.db.docs('asset_versions')).toEqual([]);
   expect(mongo.db.docs('deliverables')).toEqual([]);
 });
@@ -281,6 +347,7 @@ describe('from the MCP server', () => {
     expect(upload.upload.url).toMatch(/expires=900$/);
     expect(upload.expiresAt).toBeTruthy();
 
+    put(upload.upload.url, 'from Blender');
     const marked = await call(client, 'mark_deliverable', { projectId: 'p1', assetId: upload.assetId, shotId: 's1' });
     expect(marked).toMatchObject({ shotName: 'SH010', asset: { displayName: 'SH010_layout.glb' } });
 

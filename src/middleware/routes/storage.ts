@@ -11,7 +11,7 @@ import { resolveStorageAdapter } from '../../services/connectionResolver';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 import { signedUrlTtl } from '../../services/signedUrls';
-import { addVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions } from '../../services/assetVersions';
+import { archiveCurrentVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions } from '../../services/assetVersions';
 import { deleteDeliverablesOf } from '../../services/deliverables';
 
 type StorageCategory = 'images' | 'audios' | 'videos' | '3d-models';
@@ -197,13 +197,20 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
       }
 
-      // A new version, in a file of its own: the earlier ones are kept.
-      const version = await addVersion(fileDoc as any, { fileName, contentType, userId: auth.userId });
+      // The new version goes to the asset's own key, so its URL doesn't change; the current
+      // one is archived first, and without a way to archive it nothing is replaced.
+      if (!adapter.copyFile) return res.status(501).json({ message: 'Storage adapter cannot keep versions' });
+      let version;
+      try {
+        version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: auth.userId }, adapter.copyFile.bind(adapter));
+      } catch (err: any) {
+        return res.status(502).json({ message: 'Failed to archive the current version; nothing was replaced', details: err.message });
+      }
       const expiresIn = signedUrlTtl(auth, config, 'upload');
-      const url = await adapter.getPresignedUploadUrl(version.storageKey, contentType, expiresIn);
-      await collection.updateOne({ fileId, projectId }, { $set: { storageKey: version.storageKey, contentType, updatedAt: new Date() } });
+      const url = await adapter.getPresignedUploadUrl(fileDoc.storageKey, contentType, expiresIn);
+      await collection.updateOne({ fileId, projectId }, { $set: { contentType, updatedAt: new Date() } });
 
-      res.json({ url, storageKey: version.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
+      res.json({ url, storageKey: fileDoc.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }
@@ -489,16 +496,23 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
       }
 
-      // A new version, in a file of its own: the earlier ones are kept.
-      const version = await addVersion(fileDoc as any, { fileName, contentType, userId: auth.userId });
+      // The new version goes to the asset's own key, so its URL doesn't change; the current
+      // one is archived first, and without a way to archive it nothing is replaced.
+      if (!connAdapter.copyFile) return res.status(501).json({ message: 'Storage adapter cannot keep versions' });
+      let version;
+      try {
+        version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: auth.userId }, connAdapter.copyFile.bind(connAdapter));
+      } catch (err: any) {
+        return res.status(502).json({ message: 'Failed to archive the current version; nothing was replaced', details: err.message });
+      }
       const expiresIn = signedUrlTtl(auth, config, 'upload');
-      const url = await connAdapter.getPresignedUploadUrl(version.storageKey, contentType, expiresIn);
+      const url = await connAdapter.getPresignedUploadUrl(fileDoc.storageKey, contentType, expiresIn);
       await collection.updateOne(
         connFilter(projectId, connId, project, { fileId }),
-        { $set: { storageKey: version.storageKey, contentType, updatedAt: new Date() } },
+        { $set: { contentType, updatedAt: new Date() } },
       );
 
-      res.json({ url, storageKey: version.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
+      res.json({ url, storageKey: fileDoc.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }

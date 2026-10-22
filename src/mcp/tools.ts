@@ -275,7 +275,7 @@ export const TOOLS = [
     description: [
       "Makes a new asset (or, with assetId, a new version of one) and gives a signed URL to upload its file to, as the UI does.",
       "It doesn't upload anything: the file is sent by the tool that has it (for example Blender's MCP, running Python), with an HTTP PUT of its bytes to `upload.url` and the `upload.headers` given, before `expiresAt`.",
-      "The URL works for that file only. A new version keeps the earlier ones.",
+      "The URL works for that file only. A new version keeps the asset's URL (it replaces what it serves); the earlier ones are archived and can still be downloaded.",
       "Categories: images, audios, videos, 3d-models (.glb, .gltf, .obj, .fbx, .stl, .ply); contentType must match it.",
     ].join(' '),
     input: {

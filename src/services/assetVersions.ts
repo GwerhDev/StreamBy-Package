@@ -2,10 +2,11 @@ import crypto from 'crypto';
 import { ObjectId } from 'mongodb';
 import { nosqlDb as db } from '../utils/nosqlDb';
 
-// An asset's versions. Each one is its own file in storage, so any of them can still be
-// downloaded: the first is the asset's original key, and each new one gets a key of its own
-// (`<original key without extension>.v<n><extension>`). The asset (its storage_files record)
-// points to its latest version.
+// An asset's versions. The asset's own key always holds its current version, so its URL never
+// changes when it's replaced (a site that links to it shows the new one, with no deploy).
+// Before a new version is uploaded there, the current one is copied to a key of its own,
+// `<key without extension>.v<n><extension>`, and recorded as version n: every earlier version
+// can still be downloaded.
 
 export interface AssetVersion {
   versionId: string;
@@ -21,12 +22,10 @@ export interface AssetVersion {
 
 export const versionsCollection = () => db()?.collection('asset_versions') ?? null;
 
-const extensionOf = (name: string) => (name.includes('.') ? `.${name.split('.').pop()!.toLowerCase()}` : '');
-
-/** The key of an asset's version `n`, next to its original. */
-export const versionStorageKey = (originalKey: string, version: number, fileName: string) => {
-  const base = originalKey.replace(/\.[^./]*$/, '');
-  return `${base}.v${version}${extensionOf(fileName)}`;
+/** The key an asset's version `n` is archived in, next to the asset's own key. */
+export const archivedVersionKey = (assetKey: string, version: number) => {
+  const extension = /(\.[^./]*)$/.exec(assetKey)?.[1] ?? '';
+  return `${assetKey.slice(0, assetKey.length - extension.length)}.v${version}${extension}`;
 };
 
 /** Records the first version of an asset just made (or one made before versions were kept). */
@@ -51,23 +50,32 @@ export async function recordFirstVersion(file: {
   });
 }
 
-/** A new version of an asset: its own key, recorded as the latest. */
-export async function addVersion(
+/**
+ * Makes room for a new version of an asset, to be uploaded to its own key: its current version
+ * is copied to an archive key first (`copyFile`) and recorded there. If the copy fails nothing
+ * changes, and it throws: the current version is never lost.
+ */
+export async function archiveCurrentVersion(
   file: { fileId: string; projectId: string; storageKey: string; contentType?: string; displayName?: string; uploadedBy?: string; createdAt?: Date },
   upload: { fileName: string; contentType: string; userId: string },
+  copyFile: (from: string, to: string) => Promise<void>,
 ): Promise<AssetVersion> {
   const col = versionsCollection();
   if (!col) throw new Error('Database not available');
   await recordFirstVersion(file);
-  const [latest] = await col.find({ assetId: file.fileId, projectId: file.projectId }).sort({ version: -1 }).limit(1).toArray();
-  const first = await col.findOne({ assetId: file.fileId, projectId: file.projectId, version: 1 });
-  const version = (latest?.version ?? 1) + 1;
+  const [current] = await col.find({ assetId: file.fileId, projectId: file.projectId }).sort({ version: -1 }).limit(1).toArray();
+  const currentVersion: number = current?.version ?? 1;
+  const archiveKey = archivedVersionKey(file.storageKey, currentVersion);
+
+  await copyFile(file.storageKey, archiveKey);
+
+  await col.updateOne({ assetId: file.fileId, projectId: file.projectId, version: currentVersion }, { $set: { storageKey: archiveKey } });
   const record: AssetVersion = {
     versionId: crypto.randomUUID(),
     assetId: file.fileId,
     projectId: file.projectId,
-    version,
-    storageKey: versionStorageKey(first?.storageKey ?? file.storageKey, version, upload.fileName),
+    version: currentVersion + 1,
+    storageKey: file.storageKey,
     contentType: upload.contentType,
     fileName: upload.fileName,
     createdBy: upload.userId,

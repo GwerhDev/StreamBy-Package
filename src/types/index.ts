@@ -52,6 +52,8 @@ export interface StorageAdapter {
   getPresignedUploadUrl?: (key: string, contentType: string, expiresIn?: number) => Promise<string>;
   listFilesByCategory?: (projectId: string, category: string) => Promise<StorageFileInfo[]>;
   deleteFile?: (key: string) => Promise<void>;
+  // Copies a stored file to another key (to archive an asset's version before replacing it).
+  copyFile?: (from: string, to: string) => Promise<void>;
   // downloadName: the file is downloaded (not shown inline) with this name.
   getPresignedGetUrl?: (key: string, expiresIn?: number, downloadName?: string) => Promise<string>;
 }
