@@ -220,8 +220,20 @@ the file uploads or downloads it directly, for example Blender's or Godot's own 
 which can run code. Each URL is for that one file, and given to an API token it works only
 briefly: 15 minutes to upload, 5 to download (`mcp.signedUrlTtl`).
 
-A new version is stored as a file of its own, so the earlier ones are kept (and deleting the
-asset deletes them all). A **deliverable** is an asset, or one of its versions, delivered for a
+**Versions.** Replacing an asset doesn't change its URL: the new version is uploaded to the
+asset's own key, so a site that links to the asset shows the new one with no deploy. Before
+that, the current version is copied to a key of its own (`<key>.v<n>.<ext>`) and recorded, so
+every earlier version can still be downloaded by its id; if it can't be copied, nothing is
+replaced. A storage adapter keeps versions only if it can copy (`copyFile`; the S3 one does);
+otherwise asking for a new version answers 501. Deleting the asset deletes every key of it.
+
+Since the URL stays the same, a browser or a CDN may keep serving the earlier version for a
+while. StreamBy doesn't set `Cache-Control` on uploads (a signed URL that did would require
+every client to send the same header): set it where the files are served, for example a short
+`max-age` or `no-cache` on the CDN in front of the bucket, or invalidate the path when an asset
+is replaced.
+
+A **deliverable** is an asset, or one of its versions, delivered for a
 production shot or for an export; a shot or an export can have several, and the shot's panel
 in the UI shows them.
 

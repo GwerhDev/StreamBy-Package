@@ -12,12 +12,17 @@
     to upload its file to.
   - `get_asset_download_url` (`assets:read`): a URL to download an asset's file, its latest
     version or an earlier one. `list_asset_versions` lists them.
-- **Asset versions are kept.** Uploading a new version of an asset (`replace-url`, from the UI
-  too) stores it as a file of its own, `<original key>.v<n>.<ext>`, instead of overwriting the
-  asset's file. Each version is recorded in `asset_versions` (an asset's first version on
-  upload; an older asset gets it when it gets its second), the asset points to its latest, and
-  deleting the asset deletes every version's file. The `replace-url` routes answer the new
-  version's `versionId` and `version`.
+- **Asset versions are kept, and an asset's URL doesn't change when it's replaced.** A new
+  version (`replace-url`, from the UI too) is still uploaded to the asset's own key, so a site
+  that links to the asset shows the new one. Before that, the current version is copied to a
+  key of its own, `<key>.v<n>.<ext>`, and recorded in `asset_versions` (an asset's first
+  version is recorded on upload; an older asset gets it when it's first replaced). If it can't
+  be copied, nothing is replaced and no upload URL is given. The `replace-url` routes answer
+  the new version's `versionId` and `version`. Deleting an asset deletes every key of it.
+  - New `StorageAdapter.copyFile`, implemented by the S3 adapter. With an adapter without it,
+    asking for a new version answers 501.
+  - StreamBy doesn't set `Cache-Control` on uploads, so a browser or a CDN may serve a replaced
+    asset's earlier version for a while: set it where the files are served (see the README).
 - `GET /projects/:projectId/assets/:fileId/download-url` (`?versionId=` for an earlier version):
   a signed URL that downloads the file with its name, wherever it's stored.
 - **Deliverables**: an asset, or one of its versions, delivered for a production shot or for an
