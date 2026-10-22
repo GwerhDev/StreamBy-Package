@@ -205,9 +205,50 @@ A token sees only the tools whose permissions it has.
 | `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
 | `create_sequence`, `update_sequence`, `create_shot`, `update_shot`, `create_task`, `update_task` | `production:write` |
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
+| `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
+| `request_asset_upload`, `mark_deliverable`, `remove_deliverable` | `assets:write` |
 
 The tools that delete are marked as destructive (`destructiveHint`), so a client can ask before
 running them.
+
+**Files**
+
+A file never goes through the conversation. `request_asset_upload` makes a new asset (or a new
+version of one) and gives a signed URL to `PUT` its bytes to; `get_asset_download_url` gives a
+signed URL to `GET` an asset's file, its latest version or any earlier one. The tool that has
+the file uploads or downloads it directly, for example Blender's or Godot's own MCP server,
+which can run code. Each URL is for that one file, and given to an API token it works only
+briefly: 15 minutes to upload, 5 to download (`mcp.signedUrlTtl`).
+
+A new version is stored as a file of its own, so the earlier ones are kept (and deleting the
+asset deletes them all). A **deliverable** is an asset, or one of its versions, delivered for a
+production shot or for an export; a shot or an export can have several, and the shot's panel
+in the UI shows them.
+
+For example, with Claude connected to StreamBy and to Blender's MCP server, asking *"export the
+scene as glTF and deliver it for shot SH010 of Portfolio"* goes:
+
+1. `list_projects`, `list_sequences`, `list_shots`: the project and the shot's id.
+2. `request_asset_upload` with `category: '3d-models'`, `fileName: 'SH010_layout.glb'` and
+   `contentType: 'model/gltf-binary'`: the new asset's id, and where to upload it.
+3. In Blender, code that exports the scene and uploads it:
+
+   ```python
+   import bpy, urllib.request
+   path = bpy.app.tempdir + "SH010_layout.glb"
+   bpy.ops.export_scene.gltf(filepath=path, export_format="GLB")
+   with open(path, "rb") as f:
+       req = urllib.request.Request(UPLOAD_URL, data=f.read(), method="PUT",
+                                    headers={"Content-Type": "model/gltf-binary"})
+   urllib.request.urlopen(req)
+   ```
+
+4. `mark_deliverable` with the asset's id and `shotId`: it shows in the shot's panel.
+
+Bringing an asset into Blender or Godot is the other way around: `get_asset_download_url`, and
+code there that downloads the URL and imports the file (in Blender,
+`bpy.ops.import_scene.gltf(filepath=...)`). A new version of the same asset is
+`request_asset_upload` with its `assetId`.
 
 **Limits and audit**
 
@@ -224,6 +265,7 @@ createStreamByRouter({
   // ...
   mcp: {
     rateLimit: { requests: 120, windowMs: 60_000 }, // the default
+    signedUrlTtl: { upload: 900, download: 300 },   // the default, in seconds
     // apiBaseUrl: 'http://127.0.0.1:3000/streamby', // where tools reach the REST API;
     //   by default this same process, at the request's local port and mount path
   },
