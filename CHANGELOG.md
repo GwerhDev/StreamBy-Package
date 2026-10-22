@@ -35,8 +35,25 @@
 - `StorageAdapter.getPresignedUploadUrl` and `getPresignedGetUrl` take how long the URL works
   (and `getPresignedGetUrl` the name to download it with).
 
+- `GET /projects/:id` answers `hasProductionData`: whether the project has production
+  sequences, so a client can show them even without a production node in its workflow.
+
+### Changed
+
+- **Production data is checked before it's saved.** Sequences, shots and tasks need a name
+  that isn't blank; a status must be `todo`, `in_progress`, `review` or `done`, and a task's
+  priority `low`, `medium` or `high`; a shot's `assignedTo` must list active members of the
+  project, and a task's be one of them (or null); a due date must be a date. Otherwise they
+  answer 400. A shot is made only in a sequence of the project, and a task only in a shot of
+  it (404 otherwise).
+- The MCP tools for shots take `assignedTo` as a list of user ids, as the API does, and their
+  statuses and priorities are listed in their schema.
+
 ### Fixed
 
+- **Deleting production data leaves nothing behind.** Deleting a sequence deletes its shots'
+  tasks too (they were left), and deleting a project deletes its sequences, shots, tasks and
+  deliverables. Deleting a sequence that doesn't exist answers 404.
 - **Only editors and admins upload a new version of an asset.** The `replace-url` routes let
   any member of the project, a viewer included, replace an asset's file.
 - The ingest job no longer records a second version of the file an upload already recorded.
