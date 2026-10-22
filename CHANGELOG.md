@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.38.0
+
+### Added
+
+- **Uploading and downloading files from the MCP server**, so an agent can bring files from and
+  to the tools it works with (Blender's or Godot's own MCP, a script). The file never goes
+  through the conversation: the tools give signed URLs, and the tool that has the file uploads
+  or downloads it directly. See the README for an example with Blender.
+  - `request_asset_upload` (`assets:write`): a new asset, or a new version of one, and the URL
+    to upload its file to.
+  - `get_asset_download_url` (`assets:read`): a URL to download an asset's file, its latest
+    version or an earlier one. `list_asset_versions` lists them.
+- **Asset versions are kept.** Uploading a new version of an asset (`replace-url`, from the UI
+  too) stores it as a file of its own, `<original key>.v<n>.<ext>`, instead of overwriting the
+  asset's file. Each version is recorded in `asset_versions` (an asset's first version on
+  upload; an older asset gets it when it gets its second), the asset points to its latest, and
+  deleting the asset deletes every version's file. The `replace-url` routes answer the new
+  version's `versionId` and `version`.
+- `GET /projects/:projectId/assets/:fileId/download-url` (`?versionId=` for an earlier version):
+  a signed URL that downloads the file with its name, wherever it's stored.
+- **Deliverables**: an asset, or one of its versions, delivered for a production shot or for an
+  export, kept in the NoSQL database's `deliverables` collection. `GET`, `POST` and
+  `DELETE /projects/:projectId/deliverables` list (by `shotId` or `exportId`), mark and remove
+  them; `list_deliverables`, `mark_deliverable` and `remove_deliverable` in the MCP server.
+  Deleting a shot, a sequence, an export or an asset removes its deliverables.
+- **`mcp.signedUrlTtl`**: how long the signed URLs given to an API token work, also when it
+  lists files. Default: 15 minutes to upload, 5 to download. A session's are as before.
+- `StorageAdapter.getPresignedUploadUrl` and `getPresignedGetUrl` take how long the URL works
+  (and `getPresignedGetUrl` the name to download it with).
+
+### Fixed
+
+- **Only editors and admins upload a new version of an asset.** The `replace-url` routes let
+  any member of the project, a viewer included, replace an asset's file.
+- The ingest job no longer records a second version of the file an upload already recorded.
+
 ## 0.37.0
 
 ### ⚠️ Breaking changes
