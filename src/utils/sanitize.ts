@@ -23,6 +23,20 @@ export function sanitizeIntegrationConnections<T extends object>(conns: T[] | un
   return (conns ?? []).map(sanitizeIntegrationConnection);
 }
 
+// A project's exports as they're listed: what each one is, not its schema nor its credentials.
+// The same in the project (GET /projects/:id) and in its own list (GET /projects/:id/exports).
+export function exportSummaries(exports: any[] | undefined): any[] {
+  return (exports || []).map((e: any) => ({
+    id: e.id,
+    name: e.name,
+    description: e.description,
+    method: e.method,
+    private: e.private,
+    useConnections: e.useConnections,
+    useCredentials: e.useCredentials,
+  }));
+}
+
 export function sanitizeProject(project: any): any {
   if (!project) return project;
   return {

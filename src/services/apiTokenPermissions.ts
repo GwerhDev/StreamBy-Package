@@ -59,7 +59,7 @@ const RULES = [
   rule('read', '^/jobs/[^/]+', 'jobs:read'),
 
   // The project itself and its settings.
-  rule('read', `${P}(/preview)?`, 'project:read'),
+  rule('read', `${P}(/preview|/origins|/integrations)?`, 'project:read'),
   rule(['PATCH'], P, 'project:update'),
   rule('delete', P, 'project:delete'),
   rule(['PATCH'], `${P}/(archive|unarchive)`, 'project:update', { userTokenOnly: true }),
@@ -116,7 +116,7 @@ const RULES = [
   rule(['PATCH', 'DELETE'], `${P}/pipelines/[^/]+`, 'workflow:write'),
 
   // Exports.
-  rule('read', `${P}/exports/[^/]+`, 'exports:read'),
+  rule('read', `${P}/exports(/[^/]+)?`, 'exports:read'),
   rule(['POST'], `${P}/exports`, 'exports:write'),
   rule(['PATCH', 'DELETE'], `${P}/exports/[^/]+`, 'exports:write'),
 

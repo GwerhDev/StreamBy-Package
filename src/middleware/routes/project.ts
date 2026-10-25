@@ -4,7 +4,7 @@ import { getModel } from '../../models/manager';
 import { activeMemberOf, canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
-import { sanitizeProject } from '../../utils/sanitize';
+import { exportSummaries, sanitizeIntegrationConnections, sanitizeProject } from '../../utils/sanitize';
 import { classifyIntegrationId } from '../../services/projectIntegration';
 import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
@@ -209,15 +209,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const exports = (project.exports || []).map((e: any) => ({
-        id: e.id,
-        name: e.name,
-        description: e.description,
-        method: e.method,
-        private: e.private,
-        useConnections: e.useConnections,
-        useCredentials: e.useCredentials,
-      }));
+      const exports = exportSummaries(project.exports);
 
       const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, connections: project.connections || [], exports });
       // Whether it has production data, for its Production section to show even without a
@@ -431,6 +423,20 @@ export function projectRouter(config: StreamByConfig): Router {
     }
   });
 
+  // ─── A project's allowed origins, on their own ────────────────────────────
+  router.get('/projects/:id/origins', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      return res.status(200).json({ data: project.allowedOrigin || [] });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch project origins', details: err.message });
+    }
+  });
+
   router.patch('/projects/:id/origins', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
@@ -456,6 +462,20 @@ export function projectRouter(config: StreamByConfig): Router {
       res.status(200).json({ success: true, project: sanitizeProject(updated), message: 'Project origins updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project origins', details: err.message });
+    }
+  });
+
+  // ─── A project's integrations, on their own ───────────────────────────────
+  router.get('/projects/:id/integrations', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      return res.status(200).json({ data: sanitizeIntegrationConnections(project.integrationConnections) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch project integrations', details: err.message });
     }
   });
 

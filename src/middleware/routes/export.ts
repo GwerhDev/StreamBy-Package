@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { deleteDeliverablesOf } from '../../services/deliverables';
-import { StreamByConfig } from '../../types';
+import { Auth, StreamByConfig } from '../../types';
+import { exportSummaries } from '../../utils/sanitize';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createExport, updateExport, deleteExport } from '../../services/export';
@@ -63,6 +64,20 @@ export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
 
   const Project = getModel('projects');
+
+  // ─── A project's exports, on their own ────────────────────────────────────
+  router.get('/projects/:id/exports', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      return res.status(200).json({ data: exportSummaries(project.exports) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to fetch exports', details: err.message });
+    }
+  });
 
   router.get('/projects/:id/exports/:export_id', async (req: Request, res: Response) => {
     try {

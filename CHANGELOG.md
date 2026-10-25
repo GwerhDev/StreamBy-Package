@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Every resource of a project has its own list**, so a client fetches the one it shows instead
+  of the whole project (which still carries them all). New: `GET /projects/:id/exports` (what
+  each export is, as the project lists them: not its schema nor its credentials),
+  `GET /projects/:id/integrations` and `GET /projects/:id/origins`. They answer `{ data }`, as
+  the existing lists do (`connections`, `connections/db`, `connections/storage`, `members`,
+  `pipelines`, `workflow`), and are for the project's members. With an API token, the exports
+  need `exports:read` and the other two `project:read`.
+
 ## 0.38.0
 
 ### Added
