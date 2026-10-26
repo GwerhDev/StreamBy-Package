@@ -201,7 +201,9 @@ A token sees only the tools whose permissions it has.
 | `create_pipeline`, `update_pipeline` | `workflow:write` |
 | `list_exports` | `project:read` and `exports:read` |
 | `get_export` | `exports:read` |
-| `get_job` | `jobs:read` |
+| `get_job`, `list_jobs` | `jobs:read` |
+| `list_workers` | `project:read` |
+| `process_asset`, `retry_job` | `jobs:run` |
 | `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
 | `create_sequence`, `create_shot`, `create_task` | `production:write` and `workflow:write` |
@@ -336,6 +338,99 @@ and an expiry:
 ```
 
 The claude.ai connector needs OAuth, which isn't available yet: it's for API tokens only for now.
+
+---
+
+## ⚙️ Processing workers
+
+StreamBy doesn't process assets itself (optimizing a glTF, making LODs, transcoding...): it
+sends the work to a **worker**, an external service, and keeps what it makes. Anyone can write a
+compatible worker by following the contract below.
+
+**Where workers come from**
+
+- **The host's**, offered to every project, in the router config (each one gated, like the other
+  built-ins, by `canUseBuiltin` with kind `'worker'`):
+
+  ```ts
+  createStreamByRouter({
+    // ...
+    workers: [{
+      id: 'gltf', name: 'glTF optimizer',
+      endpoint: 'https://worker.example.com/jobs', credential: process.env.GLTF_WORKER_TOKEN,
+      kinds: ['gltf-optimize', 'lod'],   // what it does
+      categories: ['3d-models'],         // the assets it takes
+      autoKind: 'gltf-optimize',         // optional: run on its own (see below)
+      timeoutSeconds: 3600,              // optional: how long it may take a job
+    }],
+    workerOptions: {
+      callbackBaseUrl: 'https://api.example.com/streamby', // where workers call back
+      maxAttempts: 3,           // how many times a job is sent before it fails
+      sweepIntervalMs: 30_000,  // how often each instance looks for jobs to send again
+    },
+  });
+  ```
+
+- **A project's own**, connected from the project (`GET`, `POST` and
+  `DELETE /projects/:projectId/workers`; a project's render farms are workers too). Its endpoint
+  must be https and not a local or private address (`workerOptions.allowLocalEndpoints` lifts
+  that, for development). Its credential is stored encrypted, and used only while whoever
+  connected it is still in the project.
+
+`GET /projects/:projectId/workers` lists the workers a member can use.
+
+**Asking for a job**
+
+`POST /projects/:projectId/jobs/process` with
+`{ assetId, versionId?, worker: { source: 'builtin' | 'project', id }, kind, profile?, resultMode? }`
+(editors and admins; an API token needs `jobs:run`, and the MCP server has `process_asset`).
+`resultMode` decides where the result goes:
+
+- `'derived'` (the default): a new asset, linked to the original (`derivedFrom`), which is never
+  touched;
+- `'version'`: the asset's new version, at its own key, so its URL serves the result; the
+  version it replaces is archived, and can still be downloaded.
+
+A worker with an `autoKind` also runs by itself on an asset of its categories when it's marked
+as a deliverable.
+
+Jobs are kept in the main database (a `jobs` table or collection): they survive restarts, and
+every instance sees them. `GET /projects/:projectId/jobs` lists them (`?assetId=` for one asset's);
+`POST /projects/:projectId/jobs/:jobId/retry` sends a failed one again.
+
+**The contract: what a worker receives**
+
+StreamBy sends each job with a `POST` to the worker's endpoint
+(`Authorization: Bearer <the worker's credential>`):
+
+```json
+{
+  "jobId": "…", "kind": "gltf-optimize", "profile": { "textureFormat": "ktx2" }, "attempt": 1,
+  "asset": { "id": "…", "versionId": null, "fileName": "hero.glb", "contentType": "model/gltf-binary", "category": "3d-models" },
+  "download": { "url": "https://…signed…", "expiresAt": "…" },
+  "callback": { "url": "https://api.example.com/streamby/worker-jobs/<jobId>", "token": "…" },
+  "deadline": "…"
+}
+```
+
+The worker answers `2xx` to take it (any other answer, or none, and the job is sent again later),
+downloads the asset with `download.url`, and does its work before `deadline`.
+
+**The contract: what a worker calls back**
+
+Every callback is a `POST` to `callback.url` plus an action, with
+`Authorization: Bearer <callback.token>`. The token is the job's for this attempt alone: a
+callback without it, with another, or after the job ended answers 401.
+
+| Action | Body | Answer |
+|---|---|---|
+| `/progress` | `{ "progress": 0-100, "stage": "optimizing" }` (either) | the job |
+| `/upload-url` | `{ "fileName": "hero.glb", "contentType": "model/gltf-binary" }` (of the asset's category) | `{ "url", "method": "PUT", "headers", "expiresAt" }`: upload the result there |
+| `/complete` | `{ "report": { … } }` (optional; any JSON object, kept with the result) | the job, completed, with its `result`: `{ assetId, versionId, mode }` |
+| `/fail` | `{ "error": "…", "retryable": false }` | the job, failed with its error (sent again if `retryable` and attempts are left) |
+
+A job its worker doesn't complete before its deadline is sent again, up to
+`workerOptions.maxAttempts` times; then it fails, with its error, and can be retried.
 
 ---
 
