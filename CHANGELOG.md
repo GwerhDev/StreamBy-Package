@@ -48,8 +48,9 @@
 ### Fixed
 
 - **Instances starting together don't deadlock on StreamBy's tables.** The statements that make
-  them (or bring them up to date) at startup run one instance at a time, under a lock on the
-  database.
+  them (or bring them up to date) at startup run one instance at a time, in a transaction that
+  holds a transaction-level advisory lock (so it works behind a pooler in transaction mode, such
+  as Supabase's).
 
 ## 0.39.0
 

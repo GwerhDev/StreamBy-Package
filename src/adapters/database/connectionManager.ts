@@ -41,14 +41,20 @@ export const getConnection = (id: string) => {
 
 // StreamBy's tables, made (or brought up to date) at startup. Several instances starting at once
 // against the same database would deadlock on these statements, so one runs them at a time:
-// they hold a lock on the database while they do (a session lock, so on a client of their own).
+// in a transaction holding a transaction-level advisory lock, which ends with it. (A session
+// lock could outlive its unlock behind a pooler in transaction mode, such as Supabase's, which
+// may run the unlock on another connection, and block every later startup.)
 const ensureTablesExist = async (pool: Pool) => {
   const client = await pool.connect();
   try {
-    await client.query(`SELECT pg_advisory_lock(hashtext('streamby:ensure-tables'))`);
+    await client.query('BEGIN');
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext('streamby:ensure-tables'))`);
     await createTables(client);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
   } finally {
-    await client.query(`SELECT pg_advisory_unlock(hashtext('streamby:ensure-tables'))`).catch(() => {});
     client.release();
   }
 };
