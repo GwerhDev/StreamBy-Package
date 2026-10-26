@@ -39,7 +39,21 @@ export const getConnection = (id: string) => {
   return clientEntry;
 };
 
+// StreamBy's tables, made (or brought up to date) at startup. Several instances starting at once
+// against the same database would deadlock on these statements, so one runs them at a time:
+// they hold a lock on the database while they do (a session lock, so on a client of their own).
 const ensureTablesExist = async (pool: Pool) => {
+  const client = await pool.connect();
+  try {
+    await client.query(`SELECT pg_advisory_lock(hashtext('streamby:ensure-tables'))`);
+    await createTables(client);
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(hashtext('streamby:ensure-tables'))`).catch(() => {});
+    client.release();
+  }
+};
+
+const createTables = async (pool: Pick<Pool, 'query'>) => {
   try {
     await pool.query(`
       CREATE SCHEMA IF NOT EXISTS streamby;
