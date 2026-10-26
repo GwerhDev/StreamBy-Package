@@ -33,7 +33,7 @@ export function aiRouter(_config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('transcription', auth.userId, projectId, { fileId, model, sourceLanguage, outputFormats, provider, credentialId });
+      const job = await createJob('transcription', auth.userId, projectId, { fileId, model, sourceLanguage, outputFormats, provider, credentialId });
 
       setImmediate(() =>
         runTranscriptionJob(job.jobId, fileId, projectId, { model, sourceLanguage, outputFormats, provider, credentialId }),
@@ -58,7 +58,7 @@ export function aiRouter(_config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('upscale', auth.userId, projectId, { fileId, scale, model, mode, credentialId });
+      const job = await createJob('upscale', auth.userId, projectId, { fileId, scale, model, mode, credentialId });
 
       setImmediate(() =>
         runUpscaleJob(job.jobId, fileId, projectId, { scale, model, mode, credentialId }),
@@ -83,7 +83,7 @@ export function aiRouter(_config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('generate-asset', auth.userId, projectId, { assetType, provider, prompt, seed, credentialId });
+      const job = await createJob('generate-asset', auth.userId, projectId, { assetType, provider, prompt, seed, credentialId });
 
       setImmediate(() =>
         runGenerateAssetJob(job.jobId, projectId, { assetType, provider, prompt, seed, credentialId }),

@@ -76,6 +76,8 @@ async function main() {
     ],
     encrypt: config.encryptionKey,
     websocket: { server: wss },
+    // A project's worker may run on this machine while developing.
+    workerOptions: { allowLocalEndpoints: true },
   };
 
   devApp.use((req, res, next) => {

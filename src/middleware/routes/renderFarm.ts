@@ -5,88 +5,12 @@ import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createJob, getJob } from '../../services/jobQueue';
 import { runRenderJob, runFormatConvertJob, runLodJob, resolveAssetDependencyGraph } from '../../services/vfxProcessor';
 import { Auth } from '../../types';
-import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
-import crypto from 'crypto';
-import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
 
 export function renderFarmRouter(_config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
-  // ─── Render Farm Connections ─────────────────────────────────────────────────
-
-  router.get('/projects/:projectId/render-farm-connections', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-      res.json({ connections: sanitizeConnections(project.renderFarmConnections) });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  router.post('/projects/:projectId/render-farm-connections', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const { name, provider, apiUrl, credential: credentialValue, encryptedCredential: legacyCredential, description } = req.body;
-      // The credential, as given (`encryptedCredential` was its old name: it was always the
-      // value itself), stored encrypted.
-      const credential = credentialValue ?? legacyCredential;
-      if (credential && !isEncryptionKeySet()) return res.status(500).json({ message: 'Encryption key is not set' });
-      const encryptedCredential = credential ? encrypt(String(credential)) : undefined;
-
-      if (!name || !provider || !apiUrl) {
-        return res.status(400).json({ message: 'name, provider and apiUrl are required' });
-      }
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      const connection = {
-        id: crypto.randomUUID(),
-        name,
-        provider,
-        apiUrl,
-        encryptedCredential,
-        description,
-        projectId,
-        createdAt: new Date(),
-      };
-
-      await Project.update(
-        { _id: projectId },
-        { $push: { renderFarmConnections: connection } },
-      );
-
-      res.status(201).json({ connection: sanitizeConnection(connection) });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  router.delete('/projects/:projectId/render-farm-connections/:connectionId', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId, connectionId } = req.params;
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      await Project.update(
-        { _id: projectId },
-        { $pull: { renderFarmConnections: { id: connectionId } } },
-      );
-
-      res.json({ message: 'Connection deleted' });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
+  // A project's render farms are its workers: see routes/worker.
 
   // ─── VFX Jobs ────────────────────────────────────────────────────────────────
 
@@ -102,7 +26,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('render', auth.userId, projectId, { fileId, renderer, renderFarmConnectionId, frameRange, resolution, samples, outputFormat });
+      const job = await createJob('render', auth.userId, projectId, { fileId, renderer, renderFarmConnectionId, frameRange, resolution, samples, outputFormat });
 
       setImmediate(() =>
         runRenderJob(job.jobId, fileId, projectId, { renderer, renderFarmConnectionId, frameRange, resolution, samples, outputFormat }),
@@ -126,7 +50,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('format-convert', auth.userId, projectId, { fileId, inputFormat, outputFormat, applyTransforms, embedTextures });
+      const job = await createJob('format-convert', auth.userId, projectId, { fileId, inputFormat, outputFormat, applyTransforms, embedTextures });
 
       setImmediate(() =>
         runFormatConvertJob(job.jobId, fileId, projectId, { inputFormat, outputFormat, applyTransforms, embedTextures }),
@@ -150,7 +74,7 @@ export function renderFarmRouter(_config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('lod', auth.userId, projectId, { fileId, levels, reductionRatios, algorithm, outputFormat });
+      const job = await createJob('lod', auth.userId, projectId, { fileId, levels, reductionRatios, algorithm, outputFormat });
 
       setImmediate(() =>
         runLodJob(job.jobId, fileId, projectId, { levels, reductionRatios, algorithm, outputFormat }),

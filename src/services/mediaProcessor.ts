@@ -43,7 +43,7 @@ export async function runIngestJob(
   fileId: string,
   projectId: string,
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10 });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10 });
 
   try {
     const filesCol = getFilesCollection();
@@ -52,7 +52,7 @@ export async function runIngestJob(
     const fileDoc = await filesCol.findOne({ fileId, projectId });
     if (!fileDoc) throw new Error(`File ${fileId} not found in project ${projectId}`);
 
-    updateJob(jobId, { stage: 'extracting-metadata', progress: 40, assetId: fileId });
+    await updateJob(jobId, { stage: 'extracting-metadata', progress: 40, assetId: fileId });
 
     const metaCol = getMetadataCollection();
     if (metaCol) {
@@ -72,7 +72,7 @@ export async function runIngestJob(
       );
     }
 
-    updateJob(jobId, { stage: 'creating-version', progress: 70 });
+    await updateJob(jobId, { stage: 'creating-version', progress: 70 });
 
     const versionsCol = getVersionsCollection();
     // Its upload already recorded the version it's in; only an asset from before versions
@@ -92,9 +92,9 @@ export async function runIngestJob(
       });
     }
 
-    updateJob(jobId, { status: 'completed', stage: 'complete', progress: 100 });
+    await updateJob(jobId, { status: 'completed', stage: 'complete', progress: 100 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -111,7 +111,7 @@ export async function runTranscodeJob(
   },
   _adapter: StorageAdapter,
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'queued', progress: 5, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'queued', progress: 5, assetId: fileId });
 
   try {
     const filesCol = getFilesCollection();
@@ -124,7 +124,7 @@ export async function runTranscodeJob(
       throw new Error('Transcode only supports video and audio files');
     }
 
-    updateJob(jobId, { stage: 'transcoding', progress: 20 });
+    await updateJob(jobId, { stage: 'transcoding', progress: 20 });
 
     // Store the transcode request as a pending task — actual FFmpeg execution
     // happens in the host environment (Nhexa-API worker). The job record is the
@@ -154,9 +154,9 @@ export async function runTranscodeJob(
       );
     }
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -166,7 +166,7 @@ export async function runThumbnailJob(
   projectId: string,
   options: { timecode?: string; resolution?: string; strategy?: string },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const filesCol = getFilesCollection();
@@ -175,7 +175,7 @@ export async function runThumbnailJob(
     const fileDoc = await filesCol.findOne({ fileId, projectId });
     if (!fileDoc) throw new Error(`File ${fileId} not found`);
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
 
     const metaCol = getMetadataCollection();
     if (metaCol) {
@@ -199,9 +199,9 @@ export async function runThumbnailJob(
       );
     }
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 40 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 40 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -211,7 +211,7 @@ export async function runCaptionJob(
   projectId: string,
   options: { sourceLanguage?: string; outputFormat?: string; provider?: string },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const filesCol = getFilesCollection();
@@ -246,8 +246,8 @@ export async function runCaptionJob(
       );
     }
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }

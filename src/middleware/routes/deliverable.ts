@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { Auth, StreamByConfig } from '../../types';
+import { Auth, StorageAdapter, StreamByConfig } from '../../types';
+import { enqueueAutomaticJobs, publicJob } from '../../services/workerJobs';
+import { callbackBaseOf } from './worker';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { nosqlDb } from '../../utils/nosqlDb';
@@ -9,8 +11,9 @@ import { createDeliverable, deleteDeliverable, Deliverable, listDeliverables } f
 const MAX_NOTE = 1000;
 
 // A project's deliverables (see services/deliverables): marked, listed and removed. Removing
-// one never deletes its asset.
-export function deliverableRouter(_config: StreamByConfig): Router {
+// one never deletes its asset. Marking one starts the workers set to process its kind of asset
+// by themselves.
+export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = Router();
   const Project = getModel('projects');
 
@@ -105,7 +108,10 @@ export function deliverableRouter(_config: StreamByConfig): Router {
         createdBy: auth.userId,
       });
       const [described] = await describe(project, [deliverable]);
-      res.status(201).json({ deliverable: described });
+      // The project's workers set to process its kind of asset by themselves start on it.
+      const jobs = await enqueueAutomaticJobs(project, assetId, versionId || null, auth, config, callbackBaseOf(req, config))
+        .catch(() => []);
+      res.status(201).json({ deliverable: described, jobs: jobs.map(publicJob) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to mark the deliverable', details: err.message });
     }

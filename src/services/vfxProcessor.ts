@@ -21,7 +21,7 @@ export async function runRenderJob(
     outputFormat?: string;
   },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const db = getNosqlDb();
@@ -30,7 +30,7 @@ export async function runRenderJob(
     const fileDoc = await db.collection('storage_files').findOne({ fileId, projectId });
     if (!fileDoc) throw new Error(`File ${fileId} not found`);
 
-    updateJob(jobId, { stage: 'queued-farm', progress: 20 });
+    await updateJob(jobId, { stage: 'queued-farm', progress: 20 });
 
     // Store pending render task — picked up by the host render farm worker
     await db.collection('media_metadata').updateOne(
@@ -55,9 +55,9 @@ export async function runRenderJob(
       { upsert: true },
     );
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -72,7 +72,7 @@ export async function runFormatConvertJob(
     embedTextures?: boolean;
   },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const db = getNosqlDb();
@@ -81,7 +81,7 @@ export async function runFormatConvertJob(
     const fileDoc = await db.collection('storage_files').findOne({ fileId, projectId });
     if (!fileDoc) throw new Error(`File ${fileId} not found`);
 
-    updateJob(jobId, { stage: 'queued-convert', progress: 25 });
+    await updateJob(jobId, { stage: 'queued-convert', progress: 25 });
 
     await db.collection('media_metadata').updateOne(
       { assetId: fileId, projectId },
@@ -103,9 +103,9 @@ export async function runFormatConvertJob(
       { upsert: true },
     );
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 35 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 35 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -120,7 +120,7 @@ export async function runLodJob(
     outputFormat?: string;
   },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const db = getNosqlDb();
@@ -129,7 +129,7 @@ export async function runLodJob(
     const fileDoc = await db.collection('storage_files').findOne({ fileId, projectId });
     if (!fileDoc) throw new Error(`File ${fileId} not found`);
 
-    updateJob(jobId, { stage: 'queued-lod', progress: 25 });
+    await updateJob(jobId, { stage: 'queued-lod', progress: 25 });
 
     await db.collection('media_metadata').updateOne(
       { assetId: fileId, projectId },
@@ -151,9 +151,9 @@ export async function runLodJob(
       { upsert: true },
     );
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 

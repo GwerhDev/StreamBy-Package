@@ -10,6 +10,7 @@ import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
 import { nosqlDb } from '../../utils/nosqlDb';
 import { deleteProductionData } from '../../services/production';
+import { jobStore } from '../../services/jobStore';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -278,9 +279,11 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       await Project.useDbType(project.dbType).delete({ _id: projectId });
-      // Its tokens have nothing left to reach, and its production data nothing to belong to.
+      // Its tokens have nothing left to reach, and its production data and jobs nothing to
+      // belong to.
       await deleteProjectApiTokens(String(projectId));
       await deleteProductionData(String(projectId));
+      if (projectId) await jobStore().deleteProject(String(projectId));
 
       const allProjects = await Project.find({});
       const projects = allProjects

@@ -15,7 +15,7 @@ export async function runTranscriptionJob(
   projectId: string,
   options: { model?: string; sourceLanguage?: string; outputFormats?: string[]; provider?: string; credentialId?: string },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const db = getNosqlDb();
@@ -28,7 +28,7 @@ export async function runTranscriptionJob(
       throw new Error('Transcription only supports video and audio files');
     }
 
-    updateJob(jobId, { stage: 'queued-provider', progress: 20 });
+    await updateJob(jobId, { stage: 'queued-provider', progress: 20 });
 
     await db.collection('media_metadata').updateOne(
       { assetId: fileId, projectId },
@@ -51,9 +51,9 @@ export async function runTranscriptionJob(
       { upsert: true },
     );
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -63,7 +63,7 @@ export async function runUpscaleJob(
   projectId: string,
   options: { scale?: number; model?: string; mode?: 'images' | 'video'; credentialId?: string },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
+  await updateJob(jobId, { status: 'processing', stage: 'resolving', progress: 10, assetId: fileId });
 
   try {
     const db = getNosqlDb();
@@ -72,7 +72,7 @@ export async function runUpscaleJob(
     const fileDoc = await db.collection('storage_files').findOne({ fileId, projectId });
     if (!fileDoc) throw new Error(`File ${fileId} not found`);
 
-    updateJob(jobId, { stage: 'queued-upscale', progress: 20 });
+    await updateJob(jobId, { stage: 'queued-upscale', progress: 20 });
 
     await db.collection('media_metadata').updateOne(
       { assetId: fileId, projectId },
@@ -94,9 +94,9 @@ export async function runUpscaleJob(
       { upsert: true },
     );
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 30 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 30 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 
@@ -111,7 +111,7 @@ export async function runGenerateAssetJob(
     credentialId?: string;
   },
 ): Promise<void> {
-  updateJob(jobId, { status: 'processing', stage: 'queued-generation', progress: 10 });
+  await updateJob(jobId, { status: 'processing', stage: 'queued-generation', progress: 10 });
 
   try {
     const db = getNosqlDb();
@@ -129,9 +129,9 @@ export async function runGenerateAssetJob(
       requestedAt: new Date(),
     });
 
-    updateJob(jobId, { stage: 'pending-worker', progress: 20 });
+    await updateJob(jobId, { stage: 'pending-worker', progress: 20 });
   } catch (err: any) {
-    failJob(jobId, err.message);
+    await failJob(jobId, err.message);
   }
 }
 

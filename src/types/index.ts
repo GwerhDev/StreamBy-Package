@@ -194,7 +194,21 @@ export interface StreamByConfig {
   // Gates access to a built-in database/storage provider — implemented by whoever mounts
   // the package (e.g. Nhexa-API checking user_subscriptions). Absent = allow (default,
   // preserves pre-BYOC behavior for deploys that don't implement subscription gating).
-  canUseBuiltin?: (auth: Auth, builtinId: string, kind: 'database' | 'storage') => boolean | Promise<boolean>;
+  canUseBuiltin?: (auth: Auth, builtinId: string, kind: 'database' | 'storage' | 'worker') => boolean | Promise<boolean>;
+  // Processing workers offered to every project (gated, like the other built-ins, by
+  // canUseBuiltin with kind 'worker').
+  workers?: WorkerConfig[];
+  workerOptions?: {
+    // The URL workers call back to: this router's public URL (e.g.
+    // 'https://api.example.com/streamby'). Default: the URL a job was asked for at.
+    callbackBaseUrl?: string;
+    // How many times a job is sent to its worker before it fails (default 3).
+    maxAttempts?: number;
+    // How often each instance looks for jobs to send again (ms; default 30 seconds; 0: never).
+    sweepIntervalMs?: number;
+    // Lets a project's worker be on a local or private address, or plain http (development).
+    allowLocalEndpoints?: boolean;
+  };
   // Registers this deploy as an OAuth CLIENT of Jira/Google (StreamBy is the client, NOT
   // the provider). Absent per-provider = that provider's OAuth start/callback routes
   // respond 503 ("not configured"), matching canUseBuiltin's "absent = safe default"
@@ -433,7 +447,8 @@ export type JobType =
   | 'ingest' | 'transcode' | 'caption' | 'thumbnail'
   | 'render' | 'format-convert' | 'lod'
   | 'distribute' | 'qc'
-  | 'transcription' | 'upscale' | 'generate-asset';
+  | 'transcription' | 'upscale' | 'generate-asset'
+  | 'process';
 
 export type AiProvider = 'openai' | 'deepgram' | 'assemblyai' | 'stabilityai' | 'meshy' | 'elevenlabs' | 'custom';
 
@@ -536,7 +551,53 @@ export interface JobRecord {
   error?: string;
   createdAt: Date;
   updatedAt: Date;
+
+  // ── A worker's job (jobType 'process'; see services/workerJobs) ──
+  // The worker that processes it, what it asks of it, and the asset's version it reads.
+  worker?: WorkerRef | null;
+  kind?: string | null;
+  profile?: Record<string, unknown> | null;
+  versionId?: string | null;
+  // Where its result goes: a new version of the asset, or a new asset derived from it.
+  resultMode?: WorkerResultMode | null;
+  attempts?: number;
+  maxAttempts?: number;
+  // When it may be sent (again) to the worker; until when the worker has it.
+  nextAttemptAt?: Date | null;
+  leaseUntil?: Date | null;
+  // sha256 of the token the worker calls back with (never the token itself).
+  callbackHash?: string | null;
+  // The result's upload, while the worker sends it: its key and what it is.
+  upload?: { storageKey: string; fileName: string; contentType: string } | null;
+  // What the worker reported, and what was made of its result.
+  report?: Record<string, unknown> | null;
+  result?: { assetId: string; versionId: string; mode: WorkerResultMode } | null;
 }
+
+export type WorkerResultMode = 'version' | 'derived';
+export type WorkerSource = 'builtin' | 'project';
+export interface WorkerRef { source: WorkerSource; id: string; name: string }
+
+/**
+ * A processing worker a host offers every project (`StreamByConfig.workers`). StreamBy sends
+ * it jobs (see the README's worker contract) and keeps what it makes.
+ */
+export interface WorkerConfig {
+  id: string;
+  name: string;
+  // Where jobs are sent (POST), and the credential sent with them (`Authorization: Bearer`).
+  endpoint: string;
+  credential?: string;
+  // What it does (e.g. 'gltf-optimize', 'lod'), and the asset categories it takes.
+  kinds: string[];
+  categories: StorageCategoryName[];
+  // A kind it runs by itself on an asset of its categories marked as a deliverable.
+  autoKind?: string | null;
+  // How long it may take with a job before it's sent again (seconds; default an hour).
+  timeoutSeconds?: number;
+}
+
+export type StorageCategoryName = 'images' | 'audios' | 'videos' | '3d-models';
 
 export interface AssetMetadataRecord {
   assetId: string;

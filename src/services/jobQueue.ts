@@ -1,19 +1,21 @@
 import crypto from 'crypto';
-import { JobRecord, JobType, JobStatus } from '../types';
+import { JobRecord, JobType } from '../types';
 import { emitToUser } from './wsHub';
+import { jobStore } from './jobStore';
 
-const jobs = new Map<string, JobRecord>();
+// Jobs, kept in the main database (see jobStore): they survive restarts and every instance
+// sees them. Each change is sent to whoever started the job (a `jobEvent`).
 
-export function createJob(
+export async function createJob(
   jobType: JobType,
   userId: string,
   projectId: string,
   payload: Record<string, any>,
-): JobRecord {
-  const jobId = crypto.randomUUID();
+  extra: Partial<JobRecord> = {},
+): Promise<JobRecord> {
   const now = new Date();
   const job: JobRecord = {
-    jobId,
+    jobId: crypto.randomUUID(),
     jobType,
     userId,
     projectId,
@@ -23,36 +25,44 @@ export function createJob(
     payload,
     createdAt: now,
     updatedAt: now,
+    ...extra,
   };
-  jobs.set(jobId, job);
-  return job;
+  const saved = await jobStore().insert(job);
+  notify(saved);
+  return saved;
 }
 
-export function getJob(jobId: string): JobRecord | undefined {
-  return jobs.get(jobId);
+export async function getJob(jobId: string): Promise<JobRecord | null> {
+  return jobStore().get(jobId);
 }
 
-export function updateJob(
-  jobId: string,
-  updates: Partial<Pick<JobRecord, 'status' | 'stage' | 'progress' | 'assetId' | 'error'>>,
-): void {
-  const job = jobs.get(jobId);
-  if (!job) return;
-  Object.assign(job, updates, { updatedAt: new Date() });
+export async function listJobs(projectId: string, assetId?: string): Promise<JobRecord[]> {
+  return jobStore().list({ projectId, assetId });
+}
+
+export function notify(job: JobRecord): void {
   emitToUser(job.userId, {
     type: 'jobEvent',
     data: {
       jobId: job.jobId,
       jobType: job.jobType,
+      projectId: job.projectId,
       assetId: job.assetId,
+      status: job.status,
       stage: job.stage,
       progress: job.progress,
-      message: updates.stage,
+      message: job.stage,
       error: job.error,
     },
   });
 }
 
-export function failJob(jobId: string, error: string): void {
-  updateJob(jobId, { status: 'failed', stage: 'failed', error });
+export async function updateJob(jobId: string, updates: Partial<JobRecord>): Promise<JobRecord | null> {
+  const job = await jobStore().update(jobId, { ...updates, updatedAt: new Date() });
+  if (job) notify(job);
+  return job;
+}
+
+export async function failJob(jobId: string, error: string): Promise<JobRecord | null> {
+  return updateJob(jobId, { status: 'failed', stage: 'failed', error });
 }

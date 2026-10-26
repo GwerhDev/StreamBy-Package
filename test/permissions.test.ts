@@ -114,7 +114,7 @@ describe('writing to a project', () => {
     ['patch', '/projects/p1/workflow', { nodes: [], edges: [] }],
     ['post', '/projects/p1/jobs/ingest', { fileId: 'f1' }],
     ['post', '/projects/p1/jobs/render', { fileId: 'f1' }],
-    ['post', '/projects/p1/render-farm-connections', { name: 'f', provider: 'p', apiUrl: 'https://x.example.com' }],
+    ['post', '/projects/p1/workers', { name: 'f', endpoint: 'https://x.example.com', kinds: ['render'], categories: ['3d-models'] }],
     ['post', '/projects/p1/pipelines', { name: 'p' }],
   ];
   const call = (user: string, [method, path, body]: [string, string, object?]) =>
@@ -142,7 +142,7 @@ describe('writing to a project', () => {
 
 describe("seeing a job", () => {
   it("is for whoever started it, or a member of its project", async () => {
-    const job = createJob('ingest', 'vic', 'p1', {});
+    const job = await createJob('ingest', 'vic', 'p1', {});
     expect((await as('vic').get(`/jobs/${job.jobId}`)).status).toBe(200);
     expect((await as('eli').get(`/jobs/${job.jobId}`)).status).toBe(200);
     // Someone else's job is as if it didn't exist.

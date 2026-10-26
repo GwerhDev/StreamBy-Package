@@ -357,6 +357,48 @@ export const TOOLS = [
     call: ({ projectId, deliverableId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}/deliverables/${enc(deliverableId)}` }),
   }),
 
+  // ── Processing (workers) ──
+  tool({
+    name: 'list_workers', title: 'List workers', permissions: ['project:read'],
+    description: "The processing workers a project can use: the host's and the project's own (each one's id, source, what it does — its kinds — and the asset categories it takes). They show in the project's Workers settings.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/workers` }),
+    pick: (data) => data?.data ?? [],
+  }),
+  tool({
+    name: 'process_asset', title: 'Process an asset', permissions: ['jobs:run'], write: true,
+    description: "Asks a worker to process an asset (or one of its versions), e.g. optimize a glTF. The result is kept as a new asset derived from it (resultMode 'derived', the default: the original is untouched) or as the asset's new version ('version': its URL then serves the result). It runs in the background: follow it with get_job or list_jobs; it shows in the file's Jobs tab, in Storage.",
+    input: {
+      projectId,
+      assetId: id('asset'),
+      versionId: z.string().optional().describe('A version (list_asset_versions); the latest if not given'),
+      worker: z.object({ source: z.enum(['builtin', 'project']), id: z.string().min(1) }).describe('A worker, from list_workers'),
+      kind: z.string().min(1).describe("What it should do: one of the worker's kinds"),
+      profile: z.record(z.string(), z.unknown()).optional().describe("Options for the worker (e.g. { \"textureFormat\": \"ktx2\" })"),
+      resultMode: z.enum(['derived', 'version']).optional(),
+    },
+    projectOf: byProject,
+    call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/jobs/process`, body: defined(fields) }),
+    pick: (data) => data?.job,
+  }),
+  tool({
+    name: 'list_jobs', title: 'List jobs', permissions: ['jobs:read'],
+    description: "A project's jobs, newest first (of one asset if given): their status, stage, progress, error and, when done, their worker's report and result.",
+    input: { projectId, assetId: z.string().optional() },
+    projectOf: byProject,
+    call: ({ projectId, assetId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/jobs${assetId ? `?${new URLSearchParams({ assetId })}` : ''}` }),
+    pick: (data) => data?.data ?? [],
+  }),
+  tool({
+    name: 'retry_job', title: 'Retry a job', permissions: ['jobs:run'], write: true,
+    description: "Sends a failed worker job to its worker again.",
+    input: { projectId, jobId: id('job') },
+    projectOf: byProject,
+    call: ({ projectId, jobId }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/jobs/${enc(jobId)}/retry` }),
+    pick: (data) => data?.job,
+  }),
+
   // ── Projects ──
   tool({
     name: 'create_project', title: 'Create a project', permissions: ['projects:create'], write: true,

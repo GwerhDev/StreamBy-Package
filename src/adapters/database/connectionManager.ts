@@ -188,6 +188,41 @@ const ensureTablesExist = async (pool: Pool) => {
     `);
     console.log('✅ "api_tokens" table ensured to exist.');
 
+    // Jobs (see services/jobStore): kept here so they survive restarts and every instance sees
+    // them. Main db only, like the tables above.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS streamby.jobs (
+        id               TEXT PRIMARY KEY,
+        "jobType"        VARCHAR(40) NOT NULL,
+        "userId"         VARCHAR(255) NOT NULL,
+        "projectId"      VARCHAR(255) NOT NULL,
+        "assetId"        VARCHAR(255),
+        status           VARCHAR(20) NOT NULL,
+        stage            VARCHAR(60) NOT NULL,
+        progress         INTEGER NOT NULL DEFAULT 0,
+        payload          JSONB NOT NULL DEFAULT '{}',
+        error            TEXT,
+        worker           JSONB,
+        kind             VARCHAR(100),
+        profile          JSONB,
+        "versionId"      VARCHAR(255),
+        "resultMode"     VARCHAR(20),
+        attempts         INTEGER NOT NULL DEFAULT 0,
+        "maxAttempts"    INTEGER NOT NULL DEFAULT 1,
+        "nextAttemptAt"  TIMESTAMP WITH TIME ZONE,
+        "leaseUntil"     TIMESTAMP WITH TIME ZONE,
+        "callbackHash"   CHAR(64),
+        upload           JSONB,
+        report           JSONB,
+        result           JSONB,
+        "createdAt"      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        "updatedAt"      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS jobs_project_idx ON streamby.jobs ("projectId", "createdAt");
+      CREATE INDEX IF NOT EXISTS jobs_due_idx ON streamby.jobs (status, "nextAttemptAt") WHERE worker IS NOT NULL;
+    `);
+    console.log('✅ "jobs" table ensured to exist.');
+
     // The MCP server's audit log: every tool call (see mcp/audit). Main db only.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS streamby.mcp_audit (

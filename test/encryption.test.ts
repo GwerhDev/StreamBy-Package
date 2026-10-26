@@ -126,7 +126,7 @@ describe('reencryptStoredCredentials', () => {
   });
 });
 
-describe('a render farm connection', () => {
+describe("a project's worker (render farms included)", () => {
   it('stores its credential encrypted, and never answers with it', async () => {
     store.projects = [{ _id: 'p1', id: 'p1', members: [{ userId: 'u1', role: 'editor', status: 'active' }] }];
     const { createStreamByRouter } = await import('../src/middleware/createRouter');
@@ -136,8 +136,8 @@ describe('a render farm connection', () => {
       storageProviders: [], adapter: {} as any, databases: [{ id: 'mongo', type: 'nosql', main: true }], encrypt: KEY_A,
       authProvider: async () => ({ userId: 'u1', username: 'u1', role: 'viewer' } as any),
     }));
-    const res = await request(app).post('/projects/p1/render-farm-connections')
-      .send({ name: 'Farm', provider: 'deadline', apiUrl: 'https://farm.example.com', credential: 'farm-secret' });
+    const res = await request(app).post('/projects/p1/workers')
+      .send({ name: 'Farm', provider: 'deadline', endpoint: 'https://farm.example.com', credential: 'farm-secret', kinds: ['render'], categories: ['3d-models'] });
     expect(res.status).toBe(201);
     expect(JSON.stringify(res.body)).not.toContain('farm-secret');
     const stored = writes.find(w => w.data?.$push?.renderFarmConnections)!.data.$push.renderFarmConnections;

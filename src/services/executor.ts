@@ -259,7 +259,7 @@ export async function executeExport(
     if (isPublic && JOB_NODES.has(processNode.type)) throw notPublic(processNode);
 
     if (processNode.type === 'transcodeNode' && fileId) {
-      const job = createJob('transcode', systemUserId, projectId, nodeData);
+      const job = await createJob('transcode', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runTranscodeJob(job.jobId, fileId, projectId, {
           codec:        nodeData.codec,
@@ -272,7 +272,7 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'transcode' };
 
     } else if (processNode.type === 'captionNode' && fileId) {
-      const job = createJob('caption', systemUserId, projectId, nodeData);
+      const job = await createJob('caption', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runCaptionJob(job.jobId, fileId, projectId, {
           sourceLanguage: nodeData.sourceLanguage,
@@ -283,7 +283,7 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'caption' };
 
     } else if (processNode.type === 'thumbnailNode' && fileId) {
-      const job = createJob('thumbnail', systemUserId, projectId, nodeData);
+      const job = await createJob('thumbnail', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runThumbnailJob(job.jobId, fileId, projectId, {
           timecode:   nodeData.timecode,
@@ -308,12 +308,12 @@ export async function executeExport(
       if ('error' in storageResolved) {
         throw new NodeExecutionError(processNode.id, processNode.type, `Node '${processNode.id}' (${processNode.type}): ${storageResolved.error}`);
       }
-      const job = createJob('ingest', systemUserId, projectId, nodeData);
+      const job = await createJob('ingest', systemUserId, projectId, nodeData);
       setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
       payload = { ...payload, jobId: job.jobId, jobType: 'ingest' };
 
     } else if (processNode.type === 'renderJobNode' && fileId) {
-      const job = createJob('render', systemUserId, projectId, nodeData);
+      const job = await createJob('render', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runRenderJob(job.jobId, fileId, projectId, {
           renderer:               nodeData.renderer,
@@ -327,7 +327,7 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'render' };
 
     } else if (processNode.type === 'formatConvertNode' && fileId) {
-      const job = createJob('format-convert', systemUserId, projectId, nodeData);
+      const job = await createJob('format-convert', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runFormatConvertJob(job.jobId, fileId, projectId, {
           inputFormat:    nodeData.inputFormat,
@@ -339,7 +339,7 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'format-convert' };
 
     } else if (processNode.type === 'lodNode' && fileId) {
-      const job = createJob('lod', systemUserId, projectId, nodeData);
+      const job = await createJob('lod', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runLodJob(job.jobId, fileId, projectId, {
           levels:          nodeData.levels,
@@ -358,7 +358,7 @@ export async function executeExport(
       payload = { ...payload, qcReport: { checks: checkResults, overallPassed: true } };
 
     } else if (processNode.type === 'transcriptionNode' && fileId) {
-      const job = createJob('transcription', systemUserId, projectId, nodeData);
+      const job = await createJob('transcription', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runTranscriptionJob(job.jobId, fileId, projectId, {
           model:          nodeData.model,
@@ -371,7 +371,7 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'transcription' };
 
     } else if (processNode.type === 'upscaleNode' && fileId) {
-      const job = createJob('upscale', systemUserId, projectId, nodeData);
+      const job = await createJob('upscale', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runUpscaleJob(job.jobId, fileId, projectId, {
           scale:        nodeData.scale,
@@ -383,7 +383,7 @@ export async function executeExport(
       payload = { ...payload, jobId: job.jobId, jobType: 'upscale' };
 
     } else if (processNode.type === 'proceduralAssetNode') {
-      const job = createJob('generate-asset', systemUserId, projectId, nodeData);
+      const job = await createJob('generate-asset', systemUserId, projectId, nodeData);
       setImmediate(() =>
         runGenerateAssetJob(job.jobId, projectId, {
           assetType:    nodeData.assetType,

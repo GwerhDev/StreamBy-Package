@@ -13,6 +13,7 @@ import { createStorageProvider } from '../../providers/storage';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { MongoClient } from 'mongodb';
+import { publicJob } from '../../services/workerJobs';
 import { scopeReachesProject } from '../../services/auth';
 
 function getMetadataCollection() {
@@ -38,7 +39,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
   router.get('/jobs/:jobId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      const job = getJob(req.params.jobId);
+      const job = await getJob(req.params.jobId);
       if (!job) return res.status(404).json({ message: 'Job not found' });
       // With an API token, only a job of a project it reaches.
       if (!scopeReachesProject(auth.apiToken, job.projectId)) return res.status(404).json({ message: 'Job not found' });
@@ -46,7 +47,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
         const project = await Project.findOne({ _id: job.projectId });
         if (!isProjectMember(project, auth.userId)) return res.status(404).json({ message: 'Job not found' });
       }
-      res.json({ job });
+      res.json({ job: publicJob(job) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch job', details: err.message });
     }
@@ -65,7 +66,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('ingest', auth.userId, projectId, { fileId });
+      const job = await createJob('ingest', auth.userId, projectId, { fileId });
 
       // Run async — response returns immediately with jobId
       setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
@@ -89,7 +90,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('transcode', auth.userId, projectId, {
+      const job = await createJob('transcode', auth.userId, projectId, {
         fileId, codec, resolution, outputFormat, bitrate, audioCodec,
       });
 
@@ -116,7 +117,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('thumbnail', auth.userId, projectId, { fileId, timecode, resolution, strategy });
+      const job = await createJob('thumbnail', auth.userId, projectId, { fileId, timecode, resolution, strategy });
 
       setImmediate(() => runThumbnailJob(job.jobId, fileId, projectId, { timecode, resolution, strategy }));
 
@@ -139,7 +140,7 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
 
-      const job = createJob('caption', auth.userId, projectId, { fileId, sourceLanguage, outputFormat, provider });
+      const job = await createJob('caption', auth.userId, projectId, { fileId, sourceLanguage, outputFormat, provider });
 
       setImmediate(() => runCaptionJob(job.jobId, fileId, projectId, { sourceLanguage, outputFormat, provider }));
 

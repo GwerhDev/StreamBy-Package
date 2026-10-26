@@ -99,10 +99,10 @@ const RULES = [
   rule('read', `${P}/assets/[^/]+/rights`, 'rights:read'),
   rule(['PUT'], `${P}/assets/[^/]+/rights`, 'rights:write'),
 
-  // Connections (API, database, storage, distribution, render farm): the project's settings.
-  rule('read', `${P}/(connections|get-connection|distribution-connections|render-farm-connections)(/.+)?`, 'project:read'),
-  rule('write', `${P}/(connections|distribution-connections|render-farm-connections)(/.+)?`, 'project:update'),
-  rule('delete', `${P}/(connections|distribution-connections|render-farm-connections)/.+`, 'project:update'),
+  // Connections (API, database, storage, distribution, workers): the project's settings.
+  rule('read', `${P}/(connections|get-connection|distribution-connections|workers)(/.+)?`, 'project:read'),
+  rule('write', `${P}/(connections|distribution-connections|workers)(/.+)?`, 'project:update'),
+  rule('delete', `${P}/(connections|distribution-connections|workers)/.+`, 'project:update'),
 
   // Production.
   rule('read', `${P}/production/.+`, 'production:read'),
@@ -121,7 +121,8 @@ const RULES = [
   rule(['PATCH', 'DELETE'], `${P}/exports/[^/]+`, 'exports:write'),
 
   // Jobs: transcoding, rendering, AI, publishing a deliverable.
-  rule(['POST'], `${P}/(jobs/[^/]+|pipeline-suggest|deliverables/[^/]+/publish)`, 'jobs:run'),
+  rule('read', `${P}/jobs`, 'jobs:read'),
+  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/publish)`, 'jobs:run'),
 ];
 
 /** The rule for a request made with an API token, or undefined: not reachable with one. */

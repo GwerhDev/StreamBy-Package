@@ -10,6 +10,7 @@ import { authenticate, enforceApiTokenScope } from '../services/auth';
 import { apiTokenRouter } from './routes/apiToken';
 import { mcpRouter } from './routes/mcp';
 import { setEncryptionKey } from '../utils/encryption';
+import { setJobStoreDatabase } from '../services/jobStore';
 import { authRouter } from './routes/auth';
 import { userRouter } from './routes/user';
 import { exportRouter } from './routes/export';
@@ -33,12 +34,16 @@ import { productionRouter } from './routes/production';
 import { rightsRouter } from './routes/rights';
 import { workflowRouter } from './routes/workflow';
 import { pipelineRouter } from './routes/pipeline';
+import { workerRouter } from './routes/worker';
+import { workerCallbackRouter } from './routes/workerCallback';
+import { startWorkerSweeper } from '../services/workerJobs';
 import { deliverableRouter } from './routes/deliverable';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
   if (config.encrypt) setEncryptionKey(config.encrypt, config.encryptPreviousKeys);
+  setJobStoreDatabase(config);
 
   // Establish DB connections asynchronously (Postgres/Mongo + schema migrations).
   // Until they're ready, HOLD incoming requests instead of letting them through —
@@ -64,6 +69,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     })
     .finally(() => {
       ready = true;
+      // Jobs left pending (or with their worker's time up) by a restart are sent again.
+      startWorkerSweeper({ ...config, adapter });
     });
 
   router.use((_req, _res, next) => {
@@ -110,6 +117,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   // /auth answers whether there's a session (it reads it itself); everything after needs one,
   // but for the public export route (see authenticate).
   router.use(authRouter(config));
+  // Workers call back with their job's token, not a session (see routes/workerCallback).
+  router.use(workerCallbackRouter({ ...config, adapter }));
   router.use(authenticate(config));
   router.use(enforceApiTokenScope);
   router.use(ensureSubscription);
@@ -137,7 +146,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(rightsRouter(config));
   router.use(workflowRouter(config));
   router.use(pipelineRouter(config));
-  router.use(deliverableRouter(config));
+  router.use(workerRouter({ ...config, adapter }));
+  router.use(deliverableRouter({ ...config, adapter }));
 
   return router;
 }
