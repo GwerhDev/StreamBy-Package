@@ -4,7 +4,7 @@ import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { listJobs, getJob } from '../../services/jobQueue';
 import {
-  availableWorkers, newWorkerConnection, projectWorkers, summarizeProjectWorker, WorkerError,
+  assertPublicEndpoint, availableWorkers, newWorkerConnection, projectWorkers, summarizeProjectWorker, WorkerError,
 } from '../../services/workers';
 import { enqueueWorkerJob, publicJob, retryWorkerJob } from '../../services/workerJobs';
 
@@ -55,6 +55,7 @@ export function workerRouter(config: StreamByConfig & { adapter?: StorageAdapter
       const project = await projectFor(req, res, true);
       if (!project) return;
       const worker = newWorkerConnection(req.body ?? {}, req.params.projectId, auth.userId, config);
+      await assertPublicEndpoint(worker.apiUrl, config);
       await Project.update({ _id: req.params.projectId }, { $push: { renderFarmConnections: worker } } as any);
       res.status(201).json({ data: summarizeProjectWorker(worker) });
     } catch (err) {

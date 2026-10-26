@@ -9,7 +9,7 @@ import { resolveStorageAdapter } from './connectionResolver';
 import { archiveCurrentVersion, findVersion, recordFirstVersion, versionsCollection } from './assetVersions';
 import { createJob, getJob, notify } from './jobQueue';
 import { jobStore } from './jobStore';
-import { availableWorkers, resolveWorker, ResolvedWorker, WorkerError } from './workers';
+import { assertPublicEndpoint, availableWorkers, PrivateEndpointError, resolveWorker, ResolvedWorker, WorkerError } from './workers';
 
 // A worker's job, from start to end (the README has the contract a worker follows):
 //
@@ -36,8 +36,15 @@ const filesCollection = () => nosqlDb()?.collection('storage_files') ?? null;
 const hashOf = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 const extensionOf = (name: string) => (name.includes('.') ? `.${name.split('.').pop()!.toLowerCase()}` : '');
 
-/** As whom a job acts: whoever asked for it. */
-const authOf = (job: JobRecord): Auth => ({ userId: job.userId, username: '', role: 'viewer' });
+/**
+ * As whom a job acts: whoever asked for it, with the platform role and name they had then, so
+ * a host's canUseBuiltin decides on sending it as it did on asking for it.
+ */
+const authOf = (job: JobRecord): Auth => ({
+  userId: job.userId,
+  username: job.payload?.requester?.username ?? '',
+  role: job.payload?.requester?.role ?? 'viewer',
+});
 
 const findProject = (projectId: string) => getModel('projects').findOne({ _id: projectId });
 
@@ -97,7 +104,8 @@ export async function enqueueWorkerJob(
     throw new WorkerError("This asset's storage can't keep versions: ask for a derived result", 400);
   }
 
-  const job = await createJob('process', auth.userId, projectId, { callbackBase }, {
+  const requester = { role: auth.role, username: auth.username };
+  const job = await createJob('process', auth.userId, projectId, { callbackBase, requester }, {
     assetId: request.assetId,
     versionId,
     worker: worker.ref,
@@ -207,6 +215,8 @@ export async function dispatchJob(jobId: string, config: RouterConfig): Promise<
     const fileName = version?.fileName ?? fileDoc.displayName;
     const download = await adapter.getPresignedGetUrl(version?.storageKey ?? fileDoc.storageKey, DOWNLOAD_TTL_SECONDS, fileName);
     const callbackBase = config.workerOptions?.callbackBaseUrl ?? job.payload?.callbackBase;
+    // A project's worker: its name may resolve, now, to the server's own network.
+    if (worker.ref.source === 'project') await assertPublicEndpoint(worker.endpoint, config);
 
     const response = await fetch(worker.endpoint, {
       method: 'POST',
@@ -227,14 +237,27 @@ export async function dispatchJob(jobId: string, config: RouterConfig): Promise<
       }),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok) throw new Error(`The worker answered ${response.status}`);
+    if (!response.ok) {
+      // Its answer stays in the server's log: an endpoint's status isn't the user's to see.
+      console.error(`❌ StreamBy workers: ${worker.ref.name} answered ${response.status} to job ${job.jobId}`);
+      throw new Error('The worker refused the job');
+    }
     const accepted = await jobStore().claim(jobId, ['processing'], { stage: 'accepted', updatedAt: new Date() }, { callbackHash: hashOf(token) });
     if (accepted) notify(accepted);
   } catch (err) {
     const message = err instanceof Error ? (err.name === 'TimeoutError' ? "The worker didn't answer" : err.message) : String(err);
     // Only this attempt's own: the worker may have called back already.
     const still = await jobStore().get(jobId);
-    if (still?.status === 'processing' && still.callbackHash === hashOf(token)) await attemptFailed(still, message);
+    if (still?.status !== 'processing' || still.callbackHash !== hashOf(token)) return;
+    if (err instanceof PrivateEndpointError) {
+      // Not sent, and never will be: no attempt is left for an endpoint at a private address.
+      const failed = await jobStore().update(jobId, {
+        status: 'failed', stage: 'failed', error: message, leaseUntil: null, callbackHash: null, upload: null, updatedAt: new Date(),
+      });
+      if (failed) notify(failed);
+      return;
+    }
+    await attemptFailed(still, message);
   }
 }
 

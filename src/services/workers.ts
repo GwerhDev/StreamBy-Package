@@ -1,9 +1,9 @@
 import crypto from 'crypto';
-import { isIP } from 'net';
 import { Auth, StorageCategoryName, StreamByConfig, WorkerConfig, WorkerRef } from '../types';
 import { activeMemberOf } from '../utils/auth';
 import { assertBuiltinAccess } from '../utils/builtinAccess';
 import { decrypt, encrypt, isEncryptionKeySet } from '../utils/encryption';
+import { isPrivateHostName, resolvesToPrivateAddress } from '../utils/privateAddress';
 
 // Processing workers: external services StreamBy sends jobs to (see workerJobs). A project
 // can use the host's built-in ones (StreamByConfig.workers, gated by canUseBuiltin) and its
@@ -61,6 +61,9 @@ export interface ResolvedWorker {
 export class WorkerError extends Error {
   constructor(message: string, public status = 400) { super(message); }
 }
+
+/** A worker endpoint at a local or private address: never sent to, whatever the attempt. */
+export class PrivateEndpointError extends WorkerError {}
 
 const listOf = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 
@@ -120,27 +123,34 @@ export async function resolveWorker(project: any, ref: { source: string; id: str
 }
 
 // A project's worker is reached from StreamBy's server: only over https, and never at a local
-// or private address (unless the host allows it, for development).
-const PRIVATE_HOST = /^(localhost|.*\.localhost|.*\.local|.*\.internal)$/i;
-const isPrivateAddress = (host: string) => {
-  const bare = host.replace(/^\[|\]$/g, '');
-  if (isIP(bare) === 4) {
-    const [a, b] = bare.split('.').map(Number);
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
-  }
-  if (isIP(bare) === 6) return bare === '::1' || /^(fc|fd|fe80)/i.test(bare) || bare.startsWith('::ffff:');
-  return PRIVATE_HOST.test(bare);
-};
-
+// or private address (unless the host allows it, for development). The address a name
+// resolves to is checked too, when it's connected and right before each job is sent.
 export function checkWorkerEndpoint(value: unknown, config: StreamByConfig): string {
   let url: URL;
   try { url = new URL(String(value)); } catch { throw new WorkerError('endpoint must be a URL'); }
   const local = config.workerOptions?.allowLocalEndpoints === true;
   if (url.username || url.password) throw new WorkerError("endpoint can't carry credentials: give them as credential");
   if (!local && url.protocol !== 'https:') throw new WorkerError('endpoint must use https');
-  if (!local && isPrivateAddress(url.hostname)) throw new WorkerError("endpoint can't be a local or private address");
+  if (!local && isPrivateHostName(url.hostname)) throw new WorkerError("endpoint can't be a local or private address");
   if (!['https:', 'http:'].includes(url.protocol)) throw new WorkerError('endpoint must use https');
   return url.toString();
+}
+
+/**
+ * Throws if a project's worker endpoint resolves, now, to a local or private address (a
+ * public-looking name pointing at the server's own network).
+ */
+export async function assertPublicEndpoint(endpoint: string, config: StreamByConfig): Promise<void> {
+  if (config.workerOptions?.allowLocalEndpoints === true) return;
+  let host: string;
+  try { host = new URL(endpoint).hostname; } catch { throw new WorkerError('endpoint must be a URL'); }
+  let isPrivate: boolean;
+  try {
+    isPrivate = await resolvesToPrivateAddress(host);
+  } catch {
+    throw new WorkerError(`The worker's host (${host}) couldn't be resolved`, 400);
+  }
+  if (isPrivate) throw new PrivateEndpointError("The worker's endpoint resolves to a local or private address", 400);
 }
 
 export interface WorkerInput {

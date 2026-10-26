@@ -39,9 +39,21 @@ vi.mock('../src/adapters/database/connectionManager', async (importOriginal) => 
   getConnection: () => ({ type: 'nosql', client: { db: () => mongo.db } }),
 }));
 vi.mock('../src/services/backfillBuiltinConnections', () => ({ backfillBuiltinConnections: async () => {} }));
+// What names resolve to, as the tests say.
+const resolved = vi.hoisted(() => new Map<string, string[]>());
+vi.mock('dns', async (importOriginal) => {
+  const original = await importOriginal<typeof import('dns')>();
+  return {
+    ...original,
+    promises: {
+      ...original.promises,
+      lookup: async (host: string) => (resolved.get(host) ?? []).map(address => ({ address, family: address.includes(':') ? 6 : 4 })),
+    },
+  };
+});
 
 const { createStreamByRouter } = await import('../src/middleware/createRouter');
-const { dispatchJob } = await import('../src/services/workerJobs');
+const { dispatchJob, enqueueWorkerJob } = await import('../src/services/workerJobs');
 const { jobStore } = await import('../src/services/jobStore');
 const { decrypt } = await import('../src/utils/encryption');
 
@@ -78,7 +90,11 @@ const config: any = {
   workers: [{ id: 'optimizer', name: 'glTF optimizer', endpoint: workerUrl, credential: 'host-worker-secret', kinds: ['gltf-optimize'], categories: ['3d-models'] }],
   workerOptions: { sweepIntervalMs: 0, allowLocalEndpoints: true },
   canUseBuiltin: async (auth: any, _id: string, kind: string) => kind !== 'worker' || auth.userId !== 'no-builtins',
-  authProvider: async (req: any) => ({ userId: req.headers['x-test-user'], username: req.headers['x-test-user'], role: 'viewer' }),
+  authProvider: async (req: any) => ({
+    userId: req.headers['x-test-user'], username: req.headers['x-test-user'], role: 'viewer',
+    // A request made with an API token that has these permissions.
+    ...(req.headers['x-test-token'] ? { apiToken: { tokenId: 't1', kind: 'user', permissions: String(req.headers['x-test-token']).split(','), projectIds: '*' } } : {}),
+  }),
 };
 const app = express();
 app.use(express.json());
@@ -87,10 +103,14 @@ const server = http.createServer(app);
 await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/streamby`;
 
-const call = async (method: string, path: string, { user = 'eli', body, token }: { user?: string; body?: object; token?: string } = {}) => {
+const call = async (method: string, path: string, { user = 'eli', body, token, permissions }: { user?: string; body?: object; token?: string; permissions?: string[] } = {}) => {
   const res = await fetch(path.startsWith('http') ? path : `${base}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : { 'x-test-user': user }) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : { 'x-test-user': user }),
+      ...(permissions ? { 'x-test-token': permissions.join(',') } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
@@ -277,7 +297,9 @@ describe('sending again', () => {
     await vi.waitFor(async () => expect(await jobStore().get(job.jobId)).toMatchObject({ status: 'pending', stage: 'retrying', attempts: 1 }));
     const pending = await jobStore().get(job.jobId);
     expect(new Date(pending!.nextAttemptAt!).getTime()).toBeGreaterThan(Date.now());
-    expect(pending!.error).toMatch(/503/);
+    // What the endpoint answered stays in the server's log, not in the job.
+    expect(pending!.error).toBe('The worker refused the job');
+    expect(vi.mocked(console.error).mock.calls.flat().join(' ')).toMatch(/answered 503/);
 
     for (const attempt of [2, 3]) {
       await makeDue(job.jobId);
@@ -346,4 +368,73 @@ it("deleting a project deletes its jobs, and no other project's", async () => {
   expect((await call('DELETE', '/projects/p1', { user: 'ada' })).status).toBe(200);
   expect(await jobStore().list({ projectId: 'p1' })).toEqual([]);
   expect(await jobStore().get('elsewhere')).not.toBeNull();
+});
+
+describe("a project's worker at a private address", () => {
+  const strict = { ...config, workerOptions: { sweepIntervalMs: 0 } };
+  const pendingJobFor = async (endpoint: string) => {
+    store.projects[0].renderFarmConnections = [{ id: 'w-dns', projectId: 'p1', name: 'Looks public', provider: 'streamby-worker', apiUrl: endpoint, kinds: ['lod'], categories: ['3d-models'], createdBy: 'eli', createdAt: new Date() }];
+    const jobId = `dns-${Math.random()}`;
+    await jobStore().insert({
+      jobId, jobType: 'process', userId: 'eli', projectId: 'p1', assetId: 'model', status: 'pending', stage: 'queued', progress: 0,
+      payload: { callbackBase: base }, worker: { source: 'project', id: 'w-dns', name: 'Looks public' }, kind: 'lod', resultMode: 'derived',
+      attempts: 0, maxAttempts: 3, nextAttemptAt: new Date(Date.now() - 1000), createdAt: new Date(), updatedAt: new Date(),
+    });
+    return jobId;
+  };
+
+  it('is never sent a job when its name resolves to one: the job fails for good', async () => {
+    resolved.set('internal.example.invalid', ['10.0.0.5']);
+    const jobId = await pendingJobFor('https://internal.example.invalid/jobs');
+    await dispatchJob(jobId, strict);
+    expect(await jobStore().get(jobId)).toMatchObject({ status: 'failed', error: "The worker's endpoint resolves to a local or private address" });
+    expect(received).toEqual([]);
+  });
+
+  it('is checked when connected, too', async () => {
+    const { assertPublicEndpoint } = await import('../src/services/workers');
+    resolved.set('fly.example.invalid', ['fdaa:0:1::3']);
+    resolved.set('public.example.invalid', ['93.184.216.34', '2606:2800:220:1::1']);
+    await expect(assertPublicEndpoint('https://fly.example.invalid/jobs', strict)).rejects.toThrow(/private address/);
+    await expect(assertPublicEndpoint('https://public.example.invalid/jobs', strict)).resolves.toBeUndefined();
+  });
+});
+
+describe('a private address', () => {
+  it('is any local, private, shared, benchmarking, multicast or reserved one, v4 or v6', async () => {
+    const { isPrivateIp } = await import('../src/utils/privateAddress');
+    for (const ip of ['0.0.0.0', '10.1.2.3', '127.0.0.1', '100.64.0.1', '169.254.169.254', '172.16.0.1', '192.168.1.1', '198.18.0.1', '198.19.255.255', '224.0.0.1', '255.255.255.255',
+      '::', '::1', 'fc00::1', 'fdaa:0:1::3', 'fe80::1', 'ff02::1', '::ffff:10.0.0.1', '::ffff:7f00:1']) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+    for (const ip of ['8.8.8.8', '93.184.216.34', '198.20.0.1', '2606:4700::1111', '::ffff:8.8.8.8']) {
+      expect(isPrivateIp(ip), ip).toBe(false);
+    }
+  });
+});
+
+it("a job is sent as whoever asked for it, with the role they had", async () => {
+  // A host that keeps its worker for admins.
+  const adminsOnly = { ...config, canUseBuiltin: async (auth: any, _id: string, kind: string) => kind !== 'worker' || auth.role === 'admin' };
+  const job = await enqueueWorkerJob(store.projects[0], { assetId: 'model', worker: BUILTIN, kind: 'gltf-optimize' },
+    { userId: 'eli', username: 'eli', role: 'admin' }, adminsOnly, base);
+  await sentJob();
+  expect(await jobStore().get(job.jobId)).toMatchObject({ status: 'processing' });
+});
+
+describe('marking a deliverable with an API token', () => {
+  const AUTO = { name: 'Auto LOD', endpoint: workerUrl, kinds: ['lod'], categories: ['3d-models'], autoKind: 'lod' };
+
+  it("starts no automatic job if the token can't run jobs", async () => {
+    await call('POST', '/projects/p1/workers', { body: AUTO });
+    const res = await call('POST', '/projects/p1/deliverables', { permissions: ['assets:write'], body: { assetId: 'model', shotId: 's1' } });
+    expect(res.status).toBe(201);
+    expect(res.body.jobs).toEqual([]);
+  });
+
+  it('starts them if it can', async () => {
+    await call('POST', '/projects/p1/workers', { body: AUTO });
+    const res = await call('POST', '/projects/p1/deliverables', { permissions: ['assets:write', 'jobs:run'], body: { assetId: 'model', shotId: 's1' } });
+    expect(res.body.jobs).toHaveLength(1);
+  });
 });

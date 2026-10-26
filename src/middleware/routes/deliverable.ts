@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Auth, StorageAdapter, StreamByConfig } from '../../types';
 import { enqueueAutomaticJobs, publicJob } from '../../services/workerJobs';
 import { callbackBaseOf } from './worker';
+import { tokenAllows } from '../../services/auth';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { nosqlDb } from '../../utils/nosqlDb';
@@ -108,9 +109,11 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
         createdBy: auth.userId,
       });
       const [described] = await describe(project, [deliverable]);
-      // The project's workers set to process its kind of asset by themselves start on it.
-      const jobs = await enqueueAutomaticJobs(project, assetId, versionId || null, auth, config, callbackBaseOf(req, config))
-        .catch(() => []);
+      // The project's workers set to process its kind of asset by themselves start on it: not
+      // for an API token that can't run jobs.
+      const jobs = tokenAllows(auth.apiToken, 'jobs:run')
+        ? await enqueueAutomaticJobs(project, assetId, versionId || null, auth, config, callbackBaseOf(req, config)).catch(() => [])
+        : [];
       res.status(201).json({ deliverable: described, jobs: jobs.map(publicJob) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to mark the deliverable', details: err.message });

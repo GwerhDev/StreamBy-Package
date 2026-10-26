@@ -21,6 +21,11 @@ const fakeModel = (name: string): any => {
   model.useDbType = () => model;
   return model;
 };
+// A worker's name resolves to a public address (no network in tests).
+vi.mock('dns', async (importOriginal) => {
+  const original = await importOriginal<typeof import('dns')>();
+  return { ...original, promises: { ...original.promises, lookup: async () => [{ address: '93.184.216.34', family: 4 }] } };
+});
 vi.mock('../src/models/manager', () => ({ getModel: (name: string) => fakeModel(name), registerModel: () => {} }));
 vi.mock('../src/adapters/database/connectionManager', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/adapters/database/connectionManager')>()),
