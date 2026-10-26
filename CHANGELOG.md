@@ -27,13 +27,29 @@
   - A job not taken, or not finished in time, is sent again (up to `workerOptions.maxAttempts`);
     every instance looks for them (`workerOptions.sweepIntervalMs`), and only one sends each.
   - A worker with an `autoKind` runs by itself on an asset of its categories marked as a
-    deliverable.
-  - A project's worker is reached only over https and never at a local or private address
-    (`workerOptions.allowLocalEndpoints` lifts that, for development); its credential is used
-    only while whoever connected it is still in the project.
+    deliverable, unless it's marked with an API token without `jobs:run`.
+  - **Behind a proxy that ends TLS, set `workerOptions.callbackBaseUrl`** to the router's public
+    https URL: without it, the callback URL is made from the request (`req.protocol`), and comes
+    out as `http://`.
+  - A project's worker is reached only over https and never at a local, private, shared,
+    benchmarking, multicast or reserved address: neither as its endpoint is written nor as its
+    name resolves, checked when it's connected and again right before each job is sent. A job
+    for one that resolves to such an address fails for good. `workerOptions.allowLocalEndpoints`
+    lifts that, for development. Its credential is used only while whoever connected it is
+    still in the project.
+  - A worker's answer to a job it doesn't take is logged, not shown: the job says "The worker
+    refused the job".
+  - A job is sent as whoever asked for it, with the platform role they had then (a host's
+    `canUseBuiltin` decides on sending it as on asking for it).
 - MCP tools `list_workers`, `process_asset`, `list_jobs` and `retry_job`.
 - Deleting a project deletes its jobs.
 - Job events (`jobEvent`) carry the job's `projectId` and `status`.
+
+### Fixed
+
+- **Instances starting together don't deadlock on StreamBy's tables.** The statements that make
+  them (or bring them up to date) at startup run one instance at a time, under a lock on the
+  database.
 
 ## 0.39.0
 

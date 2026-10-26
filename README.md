@@ -364,7 +364,7 @@ compatible worker by following the contract below.
       timeoutSeconds: 3600,              // optional: how long it may take a job
     }],
     workerOptions: {
-      callbackBaseUrl: 'https://api.example.com/streamby', // where workers call back
+      callbackBaseUrl: 'https://api.example.com/streamby', // where workers call back (see below)
       maxAttempts: 3,           // how many times a job is sent before it fails
       sweepIntervalMs: 30_000,  // how often each instance looks for jobs to send again
     },
@@ -373,9 +373,15 @@ compatible worker by following the contract below.
 
 - **A project's own**, connected from the project (`GET`, `POST` and
   `DELETE /projects/:projectId/workers`; a project's render farms are workers too). Its endpoint
-  must be https and not a local or private address (`workerOptions.allowLocalEndpoints` lifts
-  that, for development). Its credential is stored encrypted, and used only while whoever
+  must be https and never reach a local or private address: not as written, nor as its name
+  resolves, which is checked when it's connected and again right before each job is sent (a
+  name can point at the server's own network, or start pointing there later). A job for one
+  that resolves to such an address fails for good. `workerOptions.allowLocalEndpoints` lifts
+  all this, for development. Its credential is stored encrypted, and used only while whoever
   connected it is still in the project.
+
+  The host's own workers aren't checked this way: the host chose them, and they may well be on
+  its private network.
 
 `GET /projects/:projectId/workers` lists the workers a member can use.
 
@@ -392,7 +398,8 @@ compatible worker by following the contract below.
   version it replaces is archived, and can still be downloaded.
 
 A worker with an `autoKind` also runs by itself on an asset of its categories when it's marked
-as a deliverable.
+as a deliverable (by a session, or by an API token that has `jobs:run`: one without it marks the
+deliverable and starts nothing).
 
 Jobs are kept in the main database (a `jobs` table or collection): they survive restarts, and
 every instance sees them. `GET /projects/:projectId/jobs` lists them (`?assetId=` for one asset's);
@@ -415,6 +422,11 @@ StreamBy sends each job with a `POST` to the worker's endpoint
 
 The worker answers `2xx` to take it (any other answer, or none, and the job is sent again later),
 downloads the asset with `download.url`, and does its work before `deadline`.
+
+`callback.url` is `workerOptions.callbackBaseUrl` plus the job's path. Without it, it's made
+from the request that asked for the job (`req.protocol` and its host): behind a proxy that ends
+TLS (and without Express's `trust proxy`), that comes out as `http://`, which a worker can't call
+back to. Set `callbackBaseUrl` to the router's public https URL.
 
 **The contract: what a worker calls back**
 
