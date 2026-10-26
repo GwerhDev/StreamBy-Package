@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.40.0
+
+### ⚠️ Breaking changes
+
+- **A project's render farm connections are its workers.** `GET`, `POST` and
+  `DELETE /projects/:projectId/render-farm-connections` are now
+  `/projects/:projectId/workers`, which takes `{ name, provider?, endpoint, credential?, kinds,
+  categories, autoKind?, timeoutSeconds?, description? }`. They're still kept in the project's
+  `renderFarmConnections` list.
+- **Jobs are kept in the main database** (a new `jobs` table, created at startup, or collection),
+  not in memory: they survive restarts and every instance sees them. `GET /jobs/:jobId` answers
+  from there.
+- `canUseBuiltin` may be called with kind `'worker'`.
+
+### Added
+
+- **Processing workers**: StreamBy sends jobs to external workers (the host's, in the router
+  config's `workers`; or a project's own) and keeps what they make, as a new asset derived from
+  the original or as the asset's new version, with the worker's report. The README documents the
+  contract a worker follows.
+  - `POST /projects/:projectId/jobs/process` asks for one; `GET /projects/:projectId/jobs` lists
+    a project's jobs; `POST /projects/:projectId/jobs/:jobId/retry` sends a failed one again.
+  - Workers call back to `/worker-jobs/:jobId/{progress,upload-url,complete,fail}` with a token
+    of that job's attempt alone.
+  - A job not taken, or not finished in time, is sent again (up to `workerOptions.maxAttempts`);
+    every instance looks for them (`workerOptions.sweepIntervalMs`), and only one sends each.
+  - A worker with an `autoKind` runs by itself on an asset of its categories marked as a
+    deliverable.
+  - A project's worker is reached only over https and never at a local or private address
+    (`workerOptions.allowLocalEndpoints` lifts that, for development); its credential is used
+    only while whoever connected it is still in the project.
+- MCP tools `list_workers`, `process_asset`, `list_jobs` and `retry_job`.
+- Deleting a project deletes its jobs.
+- Job events (`jobEvent`) carry the job's `projectId` and `status`.
+
 ## 0.39.0
 
 ### Added
