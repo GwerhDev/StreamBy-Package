@@ -30,6 +30,7 @@ vi.mock('../src/adapters/database/connectionManager', async (importOriginal) => 
 vi.mock('../src/services/backfillBuiltinConnections', () => ({ backfillBuiltinConnections: async () => {} }));
 
 const { createStreamByRouter } = await import('../src/middleware/createRouter');
+const { resolveApiToken, createApiToken, API_TOKEN_PREFIX } = await import('../src/services/apiTokens');
 const {
   createOAuthTokenVerifier, permissionsForOAuthScopes, protectedResourceMetadata, defaultResourceMetadataUrl, looksLikeOAuthAccessToken,
 } = await import('../src/services/oauthTokens');
@@ -174,6 +175,11 @@ const startHost = async ({ withScope = true } = {}) => {
     oauth: { issuer: ISSUER, resource: MCP_RESOURCE },
     authProvider: async (req) => {
       const bearer = req.headers.authorization?.replace(/^Bearer /, '');
+      if (bearer?.startsWith(API_TOKEN_PREFIX)) {
+        const resolved = await resolveApiToken(bearer);
+        if (!resolved) throw new Error('Invalid API token');
+        return { userId: resolved.userId, username: resolved.name, role: 'viewer', apiToken: resolved.scope };
+      }
       if (looksLikeOAuthAccessToken(bearer)) {
         const verified = await verify(bearer);
         if (!verified) throw new Error('Invalid OAuth token');
@@ -263,5 +269,38 @@ describe('StreamBy as an OAuth protected resource', () => {
     await startHost({ withScope: false });
     const res = await fetch(`${base}/projects/p1`, { headers: { Authorization: `Bearer ${sign(claimsFor())}` } });
     expect(res.status).toBe(401);
+  });
+
+  // project:update, workflow:write and exports:write reach routes that delete: an app's
+  // consent is to make and change things, so it deletes nothing (but a deliverable's mark).
+  it('lets an app with streamby:write delete nothing: no connection, worker, pipeline nor export', async () => {
+    await startHost();
+    const token = sign(claimsFor({ scope: 'streamby:write' }));
+    for (const path of ['/projects/p1/connections/storage/c1', '/projects/p1/workers/w1', '/projects/p1/pipelines/pl1', '/projects/p1/exports/e1', '/projects/p1/integrations/i1']) {
+      const res = await fetch(`${base}${path}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      expect(res.status, path).toBe(403);
+      expect((await res.json()).error, path).toMatch(/OAuth can't delete/);
+    }
+    // Changing them is what it was approved for.
+    const changed = await fetch(`${base}/projects/p1/pipelines/pl1`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}',
+    });
+    expect(changed.status).not.toBe(403);
+  });
+
+  it("lets an app take a deliverable's mark off (the asset stays)", async () => {
+    await startHost();
+    const res = await fetch(`${base}/projects/p1/deliverables/d1`, { method: 'DELETE', headers: { Authorization: `Bearer ${sign(claimsFor({ scope: 'streamby:write' }))}` } });
+    // Past the scope's checks: what answers is the route itself (no database here).
+    expect(res.status).not.toBe(403);
+    expect(JSON.stringify(await res.json())).not.toMatch(/OAuth/);
+  });
+
+  it('an API token with project:update still deletes connections', async () => {
+    await startHost();
+    const { token } = await createApiToken({ kind: 'user', userId: 'eli' }, { name: 'ci', permissions: ['project:update'], projectIds: ['p1'], expiresInDays: 30 }, { databases: [] } as any);
+    const res = await fetch(`${base}/projects/p1/connections/storage/c1`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).not.toBe(403);
+    expect(JSON.stringify(await res.json())).not.toMatch(/OAuth|permission/);
   });
 });

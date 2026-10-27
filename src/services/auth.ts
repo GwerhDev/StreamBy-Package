@@ -39,11 +39,29 @@ export const scopeReachesProject = (scope: Auth['apiToken'], projectId: string):
 export const tokenAllows = (scope: Auth['apiToken'], permission: ApiTokenPermission): boolean =>
   !scope || scope.permissions.includes(permission);
 
+// ── OAuth apps ──
+// An app the user signed in to was approved to make and change things, never to delete them:
+// its permissions come from its scopes, and some of those (project:update, workflow:write,
+// exports:write) also reach routes that delete (a connection, a worker, an integration, a
+// pipeline, an export). So an app's DELETE is refused, whatever its route's permission.
+// The one DELETE it may make is taking a deliverable's mark off: that forgets the mark only
+// (the asset, its versions and its files stay, and it can be marked again), and it's the
+// counterpart of marking one, which assets:write already allows.
+const OAUTH_DELETE_ALLOWED = new RegExp(`^/projects/[^/]+/deliverables/[^/]+/?$`);
+
+/** Whether an app (an OAuth request) may make this request's method on its path. */
+export const oauthMayDelete = (method: string, path: string): boolean =>
+  method.toUpperCase() !== 'DELETE' || OAUTH_DELETE_ALLOWED.test(path);
+
 export const enforceApiTokenScope = (req: Request, res: Response, next: NextFunction) => {
-  const scope = ((req as any).auth as Auth | undefined)?.apiToken;
+  const auth = (req as any).auth as Auth | undefined;
+  const scope = auth?.apiToken;
   if (!scope) return next();
   // The MCP server handles a token itself: its tools call the routes here, each one checked.
   if (req.path === '/mcp') return next();
+  if (auth?.oauth && !oauthMayDelete(req.method, req.path)) {
+    return res.status(403).json({ error: 'An app connected with OAuth can\'t delete' });
+  }
 
   const rule = routeRuleFor(req.method, req.path);
   if (!rule || (rule.userTokenOnly && scope.kind !== 'user')) {

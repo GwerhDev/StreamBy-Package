@@ -188,8 +188,12 @@ approved, and never more than the user can: their role in each project still app
 | `streamby:read` | Every `:read` permission: `project:read`, `members:read`, `assets:read`, `production:read`, `workflow:read`, `exports:read`, `rights:read`, `jobs:read`. |
 | `streamby:write` | Those, and making and changing: `project:update`, `assets:write`, `production:write`, `workflow:write`, `exports:write`, `rights:write`, `jobs:run`, `projects:create`. |
 
-No scope grants deleting (`*:delete`, `project:delete`) nor managing members. Other scopes
-(`profile`, `email`) grant nothing in StreamBy. `OAUTH_SCOPE_PERMISSIONS` is exported.
+No scope grants deleting (`*:delete`, `project:delete`) nor managing members. And since some
+write permissions also reach routes that delete (`project:update` a connection, a worker or an
+integration; `workflow:write` a pipeline; `exports:write` an export), **an app's `DELETE` is
+refused (403) whatever its route**, but taking a deliverable's mark off, which only forgets the
+mark (the asset stays). API tokens aren't affected. Other scopes (`profile`, `email`) grant
+nothing in StreamBy. `OAUTH_SCOPE_PERMISSIONS` is exported.
 
 **Telling clients where to sign in**
 

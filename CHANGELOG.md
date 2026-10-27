@@ -14,6 +14,9 @@
   - Scopes map to permissions: `streamby:read` to every `:read` one, `streamby:write` to those
     and making and changing; none to deleting nor managing members (`OAUTH_SCOPE_PERMISSIONS`,
     `permissionsForOAuthScopes`). The user's role in each project still applies.
+  - An app deletes nothing: its `DELETE` requests answer 403 whatever their route's permission
+    (`project:update`, `workflow:write` and `exports:write` reach some that delete), but taking
+    a deliverable's mark off. API tokens are unchanged.
   - The router's `oauth` config (`{ issuer, resource, resourceMetadataUrl?, resourceName? }`)
     makes a request without a valid token answer 401 with
     `WWW-Authenticate: Bearer resource_metadata="..."`, and serves the metadata at
