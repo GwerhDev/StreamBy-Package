@@ -173,19 +173,102 @@ list shows only the token's projects.
 
 ---
 
+## 🔐 OAuth: apps the user signs in to
+
+An app the user signs in to with their account, such as claude.ai's connector, works with
+StreamBy through an **OAuth access token**, not an API token. StreamBy is the protected resource
+(RFC 9728); the tokens are issued by the host's authorization server (for Nhexa, Nhexa-API).
+
+A token is a JWT the server signs with RS256 for one resource (its audience, RFC 8707), checked
+with the server's published keys (JWKS) alone: no secret is shared. It reaches what the user
+approved, and never more than the user can: their role in each project still applies.
+
+| Scope | Permissions |
+|---|---|
+| `streamby:read` | Every `:read` permission: `project:read`, `members:read`, `assets:read`, `production:read`, `workflow:read`, `exports:read`, `rights:read`, `jobs:read`. |
+| `streamby:write` | Those, and making and changing: `project:update`, `assets:write`, `production:write`, `workflow:write`, `exports:write`, `rights:write`, `jobs:run`, `projects:create`. |
+
+No scope grants deleting (`*:delete`, `project:delete`) nor managing members. Other scopes
+(`profile`, `email`) grant nothing in StreamBy. `OAUTH_SCOPE_PERMISSIONS` is exported.
+
+**Telling clients where to sign in**
+
+Set `oauth` in the router's config. A request without a valid token then gets a 401 with
+`WWW-Authenticate: Bearer resource_metadata="..."`, and the metadata says which authorization
+server to use. The router serves it at `GET /streamby/.well-known/oauth-protected-resource`;
+serve it at your root too, where RFC 9728 puts it (`resourceMetadataUrl` defaults to that):
+
+```ts
+import express from 'express';
+import { createStreamByRouter, protectedResourceMetadata } from 'streamby-core';
+
+const oauth = { issuer: 'https://api.example.com', resource: 'https://api.example.com/streamby/mcp' };
+app.get('/.well-known/oauth-protected-resource/streamby/mcp', (_req, res) => res.json(protectedResourceMetadata(oauth)));
+app.use('/streamby', createStreamByRouter({ /* ... */ oauth }));
+```
+
+**Validating a token (your `authProvider`)**
+
+Your `authProvider` checks the token with `createOAuthTokenVerifier` and returns the user, with
+the token's scope in `apiToken` and the app in `oauth`. A request with `oauth` but no `apiToken`
+is refused, so an app never gets all of its user's access. `looksLikeOAuthAccessToken` tells the
+token from your own session tokens.
+
+```ts
+import { createOAuthTokenVerifier, looksLikeOAuthAccessToken, API_TOKEN_PREFIX } from 'streamby-core';
+
+const verifyOAuthToken = createOAuthTokenVerifier({
+  issuer: 'https://api.example.com',
+  // What a token may be for: StreamBy's resources.
+  audiences: ['https://api.example.com/streamby', 'https://api.example.com/streamby/mcp'],
+  // The server's JWKS URL, or a function giving its keys (when the host is the server itself).
+  jwks: 'https://api.example.com/.well-known/jwks.json',
+});
+
+createStreamByRouter({
+  // ...
+  authProvider: async (req) => {
+    const bearer = req.headers.authorization?.replace(/^Bearer /, '');
+    if (bearer?.startsWith(API_TOKEN_PREFIX)) { /* an API token, as above */ }
+    if (looksLikeOAuthAccessToken(bearer)) {
+      const verified = await verifyOAuthToken(bearer); // null: forged, expired, or for another resource
+      if (!verified) throw new Error('Invalid OAuth access token');
+      // Optional but recommended: has the user taken the app's access away? (your own records)
+      if (!(await stillConnected(verified.userId, verified.clientId))) throw new Error('Access revoked');
+      const user = await findUser(verified.userId);
+      return {
+        userId: user.id, username: user.username, role: user.role,
+        apiToken: verified.scope,
+        oauth: { clientId: verified.clientId, clientName: 'Claude' }, // the name, if you know it
+      };
+    }
+    // ...your session-based authentication
+  },
+});
+```
+
+The verifier keeps the keys for 5 minutes (`jwksCacheMs`) and fetches them again for a key id it
+doesn't know (a rotation), at most once a minute. It doesn't know whether the user has since
+taken the app's access away: without that check, a revoked app keeps its access until its access
+token expires (Nhexa's last an hour). Nhexa-API checks the user's consent on every request, so
+taking the access away in accounts.nhexa.cl ends it at once.
+
+---
+
 ## 🤖 MCP server
 
 StreamBy serves an [MCP](https://modelcontextprotocol.io) server at `POST /streamby/mcp`
 (Streamable HTTP, stateless). Agents such as Claude Code use it to read and work on StreamBy
-projects with an API token (see above). It takes only an API token; a browser session gets 401.
+projects with an API token, and apps the user signed in to (claude.ai's connector) with an OAuth
+access token (see above). A browser session gets 401.
 
 Each tool calls StreamBy's own REST API with the caller's token. So it reaches exactly what the
-token allows (and, for a user's token, what its user's role in each project allows), and a
+token allows (and, for a user's token or an app, what the user's role in each project allows), and a
 change is saved just like one made from the UI, which shows it when it loads the project.
 
 **Tools**
 
-A token sees only the tools whose permissions it has.
+A token sees only the tools whose permissions it has (an app: those its scopes grant).
 
 | Tools | Permissions |
 |---|---|
@@ -273,13 +356,14 @@ code there that downloads the URL and imports the file (in Blender,
 
 **Limits and audit**
 
-- Each token can make at most 120 requests a minute (a sliding window). Past that, StreamBy
-  answers 429 with `Retry-After`. Each instance counts its own requests. Change the limit with
-  `mcp.rateLimit`.
+- Each token can make at most 120 requests a minute (a sliding window); an app, per user it acts
+  for. Past that, StreamBy answers 429 with `Retry-After`. Each instance counts its own
+  requests. Change the limit with `mcp.rateLimit`.
 - Every tool call is recorded in the `mcp_audit` table, created at startup in the main database.
-  Each row has the user (a project's token: the token itself), the token's id, the project, the
-  tool, whether it went through, the status, the error and the duration. A row never includes
-  the arguments or the token.
+  Each row has the user (a project's token: the token itself), the token's id (an app's call:
+  its OAuth client, in `oauthClientId`, and no token), the project, the tool, whether it went
+  through, the status, the error and the duration. A row never includes the arguments or the
+  token.
 
 ```ts
 createStreamByRouter({
@@ -337,7 +421,24 @@ and an expiry:
 }
 ```
 
-The claude.ai connector needs OAuth, which isn't available yet: it's for API tokens only for now.
+### Connecting from claude.ai
+
+claude.ai connects through a custom connector, which signs in with OAuth (see above): nobody on
+the team sets up a token or a file. Each person signs in with their own account and approves what
+Claude may do, and Claude reaches only that, and only what their role in each project allows.
+
+- **For yourself**: in claude.ai, Settings → Connectors → Add custom connector. Give it a name
+  (StreamBy) and the server's URL, `https://your-host/streamby/mcp`, and add it. Then Connect:
+  claude.ai opens the sign-in page, and after you sign in, the consent screen, with what it asks
+  for (`streamby:read`, and `streamby:write` to make and change things). Approve it.
+- **For your organization** (Team and Enterprise plans): an owner adds it once in Organization
+  settings → Connectors, with the same URL; each member then connects it with their own account
+  from their Settings → Connectors.
+
+claude.ai registers itself with the authorization server (dynamic client registration or a
+client ID metadata document), so there's nothing to set up there. To take its access away, the
+person removes it in their account's connected apps (in Nhexa, accounts.nhexa.cl → Aplicaciones
+→ Quitar acceso), or disconnects it in claude.ai.
 
 ---
 

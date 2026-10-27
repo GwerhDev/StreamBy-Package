@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { Auth, StreamByConfig } from '../types';
 import { isProjectTokenPrincipal } from '../utils/auth';
 import { ApiTokenPermission, routeRuleFor } from './apiTokenPermissions';
+import { wwwAuthenticate } from './oauthTokens';
 
 // The one route open without a session: a project's public export, read
 // (GET /:projectId/export/:exportName, see routes/export). Exactly that path -- not any path
@@ -56,25 +57,32 @@ export const enforceApiTokenScope = (req: Request, res: Response, next: NextFunc
   next();
 };
 
+const hasBearer = (req: Request) => /^Bearer\s+\S/i.test(req.headers.authorization ?? '');
+
 export const authenticate = (config: StreamByConfig) => async (req: Request, res: Response, next: NextFunction) => {
   if (isPublicRoute(req.method, req.path)) {
     return next();
   }
 
+  // A client without a valid token is told where to sign in (RFC 9728), when StreamBy is set
+  // up as an OAuth resource.
+  const unauthorized = () => {
+    if (config.oauth) res.setHeader('WWW-Authenticate', wwwAuthenticate(config.oauth, hasBearer(req)));
+    return res.status(401).json({ error: 'Unauthorized' });
+  };
+
   try {
     const auth = await config.authProvider(req);
-    if (!auth || !auth.userId || !auth.role) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!auth || !auth.userId || !auth.role) return unauthorized();
     // A project token's principal is only ever a project's token (see utils/auth).
-    if (isProjectTokenPrincipal(auth.userId) && auth.apiToken?.kind !== 'project') {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (isProjectTokenPrincipal(auth.userId) && auth.apiToken?.kind !== 'project') return unauthorized();
+    // An app acting for the user reaches only what its scopes grant: never without them.
+    if (auth.oauth && auth.apiToken?.kind !== 'user') return unauthorized();
     (req as any).auth = auth;
     next();
   } catch (error) {
-    console.error('Authentication failed:', error);
-    return res.status(401).json({ error: 'Unauthorized' });
+    console.error('Authentication failed:', error instanceof Error ? error.message : error);
+    return unauthorized();
   }
 };
 

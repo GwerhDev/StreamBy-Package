@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.41.0
+
+### Added
+
+- **OAuth access tokens**: apps the user signs in to with their account (claude.ai's
+  connector) work with StreamBy and its MCP server, as a protected resource (RFC 9728). The
+  README documents the setup, and how to add the connector in claude.ai.
+  - `createOAuthTokenVerifier({ issuer, audiences, jwks })` checks a token with the
+    authorization server's keys (RS256, from its JWKS URL or a function), its issuer, its
+    audience (one of StreamBy's resources, RFC 8707) and its expiry. The host's `authProvider`
+    returns its user with `apiToken: verified.scope` and `oauth: { clientId, clientName? }`.
+  - Scopes map to permissions: `streamby:read` to every `:read` one, `streamby:write` to those
+    and making and changing; none to deleting nor managing members (`OAUTH_SCOPE_PERMISSIONS`,
+    `permissionsForOAuthScopes`). The user's role in each project still applies.
+  - The router's `oauth` config (`{ issuer, resource, resourceMetadataUrl?, resourceName? }`)
+    makes a request without a valid token answer 401 with
+    `WWW-Authenticate: Bearer resource_metadata="..."`, and serves the metadata at
+    `GET /.well-known/oauth-protected-resource`; `protectedResourceMetadata` builds it for the
+    host to serve at its root too.
+  - `looksLikeOAuthAccessToken` tells an access token from a host's session tokens.
+- `Auth.oauth`: the app a request comes from. A request with it and without `apiToken` is
+  refused (an app never gets all of its user's access).
+
+### Changed
+
+- The MCP server takes an OAuth access token too. An app's requests are limited per user it acts
+  for, and its tool calls are recorded in `mcp_audit` by its client (`oauthClientId`, a new
+  column added at startup) with no `tokenId` (now nullable).
+
 ## 0.40.0
 
 ### ⚠️ Breaking changes

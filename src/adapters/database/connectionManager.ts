@@ -258,6 +258,9 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
         "createdAt"   TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS mcp_audit_token_idx ON streamby.mcp_audit ("tokenId", "createdAt");
+      -- An app's calls (an OAuth access token) are recorded by its client, with no token.
+      ALTER TABLE streamby.mcp_audit ADD COLUMN IF NOT EXISTS "oauthClientId" VARCHAR(255);
+      ALTER TABLE streamby.mcp_audit ALTER COLUMN "tokenId" DROP NOT NULL;
     `);
     console.log('✅ "mcp_audit" table ensured to exist.');
   } catch (error) {

@@ -1,13 +1,15 @@
 import crypto from 'crypto';
 import { getModel } from '../models/manager';
-import { StreamByConfig } from '../types';
+import { Auth, StreamByConfig } from '../types';
 
 // Every MCP tool call, kept: who (the token, and its owner -- a project's token is its own
-// principal, on its project), on which project, which tool, and how it went. Never its
-// arguments' values nor the token itself.
+// principal, on its project; an app the user signed in to, by its OAuth client, in place of a
+// token), on which project, which tool, and how it went. Never its arguments' values nor the
+// token itself.
 export interface McpAuditEntry {
   userId: string;
-  tokenId: string;
+  tokenId: string | null;
+  oauthClientId: string | null;
   projectId: string | null;
   tool: string;
   ok: boolean;
@@ -15,6 +17,13 @@ export interface McpAuditEntry {
   error: string | null;
   durationMs: number;
 }
+
+/** Who made an MCP request, as the audit log keeps it. */
+export const auditCallerOf = (auth: Auth): Pick<McpAuditEntry, 'userId' | 'tokenId' | 'oauthClientId'> => ({
+  userId: auth.userId,
+  tokenId: auth.oauth ? null : auth.apiToken?.tokenId ?? null,
+  oauthClientId: auth.oauth?.clientId ?? null,
+});
 
 export async function recordMcpCall(entry: McpAuditEntry, config: StreamByConfig): Promise<void> {
   try {

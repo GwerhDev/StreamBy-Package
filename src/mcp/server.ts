@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Auth, StreamByConfig } from '../types';
 import { TOOLS, ToolCall } from './tools';
-import { recordMcpCall } from './audit';
+import { auditCallerOf, recordMcpCall } from './audit';
 import { ensureWorkflowNode } from './workflowNodes';
 
 export const MCP_SERVER_NAME = 'streamby';
@@ -46,7 +46,7 @@ export function createMcpServer(auth: Auth, api: ApiCaller, config: StreamByConf
           const refused = await ensureWorkflowNode(tool.workflowNode, tool.projectOf?.(args), auth, api);
           if (refused) {
             await recordMcpCall({
-              userId: auth.userId, tokenId: auth.apiToken!.tokenId, projectId, tool: tool.name,
+              ...auditCallerOf(auth), projectId, tool: tool.name,
               ok: false, status: null, error: refused, durationMs: Date.now() - started,
             }, config);
             return { isError: true, content: [{ type: 'text' as const, text: refused }] };
@@ -56,7 +56,7 @@ export function createMcpServer(auth: Auth, api: ApiCaller, config: StreamByConf
         status = answer.status;
         const ok = status >= 200 && status < 300;
         await recordMcpCall({
-          userId: auth.userId, tokenId: auth.apiToken!.tokenId, projectId, tool: tool.name,
+          ...auditCallerOf(auth), projectId, tool: tool.name,
           ok, status, error: ok ? null : errorText(answer.body, status), durationMs: Date.now() - started,
         }, config);
         if (!ok) return { isError: true, content: [{ type: 'text' as const, text: errorText(answer.body, status) }] };
@@ -65,7 +65,7 @@ export function createMcpServer(auth: Auth, api: ApiCaller, config: StreamByConf
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await recordMcpCall({
-          userId: auth.userId, tokenId: auth.apiToken!.tokenId, projectId, tool: tool.name,
+          ...auditCallerOf(auth), projectId, tool: tool.name,
           ok: false, status, error: message, durationMs: Date.now() - started,
         }, config);
         return { isError: true, content: [{ type: 'text' as const, text: `The call failed: ${message}` }] };

@@ -188,6 +188,10 @@ export interface StreamByConfig {
     // minutes) and to download (default 5 minutes).
     signedUrlTtl?: { upload?: number; download?: number };
   };
+  // StreamBy as an OAuth 2 protected resource (RFC 9728): what it tells a client (an MCP client
+  // such as claude.ai) that comes without a token, so it can sign in. Validating the tokens is
+  // the host's authProvider's (see services/oauthTokens).
+  oauth?: OAuthResourceConfig;
   websocket?: {
     server: WebSocketServer;
   };
@@ -239,7 +243,31 @@ export interface Auth {
   role: 'viewer' | 'editor' | 'admin';
   // Set when the request was made with an API token (see services/apiTokens): it reaches only
   // what the token's permissions and projects do -- a user's token never more than its owner.
+  // An OAuth access token's request has one too: the permissions its scopes grant.
   apiToken?: ApiTokenScope;
+  // Set when the request was made with an OAuth access token: the app the user let act for them.
+  oauth?: OAuthClientInfo;
+}
+
+export interface OAuthClientInfo {
+  clientId: string;
+  // How the host knows it (e.g. the name the user approved), when it does.
+  clientName?: string;
+}
+
+export interface OAuthResourceConfig {
+  // The authorization server that issues the tokens (its issuer identifier).
+  issuer: string;
+  // This resource's identifier, as clients ask tokens for it (RFC 8707), e.g.
+  // 'https://api.example.com/streamby/mcp'.
+  resource: string;
+  // Where its metadata is published, announced in WWW-Authenticate. Default: RFC 9728's place
+  // for `resource` (<origin>/.well-known/oauth-protected-resource<path>), at the host's root,
+  // which the host serves (see protectedResourceMetadata). This router also answers it at its
+  // own GET /.well-known/oauth-protected-resource.
+  resourceMetadataUrl?: string;
+  // The name clients show it by (default 'StreamBy').
+  resourceName?: string;
 }
 
 export type { ApiTokenPermission, ProjectPermission, AccountPermission };

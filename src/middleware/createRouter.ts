@@ -23,6 +23,7 @@ import { dbConnectionRouter } from './routes/dbConnection';
 import { storageConnectionRouter } from './routes/storageConnection';
 import { userIntegrationRouter } from './routes/userIntegration';
 import { oauthRouter } from './routes/oauth';
+import { oauthResourceRouter } from './routes/oauthResource';
 import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
 import { mediaRouter } from './routes/media';
@@ -114,6 +115,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
     initWsHub(config.websocket.server, config);
   }
 
+  // Where to sign in for a token (RFC 9728): open, before anything asks for one.
+  router.use(oauthResourceRouter(config));
   // /auth answers whether there's a session (it reads it itself); everything after needs one,
   // but for the public export route (see authenticate).
   router.use(authRouter(config));
