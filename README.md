@@ -134,6 +134,7 @@ hash is stored, with a short prefix to tell it apart.
 | Exports | `exports:read`, `exports:write` | The project's exports. |
 | Rights | `rights:read`, `rights:write` | Assets' rights. |
 | Jobs | `jobs:read`, `jobs:run` | Following jobs; starting them (transcoding, rendering, AI, publishing a deliverable). |
+| Documents | `docs:read`, `docs:write`, `docs:delete` | The project's documents: reading them and their history; creating, editing, moving and publishing them; deleting them. |
 | Account | `projects:create` | Creating projects. A user's token only; the token reaches what it creates. |
 
 `PROJECT_PERMISSIONS` and `ACCOUNT_PERMISSIONS` are exported. A route no permission covers
@@ -185,8 +186,8 @@ approved, and never more than the user can: their role in each project still app
 
 | Scope | Permissions |
 |---|---|
-| `streamby:read` | Every `:read` permission: `project:read`, `members:read`, `assets:read`, `production:read`, `workflow:read`, `exports:read`, `rights:read`, `jobs:read`. |
-| `streamby:write` | Those, and making and changing: `project:update`, `assets:write`, `production:write`, `workflow:write`, `exports:write`, `rights:write`, `jobs:run`, `projects:create`. |
+| `streamby:read` | Every `:read` permission: `project:read`, `members:read`, `assets:read`, `production:read`, `workflow:read`, `exports:read`, `rights:read`, `jobs:read`, `docs:read`. |
+| `streamby:write` | Those, and making and changing: `project:update`, `assets:write`, `production:write`, `workflow:write`, `exports:write`, `rights:write`, `jobs:run`, `projects:create`, `docs:write`. |
 
 No scope grants deleting (`*:delete`, `project:delete`) nor managing members. And since some
 write permissions also reach routes that delete (`project:update` a connection, a worker or an
@@ -297,6 +298,8 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
 | `request_asset_upload`, `mark_deliverable`, `remove_deliverable` | `assets:write` |
+| `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
+| `create_document`, `update_document`, `update_document_section` | `docs:write` |
 
 The tools take the path a user does in the UI, and each one's description says where its
 result shows there. Production data lives under a production node of the project's workflow:
@@ -446,6 +449,45 @@ person removes it in their account's connected apps (in Nhexa, accounts.nhexa.cl
 
 ---
 
+## 📄 Documents
+
+Each project keeps its documents: markdown its team reads and edits (its concept, its
+architecture, its decisions), and agents read and keep up to date through the MCP server. They're
+kept in the main database (the `documents` and `document_versions` tables, created at startup,
+or collections), each one in a single project, in folders.
+
+- **Every save is a version**, with who saved it and when: a user, an API token, or an app on a
+  user's behalf (`{ userId, username, via: 'session' | 'apiToken' | 'oauth', tokenId?, clientId?, clientName? }`).
+- **Nothing is overwritten without notice.** A change says the version it was made on
+  (`baseVersion`); if someone saved another one since, it's refused with a 409 and the document
+  as it is now, to read again.
+- **A section** is what's under a heading (`## Architecture`), up to the next one of the same
+  level or above: it can be replaced alone, the rest untouched.
+- **Drafts and published versions.** A document marked exportable delivers, through the project's
+  exports, only the version published from its history; editing it changes nothing exported until
+  another version is published. An export's `documentsNode` (on the StreamBy node's data input)
+  delivers them, `[{ id, title, parentId, position, version, content, publishedAt }]`: all the
+  project's, those in one folder (`data.folderId`), or some (`data.documentIds`).
+- **In real time**, a `documentEvent` reaches the project's active members on each change:
+  `{ projectId, action: 'created' | 'saved' | 'changed' | 'deleted', documentIds, version?, title?, author }`
+  (`saved` is a new version; `changed`, a move or a publication).
+
+| Route | Permission |
+|---|---|
+| `GET /projects/:projectId/documents`: the tree, without contents | `docs:read` |
+| `POST /projects/:projectId/documents` `{ title, content?, kind?: 'document' \| 'folder', parentId?, position? }` | `docs:write` |
+| `GET /projects/:projectId/documents/:docId` | `docs:read` |
+| `PATCH /projects/:projectId/documents/:docId` `{ baseVersion, title?, content? }` (a new version) and/or `{ parentId?, position?, exportable? }` | `docs:write` |
+| `PATCH /projects/:projectId/documents/:docId/sections` `{ baseVersion, heading, content }` | `docs:write` |
+| `GET /projects/:projectId/documents/:docId/versions` and `/versions/:version` | `docs:read` |
+| `POST /projects/:projectId/documents/:docId/publish` `{ version }` (`null`: none) | `docs:write` |
+| `DELETE /projects/:projectId/documents/:docId` (a folder, with everything in it) | `docs:delete` |
+
+Editors and admins create, edit, publish and delete them; viewers read them. An app connected
+with OAuth reads and edits them, but deletes none.
+
+---
+
 ## ⚙️ Processing workers
 
 StreamBy doesn't process assets itself (optimizing a glTF, making LODs, transcoding...): it
@@ -560,7 +602,7 @@ What a user can do in a project depends on their role in that project, as an act
 | Role | Can |
 |---|---|
 | `viewer` | See the project and its content, and archive the project in their own list. |
-| `editor` | Everything a viewer can, plus change the project: its details, connections, exports, files and folders, workflow, pipelines, production, reviews, rights, and start jobs. |
+| `editor` | Everything a viewer can, plus change the project: its details, connections, exports, files and folders, workflow, pipelines, production, reviews, rights, documents, and start jobs. |
 | `admin` | Everything an editor can, plus manage the project's members and delete the project. |
 
 A project's public exports (`GET /streamby/:projectId/export/:exportName`) are read without a

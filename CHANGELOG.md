@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.42.0
+
+### Added
+
+- **Project documents**: markdown a project's team reads and edits in the UI, and agents read and
+  keep up to date through the MCP server, with every save a version (who saved it, and when). The
+  README's Documents section documents them.
+  - **New tables: `documents` and `document_versions`.** They're created at startup in the main
+    database (collections in MongoDB; in memory without one).
+  - Routes under `/projects/:projectId/documents`: the tree, a document, creating, a new version
+    (`PATCH` with `baseVersion`; 409 with the document as it is now when it changed since), a
+    section's (`PATCH .../sections`), moving and marking exportable, the history
+    (`.../versions[/:version]`), publishing a version (`POST .../publish`) and deleting (a folder
+    with everything in it). Deleting a project deletes its documents.
+  - Permissions `docs:read`, `docs:write` and `docs:delete`. The OAuth scopes grant reading
+    (`streamby:read`) and writing (`streamby:write`); an app deletes none.
+  - MCP tools `list_documents`, `get_document`, `list_document_versions`, `create_document`,
+    `update_document` and `update_document_section`.
+  - An export's `documentsNode` delivers the published version of the project's exportable
+    documents (all, one folder's, or some), never a draft.
+  - A `documentEvent` to the project's active members on each change.
+  - Types `ProjectDocument`, `DocumentVersion`, `DocumentAuthor` and `DocumentKind`.
+
 ## 0.41.0
 
 ### Added

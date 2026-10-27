@@ -11,6 +11,7 @@ import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/api
 import { nosqlDb } from '../../utils/nosqlDb';
 import { deleteProductionData } from '../../services/production';
 import { jobStore } from '../../services/jobStore';
+import { documentStore } from '../../services/documents';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -284,6 +285,7 @@ export function projectRouter(config: StreamByConfig): Router {
       await deleteProjectApiTokens(String(projectId));
       await deleteProductionData(String(projectId));
       if (projectId) await jobStore().deleteProject(String(projectId));
+      if (projectId) await documentStore().deleteProject(String(projectId));
 
       const allProjects = await Project.find({});
       const projects = allProjects

@@ -15,12 +15,12 @@ export type OAuthScope = typeof OAUTH_SCOPES[number];
 
 const READ_PERMISSIONS: ApiTokenPermission[] = [
   'project:read', 'members:read', 'assets:read', 'production:read', 'workflow:read',
-  'exports:read', 'rights:read', 'jobs:read',
+  'exports:read', 'rights:read', 'jobs:read', 'docs:read',
 ];
 // Making and changing, as the consent screen says: never deleting, nor managing members.
 const WRITE_PERMISSIONS: ApiTokenPermission[] = [
   'project:update', 'assets:write', 'production:write', 'workflow:write', 'exports:write',
-  'rights:write', 'jobs:run', 'projects:create',
+  'rights:write', 'jobs:run', 'projects:create', 'docs:write',
 ];
 
 /** The permissions each scope grants. */

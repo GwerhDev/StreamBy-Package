@@ -263,6 +263,39 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
       ALTER TABLE streamby.mcp_audit ALTER COLUMN "tokenId" DROP NOT NULL;
     `);
     console.log('✅ "mcp_audit" table ensured to exist.');
+
+    // Projects' documents and their versions (see services/documents). Main db only.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS streamby.documents (
+        id                  TEXT PRIMARY KEY,
+        "projectId"         VARCHAR(255) NOT NULL,
+        kind                VARCHAR(20) NOT NULL DEFAULT 'document',
+        title               TEXT NOT NULL,
+        "parentId"          TEXT,
+        position            INTEGER NOT NULL DEFAULT 0,
+        content             TEXT NOT NULL DEFAULT '',
+        version             INTEGER NOT NULL,
+        exportable          BOOLEAN NOT NULL DEFAULT FALSE,
+        "publishedVersion"  INTEGER,
+        "createdAt"         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        "createdBy"         JSONB NOT NULL,
+        "updatedAt"         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        "updatedBy"         JSONB NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS documents_project_idx ON streamby.documents ("projectId");
+      CREATE TABLE IF NOT EXISTS streamby.document_versions (
+        "documentId"  TEXT NOT NULL,
+        "projectId"   VARCHAR(255) NOT NULL,
+        version       INTEGER NOT NULL,
+        title         TEXT NOT NULL,
+        content       TEXT NOT NULL,
+        author        JSONB NOT NULL,
+        "createdAt"   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        PRIMARY KEY ("documentId", version)
+      );
+      CREATE INDEX IF NOT EXISTS document_versions_project_idx ON streamby.document_versions ("projectId");
+    `);
+    console.log('✅ "documents" and "document_versions" tables ensured to exist.');
   } catch (error) {
     console.error('❌ Error ensuring tables exist:', error);
   }

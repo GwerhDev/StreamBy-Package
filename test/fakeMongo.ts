@@ -49,9 +49,13 @@ export class FakeCollection {
     return { matchedCount: 1, modifiedCount: 1 };
   }
 
+  // The document it changed, as it is after (returnDocument 'after'), even if the change made
+  // it no longer match the filter.
   async findOneAndUpdate(filter: Doc, update: Doc) {
+    const doc = this.docs.find(d => matches(d, filter));
+    if (!doc) return null;
     await this.updateOne(filter, update);
-    return this.findOne(filter);
+    return { ...doc };
   }
 
   async deleteOne(filter: Doc) {

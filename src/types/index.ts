@@ -655,3 +655,52 @@ export interface AssetVersionRecord {
   changeNote?: string;
   createdAt: Date;
 }
+
+// ── Project documents (see services/documents) ──
+
+/**
+ * Who saved a document's version: a user in the UI, an API token, or an app the user let act
+ * for them (OAuth, e.g. Claude in claude.ai).
+ */
+export interface DocumentAuthor {
+  userId: string;
+  username: string;
+  via: 'session' | 'apiToken' | 'oauth';
+  tokenId?: string;
+  clientId?: string;
+  clientName?: string;
+}
+
+export type DocumentKind = 'document' | 'folder';
+
+/** A project's document as it is now (a folder only groups others: it has no content). */
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  kind: DocumentKind;
+  title: string;
+  // The folder it's in (null: at the top), and its place among its siblings.
+  parentId: string | null;
+  position: number;
+  content: string;
+  // Each save is a version, 1 the first: an update says which one it was made on.
+  version: number;
+  // Delivered through the project's exports: only its published version, never a draft.
+  exportable: boolean;
+  publishedVersion: number | null;
+  createdAt: Date;
+  createdBy: DocumentAuthor;
+  updatedAt: Date;
+  updatedBy: DocumentAuthor;
+}
+
+/** One save of a document: its title and content then, who saved it and when. */
+export interface DocumentVersion {
+  documentId: string;
+  projectId: string;
+  version: number;
+  title: string;
+  content: string;
+  author: DocumentAuthor;
+  createdAt: Date;
+}

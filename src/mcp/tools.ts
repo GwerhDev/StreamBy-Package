@@ -399,6 +399,75 @@ export const TOOLS = [
     pick: (data) => data?.job,
   }),
 
+  // ── Documents ──
+  tool({
+    name: 'list_documents', title: 'List documents', permissions: ['docs:read'],
+    description: "A project's documents (its concept, architecture, decisions...), as the tree of its Documents section shows them: each one's id, title, folder (parentId; a folder's kind is 'folder'), position, current version and the version published through its exports, without their content (read one with get_document).",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/documents` }),
+    pick: (data) => data?.documents ?? [],
+  }),
+  tool({
+    name: 'get_document', title: 'Read a document', permissions: ['docs:read'],
+    description: "A document's markdown and its current version, the one an update is made on. With `version`, that past version instead (see list_document_versions).",
+    input: { projectId, documentId: id('document'), version: z.number().int().min(1).optional().describe('A past version to read; the current one if not given') },
+    projectOf: byProject,
+    call: ({ projectId, documentId, version }) => ({
+      method: 'GET',
+      path: `/projects/${enc(projectId)}/documents/${enc(documentId)}${version ? `/versions/${version}` : ''}`,
+    }),
+    pick: (data) => data?.document ?? data?.version,
+  }),
+  tool({
+    name: 'list_document_versions', title: "List a document's versions", permissions: ['docs:read'],
+    description: "A document's history, the latest first: each version's number, title, who saved it (a user, an API token, or an app on a user's behalf) and when.",
+    input: { projectId, documentId: id('document') },
+    projectOf: byProject,
+    call: ({ projectId, documentId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/documents/${enc(documentId)}/versions` }),
+    pick: (data) => data?.versions ?? [],
+  }),
+  tool({
+    name: 'create_document', title: 'Create a document', permissions: ['docs:write'], write: true,
+    description: "Creates a markdown document (or, with kind 'folder', a folder to group them) in a project's Documents section, at the end of its folder. It's a draft: nothing is exported until someone publishes a version of it in the UI.",
+    input: {
+      projectId,
+      title: z.string().min(1),
+      content: z.string().optional().describe('Its markdown'),
+      kind: z.enum(['document', 'folder']).optional(),
+      parentId: z.string().optional().describe("The folder it goes in (a folder's id); at the top if not given"),
+    },
+    projectOf: byProject,
+    call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/documents`, body: defined(fields) }),
+    pick: (data) => data?.document,
+  }),
+  tool({
+    name: 'update_document', title: 'Update a document', permissions: ['docs:write'], write: true,
+    description: "Saves a new version of a document: its whole markdown, its title, or both. `baseVersion` is the version it was read at (get_document): if someone saved another one since, nothing is saved and the answer says so; read it again and make the change on the new version. To change one part, update_document_section rewrites less.",
+    input: {
+      projectId, documentId: id('document'),
+      baseVersion: z.number().int().min(1).describe('The version the change was made on'),
+      title: z.string().min(1).optional(),
+      content: z.string().optional().describe('The whole new markdown'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, documentId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/documents/${enc(documentId)}`, body: defined(fields) }),
+    pick: (data) => data?.document,
+  }),
+  tool({
+    name: 'update_document_section', title: "Update a document's section", permissions: ['docs:write'], write: true,
+    description: "Saves a new version of a document with only what's under one of its headings replaced (up to the next heading of the same level or above), the rest untouched. `heading` is the heading as written (\"## Architecture\") or its title alone. `baseVersion` is the version it was read at: if the document changed since, nothing is saved; read it again.",
+    input: {
+      projectId, documentId: id('document'),
+      baseVersion: z.number().int().min(1).describe('The version the change was made on'),
+      heading: z.string().min(1).describe('The section\'s heading, e.g. "## Architecture"'),
+      content: z.string().describe("The section's new markdown, without its heading"),
+    },
+    projectOf: byProject,
+    call: ({ projectId, documentId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/documents/${enc(documentId)}/sections`, body: fields }),
+    pick: (data) => data?.document,
+  }),
+
   // ── Projects ──
   tool({
     name: 'create_project', title: 'Create a project', permissions: ['projects:create'], write: true,

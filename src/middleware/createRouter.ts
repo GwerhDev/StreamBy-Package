@@ -39,12 +39,15 @@ import { workerRouter } from './routes/worker';
 import { workerCallbackRouter } from './routes/workerCallback';
 import { startWorkerSweeper } from '../services/workerJobs';
 import { deliverableRouter } from './routes/deliverable';
+import { documentRouter } from './routes/document';
+import { setDocumentStoreDatabase } from '../services/documents';
 
 export function createStreamByRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = express.Router();
 
   if (config.encrypt) setEncryptionKey(config.encrypt, config.encryptPreviousKeys);
   setJobStoreDatabase(config);
+  setDocumentStoreDatabase(config);
 
   // Establish DB connections asynchronously (Postgres/Mongo + schema migrations).
   // Until they're ready, HOLD incoming requests instead of letting them through —
@@ -151,6 +154,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(pipelineRouter(config));
   router.use(workerRouter({ ...config, adapter }));
   router.use(deliverableRouter({ ...config, adapter }));
+  router.use(documentRouter(config));
 
   return router;
 }

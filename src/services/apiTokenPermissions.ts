@@ -12,6 +12,7 @@ export const PROJECT_PERMISSIONS = [
   'exports:read', 'exports:write',
   'rights:read', 'rights:write',
   'jobs:read', 'jobs:run',
+  'docs:read', 'docs:write', 'docs:delete',
 ] as const;
 
 /** Permissions on the account: only a user's token has them. */
@@ -123,6 +124,11 @@ const RULES = [
   // Jobs: transcoding, rendering, AI, publishing a deliverable.
   rule('read', `${P}/jobs`, 'jobs:read'),
   rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/publish)`, 'jobs:run'),
+
+  // Documents: writing them is saving a version, moving them or publishing one.
+  rule('read', `${P}/documents(/.+)?`, 'docs:read'),
+  rule('write', `${P}/documents(/[^/]+(/sections|/publish)?)?`, 'docs:write'),
+  rule('delete', `${P}/documents/[^/]+`, 'docs:delete'),
 ];
 
 /** The rule for a request made with an API token, or undefined: not reachable with one. */

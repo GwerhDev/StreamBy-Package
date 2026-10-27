@@ -5,6 +5,7 @@ import { resolveDbConnectionClient, releaseDbClient, resolveStorageAdapter, find
 import { getDecryptedIntegrationCredentialById } from './userIntegration';
 import { buildServiceAuthHeaders } from './oauthClient';
 import { createJob } from './jobQueue';
+import { publishedDocuments } from './documents';
 import {
   runIngestJob,
   runTranscodeJob,
@@ -175,6 +176,13 @@ export async function executeExport(
       } finally {
         await releaseDbClient(resolved);
       }
+
+    } else if (node.type === 'documentsNode') {
+      // The project's own documents, as published: an edit is a draft, delivered only once a
+      // version of it is published. Its own data, so public exports read it too.
+      const documentIds = Array.isArray(node.data?.documentIds) ? (node.data.documentIds as string[]) : undefined;
+      const folderId = (node.data?.folderId as string | undefined) || undefined;
+      dataResults.push(await publishedDocuments(project._id?.toString() ?? project.id, { folderId, documentIds }));
 
     } else if (node.type === 'connectionNode') {
       const connection = project.connections?.find((c: any) => c.id === node.data?.connectionId);
