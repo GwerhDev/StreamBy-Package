@@ -1,5 +1,5 @@
 import { nosqlDb } from '../utils/nosqlDb';
-import { resourceOfNode } from './workflowResources';
+import { isOwnNode } from './workflowResources';
 
 // What depends on one of a project's resources (a connection, an export, a pipeline), told
 // before it's removed: the nodes that use it (in the workflow, the exports, the pipelines) and
@@ -28,11 +28,8 @@ const FIELDS: Record<ResourceKind, string[]> = {
 };
 
 // A resource's own node in the workflow isn't a dependent of it: its other nodes using it are
-// (a data source reading one of a database's tables).
-const ownNode = (node: any, kind: ResourceKind, id: string) => {
-  const ref = resourceOfNode(node);
-  return ref?.kind === kind && ref.id === id && !(node.data?.tableName || node.data?.recordId);
-};
+// (a data source reading one of a database's tables, an Ingest importing one file).
+const ownNode = (node: any, kind: ResourceKind, id: string) => isOwnNode(node, kind, id);
 
 const nodesUsing = (schema: any, kind: ResourceKind, id: string, skipOwn = false): any[] =>
   (Array.isArray(schema?.nodes) ? schema.nodes : []).filter((node: any) =>

@@ -60,9 +60,27 @@ export function referencedIn(schema: NodeSchema): Record<ResourceKind, Set<strin
   return refs;
 }
 
-// A node of a consumer of a connection rather than the connection itself: a data source reading
-// one table of a database, which a workflow may have beside the database's own node.
-const consumes = (node: any) => node?.type === 'dataSourceNode' && !!(node.data?.tableName || node.data?.recordId);
+// What a node's data holds only to be shown (its name, how it's drawn), not what it does.
+const PRESENTATION = new Set(['label', 'subtitle', 'icon', 'bgColor', 'iconColor', 'description']);
+
+/**
+ * Whether a node consumes its resource rather than being it: it holds a configuration of its own
+ * beside the resource's id (a data source reading one table, an Ingest importing one file, a
+ * service node set to an action). A workflow may have many beside the resource's own node, and
+ * they're never merged into it.
+ */
+export function consumes(node: any): boolean {
+  const kind = KIND_OF_TYPE.get(node?.type);
+  if (!kind) return false;
+  return Object.entries(node?.data ?? {}).some(([key, value]) =>
+    key !== NODE_OF[kind].field && !PRESENTATION.has(key) && value !== '' && value !== null && value !== undefined && !(typeof value === 'object' && !Object.keys(value as object).length));
+}
+
+/** Whether a node is its resource's own node (bound to it, and not one consuming it). */
+export const isOwnNode = (node: any, kind: ResourceKind, id: string) => {
+  const ref = resourceOfNode(node);
+  return ref?.kind === kind && ref.id === id && !consumes(node);
+};
 
 // Where a new resource's node goes, as the canvas lays them out around the orchestrator: the
 // inputs above it, the exports below, the pipelines on its left.
@@ -81,10 +99,14 @@ function placeFor(schema: NodeSchema, row: Row) {
 
 const orchestratorNode = () => ({ id: ORCHESTRATOR, type: 'orchestratorNode', position: { x: 350, y: 20 }, data: { label: 'StreamBy', subtitle: 'Orchestrator' } });
 
-/** The schema with the resource's node, if it has none yet (as the canvas wires one). */
+/**
+ * The schema with the resource's own node, if it has none yet (as the canvas wires one): nodes
+ * consuming it (an Ingest importing one of its files) aren't it, and removing them all mustn't
+ * remove it unasked.
+ */
 export function withResourceNode(schema: NodeSchema, kind: ResourceKind, resource: any): NodeSchema {
   const id = String(resource.id);
-  if (referencedIn(schema)[kind].has(id)) return schema;
+  if (schema.nodes.some(n => isOwnNode(n, kind, id))) return schema;
   const def = NODE_OF[kind];
   const base = schema.nodes.some(n => n.id === ORCHESTRATOR) ? schema : { ...schema, nodes: [orchestratorNode(), ...schema.nodes] };
   const nodeId = `${kind}-${id}-${crypto.randomUUID().slice(0, 8)}`;
@@ -156,7 +178,10 @@ export function migrateSchema(project: any, schema: NodeSchema): NodeSchema {
 export async function writeWorkflow(project: any, changes: Record<string, unknown>): Promise<any> {
   const Project = getModel('projects');
   const projectId = String(project._id ?? project.id);
-  const now = new Date();
+  // Each save a later version than the one before, even within the same millisecond: a save is
+  // made on the version it was read at (baseUpdatedAt), so two can't share one.
+  const before = project.workflow?.updatedAt ? new Date(project.workflow.updatedAt).getTime() : 0;
+  const now = new Date(Math.max(Date.now(), before + 1));
   const base = project.workflow ?? { id: crypto.randomUUID(), name: 'Workflow', description: '', status: 'draft', projectId, nodeSchema: null, createdAt: now };
   const updated = { ...base, ...changes, id: base.id, projectId, updatedAt: now };
   if (project.dbType === 'sql') {
@@ -228,6 +253,21 @@ export async function removeResourceOf(project: any, kind: ResourceKind, id: str
     await nosqlDb()?.collection('pipelines').deleteOne({ id, projectId });
     await syncPipelineRefs(projectId);
   }
+}
+
+/** A pipeline made in the project (its refs kept in sync), as its section makes one. */
+export async function createPipelineOf(projectId: string, name: string, userId: string): Promise<any> {
+  const db = nosqlDb();
+  if (!db) throw new Error('Database not available');
+  const project: any = await getModel('projects').findOne({ _id: projectId });
+  const now = new Date();
+  const pipeline = {
+    id: crypto.randomUUID(), projectId, name, description: null, order: project?.pipelines?.length ?? 0,
+    nodeSchema: null, createdBy: userId, createdAt: now, updatedAt: now,
+  };
+  await db.collection('pipelines').insertOne({ ...pipeline });
+  await syncPipelineRefs(projectId);
+  return pipeline;
 }
 
 /** The project's resource lists as they're answered after a change. */

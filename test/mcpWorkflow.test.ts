@@ -121,7 +121,7 @@ describe('production through the workflow', () => {
   it('counts any production node (an Assembly, a Master) as one', async () => {
     store.projects[0].workflow = { id: 'w1', name: 'Workflow', nodeSchema: { nodes: [{ id: 'a', type: 'assemblyNode' }], edges: [] } };
     await call(await connect(await tokenFor(WRITER)), 'create_sequence', { projectId: 'p1', name: 'Opening' });
-    expect(nodesOf().map((n: any) => n.type)).toEqual(['assemblyNode']);
+    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode', 'assemblyNode']);
   });
 
   it("makes nothing when the node can't be added, and says why", async () => {
@@ -129,7 +129,8 @@ describe('production through the workflow', () => {
     const result = await call(await connect(await tokenFor(WRITER, 'vic')), 'create_sequence', { projectId: 'p1', name: 'Opening' });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/Couldn't add a production node/);
-    expect(nodesOf()).toEqual([]);
+    // Read, it's brought to define the project (its orchestrator), but no node was added.
+    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode']);
     expect(mongo.db.docs('production_sequences')).toEqual([]);
     expect(store.mcp_audit.at(-1)).toMatchObject({ tool: 'create_sequence', ok: false, projectId: 'p1' });
   });

@@ -12,7 +12,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { Pool } from 'pg';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 
-const DEFAULT_NODE_SCHEMA = {
+export const DEFAULT_NODE_SCHEMA = {
   nodes: [
     {
       id: 'request',
@@ -287,7 +287,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const result = await createExport(config, projectId, description, name, dbType, exportType, isPrivate, allowedOrigin, resolvedNodeSchema, useConnections, useCredentials, storageDbId);
       await addToWorkflow(projectId, 'export', { id: result.exportId, name, method: 'GET' });
 
-      res.status(201).json({ data: result, message: result.message });
+      res.status(201).json({ data: result, exports: exportSummaries((await Project.findOne({ _id: projectId }))?.exports), message: result.message });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to create raw export', details: err.message });
     }

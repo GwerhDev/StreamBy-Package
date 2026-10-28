@@ -4,6 +4,7 @@ import { Auth } from '../types';
 import { activeMemberOf } from '../utils/auth';
 import { scopeReachesProject } from '../services/auth';
 import type { ApiCaller } from './server';
+import { readWorkflow } from '../services/workflowResources';
 
 // What a workflow needs before the data that depends on it is made, as a user would do in the
 // UI: production data lives under a production node, so a production section is only part of
@@ -38,14 +39,19 @@ export async function ensureWorkflowNode(
   const project = await getModel('projects').findOne({ _id: projectId });
   if (!project || !activeMemberOf(project, auth.userId)) return null;
 
-  const schema = project.workflow?.nodeSchema ?? null;
-  const nodes: any[] = Array.isArray(schema?.nodes) ? schema.nodes : [];
+  // The workflow as it's answered (brought to define the project, if it wasn't yet), and saved
+  // on that version: what changed since isn't undone.
+  const workflow = await readWorkflow(project);
+  const nodes: any[] = Array.isArray(workflow?.nodeSchema?.nodes) ? workflow.nodeSchema.nodes : [];
   if (nodes.some(node => PRODUCTION_NODE_TYPES.has(node?.type))) return null;
 
   const answer = await api({
     method: 'PATCH',
     path: `/projects/${encodeURIComponent(projectId)}/workflow`,
-    body: { nodeSchema: { ...(schema ?? {}), nodes: [...nodes, newShotNode()], edges: Array.isArray(schema?.edges) ? schema.edges : [] } },
+    body: {
+      nodeSchema: { nodes: [...nodes, newShotNode()], edges: Array.isArray(workflow?.nodeSchema?.edges) ? workflow.nodeSchema.edges : [] },
+      baseUpdatedAt: new Date(workflow.updatedAt).toISOString(),
+    },
   });
   if (answer.status >= 200 && answer.status < 300) return null;
   const message = (answer.body as any)?.message ?? (answer.body as any)?.error;

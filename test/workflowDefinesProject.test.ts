@@ -47,9 +47,18 @@ vi.mock('../src/services/wsHub', () => ({ initWsHub: () => {}, emitToUser: () =>
 const { createStreamByRouter } = await import('../src/middleware/createRouter');
 const { CONNECT_PREFIX } = await import('../src/services/workflowResources');
 
+// A session ('x-test-user'), or an app the user connected with OAuth ('x-test-oauth': its name).
 const authProvider = async (req: any) => {
   const user = req.headers['x-test-user'];
   if (!user) throw new Error('No session');
+  const app = req.headers['x-test-oauth'];
+  if (app) {
+    return {
+      userId: user, username: user, role: 'viewer' as const,
+      apiToken: { tokenId: `oauth:${app}:${user}`, kind: 'user' as const, projectIds: '*' as const, permissions: ['workflow:read', 'workflow:write'] as any },
+      oauth: { clientId: `dyn_${app}`, clientName: app },
+    };
+  }
   return { userId: user, username: user, role: 'viewer' as const };
 };
 const app = express();
@@ -58,8 +67,9 @@ app.use('/streamby', createStreamByRouter({
   storageProviders: [{ id: 's3-main', type: 's3' } as any], adapter: {} as any, authProvider,
   databases: [{ id: 'mongo', type: 'nosql' }, { id: 'postgres', type: 'sql', main: true }] as any,
 }));
-const as = (user: string) => ({
+const as = (user: string, oauth?: string) => ({
   get: (p: string) => request(app).get(`/streamby${p}`).set('x-test-user', user),
+  oauthPatch: (p: string, body?: object) => request(app).patch(`/streamby${p}`).set('x-test-user', user).set('x-test-oauth', oauth ?? 'Claude').send(body ?? {}),
   post: (p: string, body?: object) => request(app).post(`/streamby${p}`).set('x-test-user', user).send(body ?? {}),
   patch: (p: string, body?: object) => request(app).patch(`/streamby${p}`).set('x-test-user', user).send(body ?? {}),
   delete: (p: string) => request(app).delete(`/streamby${p}`).set('x-test-user', user),
@@ -125,6 +135,26 @@ describe('a workflow made before it defined the project', () => {
     expect(read.nodeSchema.edges.map((e: any) => [e.source, e.target])).toEqual([['db-db-mongo', 'streamby'], ['db-db-mongo', 'gate']]);
   });
 
+  it("keeps a resource's consumers apart from its node: two Ingests of one storage, each importing its file", async () => {
+    project().storageConnections = [{ id: 'st-1', name: 'AWS S3', type: 's3', projectId: 'p1', source: 'builtin', integrationId: 's3-main' }];
+    mongo.db.collection('storage_files').docs.push({ fileId: 'a1', projectId: 'p1', displayName: 'plate.exr' }, { fileId: 'a2', projectId: 'p1', displayName: 'rock.glb' });
+    project().workflow = { id: 'w1', name: 'Workflow', nodeSchema: {
+      nodes: [
+        { id: 'streamby', type: 'orchestratorNode', position: { x: 350, y: 20 }, data: {} },
+        { id: 'ing-1', type: 'ingestNode', position: { x: 0, y: 0 }, data: { label: 'Plates', storageConnectionId: 'st-1', fileId: 'a1' } },
+        { id: 'ing-2', type: 'ingestNode', position: { x: 0, y: 200 }, data: { label: 'Props', storageConnectionId: 'st-1', fileId: 'a2' } },
+        { id: 'sheet', type: 'creditsSheetNode', position: { x: 400, y: 200 }, data: { documentId: 'credits-1' } },
+      ],
+      edges: [{ id: 'e1', source: 'ing-1', target: 'sheet' }, { id: 'e2', source: 'ing-2', target: 'sheet' }],
+    } };
+    const read = (await vic.get(W)).body.data;
+    const ingests = read.nodeSchema.nodes.filter((n: any) => n.type === 'ingestNode');
+    // Both stay, and the storage gets its own node beside them.
+    expect(ingests.map((n: any) => n.data.fileId ?? null)).toEqual(['a1', 'a2', null]);
+    const { ingestAssetsOf } = await import('../src/services/creditsSheets');
+    expect(ingestAssetsOf(project().workflow, 'credits-1')).toEqual(['a1', 'a2']);
+  });
+
   it('a project with no workflow has one with its resources', async () => {
     const read = (await vic.get(W)).body.data;
     expect(read.nodeSchema.nodes.map((n: any) => n.type)).toEqual(['orchestratorNode', 'dataSourceNode']);
@@ -187,18 +217,57 @@ describe('saving the workflow', () => {
     expect(project().disconnectedBuiltins).toEqual([{ kind: 'db', integrationId: 'mongo', connectionId: 'db-mongo' }]);
   });
 
-  it("refuses a version saved over a newer one, removing nothing", async () => {
+  it("refuses a schema made before a resource was added from its section: 409, the resource intact", async () => {
+    // All in the same millisecond: still two versions.
+    vi.useFakeTimers({ now: new Date('2026-10-28T12:00:00.000Z'), toFake: ['Date'] });
     const read = (await eli.get(W)).body.data;
     await eli.post('/projects/p1/connections/db', { integrationId: 'postgres' });
     const stale = await eli.patch(W, { nodeSchema: read.nodeSchema, baseUpdatedAt: read.updatedAt });
     expect(stale.status).toBe(409);
+    expect(stale.body.data.nodeSchema.nodes.some((n: any) => n.data?.connectionId && n.data.connectionId !== 'db-mongo')).toBe(true);
     expect(project().dbConnections.map((c: any) => c.integrationId)).toEqual(['mongo', 'postgres']);
+    vi.useRealTimers();
   });
 
-  it("an agent's change to a workflow not brought yet removes none of its resources", async () => {
-    project().workflow = { id: 'w1', name: 'Workflow', nodeSchema: { nodes: [], edges: [] } };
-    await eli.patch(W, { nodeSchema: { nodes: [{ id: 'shot', type: 'shotNode', data: {} }], edges: [] } });
+  it("refuses a save without the version it was made on (an old client), removing nothing", async () => {
+    const read = (await eli.get(W)).body.data;
+    const old = await eli.patch(W, { nodeSchema: { nodes: [], edges: [] } });
+    expect(old.status).toBe(400);
+    expect(old.body.message).toMatch(/baseUpdatedAt is required/);
     expect(project().dbConnections.map((c: any) => c.id)).toEqual(['db-mongo']);
-    expect(nodes().map((n: any) => n.type)).toEqual(['orchestratorNode', 'shotNode', 'dataSourceNode']);
+    expect(new Date(project().workflow.updatedAt).toISOString()).toBe(read.updatedAt);
+  });
+
+  it("refuses what isn't a schema: never read as an empty one", async () => {
+    const read = (await eli.get(W)).body.data;
+    for (const nodeSchema of [null, [], { nodes: [] }, { nodes: 'x', edges: [] }]) {
+      const bad = await eli.patch(W, { nodeSchema, baseUpdatedAt: read.updatedAt });
+      expect(bad.status).toBe(400);
+    }
+    expect(project().dbConnections.map((c: any) => c.id)).toEqual(['db-mongo']);
+  });
+
+  it("an app connected with OAuth removes nothing through it: refused, saying what it'd remove", async () => {
+    const read = (await eli.get(W)).body.data;
+    const claude = as('eli', 'Claude');
+    const refused = await claude.oauthPatch(W, { nodeSchema: { nodes: read.nodeSchema.nodes.filter((n: any) => n.type === 'orchestratorNode'), edges: [] }, baseUpdatedAt: read.updatedAt });
+    expect(refused.status).toBe(403);
+    expect(refused.body.message).toMatch(/removes nothing: this would remove MongoDB/);
+    expect(refused.body.removing).toEqual([{ kind: 'db', id: 'db-mongo' }]);
+    expect(project().dbConnections.map((c: any) => c.id)).toEqual(['db-mongo']);
+    // What adds, it saves.
+    const added = await claude.oauthPatch(W, { nodeSchema: { nodes: [...read.nodeSchema.nodes, { id: 'shot', type: 'shotNode', data: {} }], edges: read.nodeSchema.edges }, baseUpdatedAt: read.updatedAt });
+    expect(added.status).toBe(200);
+  });
+
+  it('makes the pipelines and exports drafted on its nodes', async () => {
+    const saved = await save(n => [...n,
+      { id: 'p-draft', type: 'pipelineRefNode', data: { label: 'Shading', pipelineDraft: { name: 'Shading' } } },
+    ]);
+    expect(saved.body.errors).toEqual([]);
+    const pipeline = project().pipelines[0];
+    expect(pipeline.name).toBe('Shading');
+    expect(saved.body.data.nodeSchema.nodes.find((n: any) => n.id === 'p-draft').data).toEqual({ label: 'Shading', pipelineId: pipeline.id });
+    expect(saved.body.project.pipelines).toEqual([expect.objectContaining({ id: pipeline.id, name: 'Shading' })]);
   });
 });

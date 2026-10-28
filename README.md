@@ -648,9 +648,16 @@ resource; a data source reading one of a database's tables is a node of its own.
 - **Saving the workflow** (`PATCH /projects/:id/workflow` `{ nodeSchema, baseUpdatedAt }`) makes
   the project what it defines, then answers `{ data, project, errors }`: the workflow, the
   project's lists as they are then, and what couldn't be done. A node set to an integration the
-  project doesn't have (`"__connect__:<integrationId>"`) connects it; an API drafted on a node
-  (`data.connectionDraft`) is made; a resource whose nodes are all gone is removed. Saved over a
-  newer version than `baseUpdatedAt`, it's refused with a 409 and the workflow as it is now.
+  project doesn't have (`"__connect__:<integrationId>"`) connects it; an API, a pipeline or an
+  export drafted on a node (`data.connectionDraft`, `data.pipelineDraft`, `data.exportDraft`) is
+  made; a resource whose nodes are all gone is removed.
+  - `baseUpdatedAt` (the workflow's `updatedAt` as it was read) is required with a `nodeSchema`,
+    and `nodeSchema` must be `{ nodes: [...], edges: [...] }`: a 400 otherwise. Saved over a newer
+    version, it's a 409 with the workflow as it is now.
+  - An app connected with OAuth removes nothing through it, as it deletes nothing: a save that
+    would remove resources is a 403 listing them (`removing`).
+  - A node holding a configuration of its own beside its resource's id (a data source reading one
+    table, an Ingest importing one file) consumes the resource: never merged into its node.
 - **Reading it** (`GET`) never rewrites it, except once, for a workflow made before this: the
   nodes once drawn from the project's lists are bound by their ids, a resource without a node gets
   one, and two nodes of the same resource are merged.

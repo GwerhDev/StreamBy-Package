@@ -5,9 +5,14 @@ import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { connectIntegration } from '../../services/projectIntegration';
 import { addConnection } from '../../services/connection';
+import { createExport } from '../../services/export';
+import { DEFAULT_NODE_SCHEMA } from './export';
 import {
-  listsOf, migrateSchema, oneNodePerResource, pendingOf, readWorkflow, referencedIn, removeResourceOf, ResourceKind, writeWorkflow,
+  createPipelineOf, listsOf, migrateSchema, oneNodePerResource, pendingOf, readWorkflow, referencedIn, removeResourceOf, ResourceKind, writeWorkflow,
 } from '../../services/workflowResources';
+
+const isSchema = (value: any): value is NodeSchema =>
+  !!value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.nodes) && Array.isArray(value.edges);
 
 // The integration kind a node's pending connection is of, by the node's type, and its field.
 const INTEGRATION_KIND: Record<string, { kind: 'database' | 'storage' | 'service'; field: string }> = {
@@ -53,11 +58,18 @@ export function workflowRouter(config: StreamByConfig): Router {
       }
 
       const { name, description, status, nodeSchema, baseUpdatedAt } = req.body;
-      // Made on the version it was read at: a change saved since (a resource added from its
-      // section, its node with it) would be undone, its resource removed.
-      const current = project.workflow?.updatedAt ? new Date(project.workflow.updatedAt).toISOString() : null;
-      if (nodeSchema !== undefined && baseUpdatedAt && current && new Date(baseUpdatedAt).toISOString() !== current) {
-        return res.status(409).json({ message: 'The workflow changed since it was opened: open it again to see the change.', data: await readWorkflow(project) });
+      if (nodeSchema !== undefined) {
+        // A schema saved removes what it lacks: one that isn't a schema is never read as empty.
+        if (!isSchema(nodeSchema)) return res.status(400).json({ message: 'nodeSchema is { nodes: [...], edges: [...] }' });
+        // Made on the version it was read at, always: a change saved since (a resource added from
+        // its section, its node with it) would be undone, its resource removed.
+        if (typeof baseUpdatedAt !== 'string' || Number.isNaN(new Date(baseUpdatedAt).getTime())) {
+          return res.status(400).json({ message: "baseUpdatedAt is required: the workflow's updatedAt as it was read" });
+        }
+        const current = project.workflow?.updatedAt ? new Date(project.workflow.updatedAt).toISOString() : null;
+        if (current !== new Date(baseUpdatedAt).toISOString()) {
+          return res.status(409).json({ message: 'The workflow changed since it was opened: open it again to see the change.', data: await readWorkflow(project) });
+        }
       }
       const changes: Record<string, unknown> = {
         ...(name !== undefined && { name }), ...(description !== undefined && { description }), ...(status !== undefined && { status }),
@@ -68,12 +80,23 @@ export function workflowRouter(config: StreamByConfig): Router {
         const before: NodeSchema = project.workflow?.resourceNodesAt
           ? { nodes: project.workflow?.nodeSchema?.nodes ?? [], edges: project.workflow?.nodeSchema?.edges ?? [] }
           : migrateSchema(project, { nodes: project.workflow?.nodeSchema?.nodes ?? [], edges: project.workflow?.nodeSchema?.edges ?? [] });
-        const given: NodeSchema = { nodes: Array.isArray(nodeSchema?.nodes) ? nodeSchema.nodes : [], edges: Array.isArray(nodeSchema?.edges) ? nodeSchema.edges : [] };
+        const given: NodeSchema = { nodes: nodeSchema.nodes, edges: nodeSchema.edges };
         // One not brought yet to define the project (see migrateSchema) is, before it's compared:
         // its resources without a node aren't removed for it.
         const sent = project.workflow?.resourceNodesAt ? given : migrateSchema(project, given);
 
-        // What its nodes make: the integrations they were set to, the APIs drafted on them.
+        // What it would remove: a resource bound to a node before, to none now. An app connected
+        // with OAuth deletes nothing (as its DELETEs are refused), nor through the workflow.
+        const was = referencedIn(before);
+        const removing = (Object.keys(was) as ResourceKind[]).flatMap(kind =>
+          [...was[kind]].filter(id => !referencedIn(sent)[kind].has(id)).map(id => ({ kind, id })));
+        if ((req as any).auth?.oauth && removing.length) {
+          const named = removing.map(({ kind, id }) => before.nodes.find((n: any) => n.data && Object.values(n.data).includes(id))?.data?.label ?? `${kind} ${id}`);
+          return res.status(403).json({ message: `An app connected with OAuth removes nothing: this would remove ${named.join(', ')}`, removing });
+        }
+
+        // What its nodes make: the integrations they were set to, the APIs, pipelines and exports
+        // drafted on them.
         const connected = new Map<string, string>();
         const nodes: any[] = [];
         for (const node of sent.nodes) {
@@ -88,6 +111,26 @@ export function workflowRouter(config: StreamByConfig): Router {
             }
             if (connected.has(integrationId)) data = { ...data, [pending.field]: connected.get(integrationId) };
           }
+          if (node.type === 'pipelineRefNode' && data.pipelineDraft && !data.pipelineId) {
+            try {
+              const pipeline = await createPipelineOf(projectId, String(data.pipelineDraft.name ?? data.label), auth.userId);
+              const { pipelineDraft: _draft, ...rest } = data;
+              data = { ...rest, pipelineId: pipeline.id, label: pipeline.name };
+            } catch (err: any) {
+              errors.push(`${data.pipelineDraft?.name ?? 'Pipeline'}: ${err.message}`);
+            }
+          }
+          if (node.type === 'exportNode' && data.exportDraft && !data.exportId) {
+            try {
+              const exportName = String(data.exportDraft.name ?? data.label);
+              const mainDb = config.databases?.find(db => db.main) ?? config.databases?.[0];
+              const created = await createExport(config, projectId, '', exportName, mainDb?.type ?? 'nosql', 'json', false, ['*'], DEFAULT_NODE_SCHEMA as any, false, false, undefined as any);
+              const { exportDraft: _draft, ...rest } = data;
+              data = { ...rest, exportId: created.exportId, label: exportName };
+            } catch (err: any) {
+              errors.push(`${data.exportDraft?.name ?? 'Export'}: ${err.message}`);
+            }
+          }
           if (node.type === 'connectionNode' && data.connectionDraft && !data.connectionId) {
             try {
               const { name: apiName, apiUrl, method, token, prefix, description: apiDescription } = data.connectionDraft;
@@ -101,18 +144,12 @@ export function workflowRouter(config: StreamByConfig): Router {
           nodes.push(data === node?.data ? node : { ...node, data });
         }
 
-        // What its nodes no longer are: a resource bound to a node before, to none now.
-        const was = referencedIn(before);
-        const is = referencedIn({ nodes, edges: sent.edges });
         project = await Project.findOne({ _id: projectId });
-        for (const kind of Object.keys(was) as ResourceKind[]) {
-          for (const id of was[kind]) {
-            if (is[kind].has(id)) continue;
-            try {
-              await removeResourceOf(project, kind, id, config);
-            } catch (err: any) {
-              errors.push(`${id}: ${err.message}`);
-            }
+        for (const { kind, id } of removing) {
+          try {
+            await removeResourceOf(project, kind, id, config);
+          } catch (err: any) {
+            errors.push(`${id}: ${err.message}`);
           }
         }
         changes.nodeSchema = oneNodePerResource({ nodes, edges: sent.edges });

@@ -23,7 +23,11 @@
   an API, an export, a pipeline, a project integration) adds or removes its node; saving the
   workflow connects what its nodes were set to (`"__connect__:<integrationId>"`), makes the APIs
   drafted on them (`data.connectionDraft`) and removes the resources whose nodes are gone,
-  answering `{ data, project, errors }`. With `baseUpdatedAt`, a save over a newer version is a 409.
+  answering `{ data, project, errors }`. A save needs `baseUpdatedAt` (a 409 over a newer version)
+  and a `nodeSchema` with `nodes` and `edges` lists (a 400 otherwise); an app connected with OAuth
+  can't remove resources through it (a 403 listing them). Pipelines and exports drafted on nodes
+  are made on save too. A node with a configuration of its own (a data source's table, an
+  Ingest's file) consumes its resource and is never merged into its node.
   A workflow made before this is brought to it once, when it's read (`resourceNodesAt`).
 - **What depends on a resource**, asked before removing it: `GET /projects/:id/dependents/:kind/:resourceId`
   (connections, exports, pipelines): the workflow's, exports' and pipelines' nodes that use it,

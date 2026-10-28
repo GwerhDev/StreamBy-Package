@@ -88,7 +88,7 @@ export function pipelineRouter(_config: StreamByConfig): Router {
       await db.collection('pipelines').insertOne({ ...pipeline });
       await syncProjectRefs(projectId);
       await addToWorkflow(projectId, 'pipeline', pipeline);
-      res.status(201).json({ pipeline });
+      res.status(201).json({ pipeline, pipelines: (await Project.findOne({ _id: projectId }))?.pipelines ?? [] });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
