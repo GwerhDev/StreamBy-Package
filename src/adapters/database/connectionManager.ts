@@ -101,6 +101,7 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS workflow            JSONB;
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS pipelines           JSONB DEFAULT '[]';
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "builtinBackfilledAt" TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS "disconnectedBuiltins" JSONB DEFAULT '[]';
       -- Written when a project is made (routes/project) and by its connection routes.
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS public              BOOLEAN DEFAULT TRUE;
       ALTER TABLE streamby.projects ADD COLUMN IF NOT EXISTS category            TEXT;

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { MongoClient } from 'mongodb';
 import { StreamByConfig } from '../../types';
 import { canEditProject, isProjectMember } from '../../utils/auth';
@@ -86,6 +87,7 @@ export function pipelineRouter(_config: StreamByConfig): Router {
 
       await db.collection('pipelines').insertOne({ ...pipeline });
       await syncProjectRefs(projectId);
+      await addToWorkflow(projectId, 'pipeline', pipeline);
       res.status(201).json({ pipeline });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -158,7 +160,8 @@ export function pipelineRouter(_config: StreamByConfig): Router {
 
       await db.collection('pipelines').deleteOne({ id: pipelineId, projectId });
       await syncProjectRefs(projectId);
-      res.json({ message: 'Pipeline deleted' });
+      await removeFromWorkflow(projectId, 'pipeline', pipelineId);
+      res.json({ message: 'Pipeline deleted', pipelines: (await Project.findOne({ _id: projectId }))?.pipelines ?? [] });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

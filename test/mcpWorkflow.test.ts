@@ -96,14 +96,15 @@ describe('production through the workflow', () => {
     const client = await connect(await tokenFor(WRITER));
     const result = await call(client, 'create_sequence', { projectId: 'p1', name: 'Opening' });
     expect(result.isError).toBeFalsy();
-    expect(nodesOf()).toEqual([expect.objectContaining({
+    // Beside the orchestrator, there in every workflow.
+    expect(nodesOf()).toEqual([expect.objectContaining({ id: 'streamby', type: 'orchestratorNode' }), expect.objectContaining({
       type: 'shotNode', id: expect.stringMatching(/^shotNode-/), data: expect.objectContaining({ label: 'Shot', subtitle: 'Raw video clip' }),
     })]);
     expect(mongo.db.docs('production_sequences').map((s: any) => s.name)).toEqual(['Opening']);
 
     // Once it's there, nothing more is added.
     await call(client, 'create_sequence', { projectId: 'p1', name: 'Chase' });
-    expect(nodesOf()).toHaveLength(1);
+    expect(nodesOf()).toHaveLength(2);
   });
 
   it("keeps the workflow's other nodes and edges", async () => {
@@ -138,6 +139,6 @@ describe('production through the workflow', () => {
     const client = await connect(await tokenFor(WRITER));
     const shot = await call(client, 'create_shot', { projectId: 'p1', sequenceId: 'q1', name: 'SH010' });
     expect(shot.isError).toBeFalsy();
-    expect(nodesOf().map((n: any) => n.type)).toEqual(['shotNode']);
+    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode', 'shotNode']);
   });
 });

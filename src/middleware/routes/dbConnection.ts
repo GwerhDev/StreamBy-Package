@@ -1,4 +1,7 @@
 import { Router, Request, Response } from 'express';
+import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
+import { rememberDisconnectedBuiltin } from './projectResources';
+import { connectIntegration } from '../../services/projectIntegration';
 import { ObjectId } from 'mongodb';
 import { StreamByConfig, Auth, DbConnection, ExternalDbType, CreateTableSchema } from '../../types';
 import { getModel } from '../../models/manager';
@@ -60,12 +63,28 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
     }
   });
 
+  // The project's database connections as they're answered, after each change too.
+  const listNow = async (projectId: string) => sanitizeConnections((await Project.findOne({ _id: projectId }))?.dbConnections);
+
   // ─── Add DB connection ────────────────────────────────────────────────────
   router.post('/projects/:id/connections/db', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
 
       const { name, dbType, credential, integrationId, description } = req.body;
+      if (credential && integrationId) {
+        return res.status(400).json({ message: 'Provide only one of credential or integrationId' });
+      }
+      // An integration (the user's, or a built-in) is a named, typed database already.
+      if (integrationId) {
+        const project = await Project.findOne({ _id: req.params.id });
+        if (!project) return res.status(404).json({ message: 'Project not found' });
+        if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+        const result = await connectIntegration(project, integrationId, auth, config, { kind: 'database', description });
+        if ('error' in result) return res.status(result.status).json({ message: result.error });
+        await addToWorkflow(req.params.id, 'db', result.connection);
+        return res.status(201).json({ data: sanitizeConnection(result.connection as DbConnection), dbConnections: await listNow(req.params.id) });
+      }
       if (!name || !dbType) {
         return res.status(400).json({ message: 'name and dbType are required' });
       }
@@ -107,7 +126,8 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       };
 
       await Project.update({ _id: req.params.id }, { $push: { dbConnections: connection } });
-      return res.status(201).json({ data: sanitizeConnection(connection) });
+      await addToWorkflow(req.params.id, 'db', connection);
+      return res.status(201).json({ data: sanitizeConnection(connection), dbConnections: await listNow(req.params.id) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to add DB connection', details: err.message });
     }
@@ -124,12 +144,12 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
 
       const conn = findDbConnection(project, req.params.connId);
       if (!conn) return res.status(404).json({ message: 'DB connection not found' });
-      if (conn.source === 'builtin') {
-        return res.status(403).json({ message: 'Cannot delete a built-in database connection' });
-      }
-
+      // A built-in is disconnected, not deleted: what the project keeps in it stays, and it can
+      // be connected again (routes/projectResources).
       await Project.update({ _id: req.params.id }, { $pull: { dbConnections: { id: req.params.connId } } });
-      return res.status(200).json({ message: 'DB connection deleted successfully' });
+      if (conn.source === 'builtin') await rememberDisconnectedBuiltin(req.params.id, 'db', conn);
+      await removeFromWorkflow(req.params.id, 'db', req.params.connId);
+      return res.status(200).json({ message: 'DB connection deleted successfully', dbConnections: await listNow(req.params.id) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete DB connection', details: err.message });
     }

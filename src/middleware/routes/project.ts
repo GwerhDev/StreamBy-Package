@@ -1,11 +1,13 @@
 import { Router, Request, Response } from 'express';
+import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { DbConnection, StorageConnection, IntegrationConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
 import { activeMemberOf, canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { exportSummaries, sanitizeIntegrationConnections, sanitizeProject } from '../../utils/sanitize';
-import { classifyIntegrationId } from '../../services/projectIntegration';
+import { classifyIntegrationId, connectIntegration } from '../../services/projectIntegration';
+import { rememberDisconnectedBuiltin } from './projectResources';
 import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
 import { nosqlDb } from '../../utils/nosqlDb';
@@ -497,18 +499,10 @@ export function projectRouter(config: StreamByConfig): Router {
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
 
-      const alreadyConnected = [...(project.dbConnections ?? []), ...(project.storageConnections ?? []), ...(project.integrationConnections ?? [])]
-        .some((c: any) => c.integrationId === integrationId);
-      if (alreadyConnected) return res.status(400).json({ message: 'This integration is already connected to the project' });
-
-      const result = await classifyIntegrationId(integrationId, auth, config, projectId);
+      const result = await connectIntegration(project, integrationId, auth, config);
       if ('error' in result) return res.status(result.status).json({ message: result.error });
-
-      const updated = result.kind === 'database'
-        ? await Project.update({ _id: projectId }, { $push: { dbConnections: result.connection } })
-        : result.kind === 'storage'
-          ? await Project.update({ _id: projectId }, { $push: { storageConnections: result.connection } })
-          : await Project.update({ _id: projectId }, { $push: { integrationConnections: result.connection } });
+      await addToWorkflow(projectId, result.kind === 'database' ? 'db' : result.kind, result.connection);
+      const updated = await Project.findOne({ _id: projectId });
       if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
 
       res.status(201).json({ data: result.connection, project: sanitizeProject(updated) });
@@ -534,12 +528,18 @@ export function projectRouter(config: StreamByConfig): Router {
       const integrationConn = (project.integrationConnections ?? []).find((c: any) => c.integrationId === integrationId);
       if (!dbConn && !storageConn && !integrationConn) return res.status(404).json({ message: 'Integration not connected to this project' });
 
-      const updated = dbConn
+      const removed = dbConn
         ? await Project.update({ _id: projectId }, { $pull: { dbConnections: { id: dbConn.id } } })
         : storageConn
           ? await Project.update({ _id: projectId }, { $pull: { storageConnections: { id: storageConn.id } } })
           : await Project.update({ _id: projectId }, { $pull: { integrationConnections: { id: integrationConn!.id } } });
-      if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
+      if (!removed) return res.status(404).json({ message: 'Project not found or not updated' });
+      // A built-in disconnected keeps its id, to come back as it was (services/projectIntegration).
+      const builtin = [dbConn, storageConn].find(c => c?.source === 'builtin');
+      if (builtin) await rememberDisconnectedBuiltin(projectId, dbConn ? 'db' : 'storage', builtin);
+      const gone = dbConn ?? storageConn ?? integrationConn!;
+      await removeFromWorkflow(projectId, dbConn ? 'db' : storageConn ? 'storage' : 'service', gone.id);
+      const updated = await Project.findOne({ _id: projectId });
 
       res.status(200).json({ message: 'Integration removed', project: sanitizeProject(updated) });
     } catch (err: any) {

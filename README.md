@@ -636,6 +636,49 @@ A job its worker doesn't complete before its deadline is sent again, up to
 
 ---
 
+## 🧭 The workflow defines the project
+
+Each of a project's resources (a database, an API, a storage, a service, an export, a pipeline)
+is a node of its workflow, bound to it by the resource's id in its data (`connectionId`,
+`storageConnectionId`, `integrationConnectionId`, `exportId`, `pipelineId`). One node per
+resource; a data source reading one of a database's tables is a node of its own.
+
+- **From a section** (or an agent): adding a resource adds its node to the saved workflow, and
+  removing it removes its nodes.
+- **Saving the workflow** (`PATCH /projects/:id/workflow` `{ nodeSchema, baseUpdatedAt }`) makes
+  the project what it defines, then answers `{ data, project, errors }`: the workflow, the
+  project's lists as they are then, and what couldn't be done. A node set to an integration the
+  project doesn't have (`"__connect__:<integrationId>"`) connects it; an API drafted on a node
+  (`data.connectionDraft`) is made; a resource whose nodes are all gone is removed. Saved over a
+  newer version than `baseUpdatedAt`, it's refused with a 409 and the workflow as it is now.
+- **Reading it** (`GET`) never rewrites it, except once, for a workflow made before this: the
+  nodes once drawn from the project's lists are bound by their ids, a resource without a node gets
+  one, and two nodes of the same resource are merged.
+
+---
+
+## 🔌 Removing a project's resources
+
+Before a connection (database, API, storage, service), an export or a pipeline is removed, the
+UI asks what depends on it: `GET /projects/:id/dependents/:kind/:resourceId` (`kind`: `db`,
+`api`, `storage`, `service`, `export`, `pipeline`; `project:read`) answers
+`{ dependents: [{ type, name, id?, count? }] }`: the nodes that use it in the workflow, the
+exports and the pipelines (`workflow`, `export`, `pipeline`: they stop working without it), and
+what's kept for it (`files` and `folders` of a storage, `deliverables` and `shots` of an
+export). Removing it changes none of them.
+
+**Built-ins** (the host's database and storage) are disconnected like any connection, and what
+the project keeps in them stays. They're connected again as any integration is, by its id in
+the pool (`GET /user/integrations`): `POST /projects/:id/integrations` `{ integrationId }`, or
+`POST .../connections/db` and `.../connections/storage` with `integrationId` (its name and type
+come from the integration). One connected again keeps the id it had (`disconnectedBuiltins`
+on the project), so its files and records are its own again.
+
+Deleting an account's integration disconnects the project connections that use it;
+`GET /user/integrations/:id/dependents` lists them first.
+
+---
+
 ## 👥 Project roles
 
 What a user can do in a project depends on their role in that project, as an active member

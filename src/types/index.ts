@@ -98,6 +98,8 @@ export interface ProjectInfo {
   // storageConnections for a pre-BYOC project — guards against re-seeding a builtin an
   // admin has since disconnected on purpose.
   builtinBackfilledAt?: Date;
+  // The built-ins disconnected, with the id each had: connected again, it keeps it.
+  disconnectedBuiltins?: { kind: 'db' | 'storage'; integrationId: string; connectionId: string }[];
   workflow?: Workflow;
 }
 

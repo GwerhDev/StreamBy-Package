@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { StreamByConfig, Auth, ConnectionMethod } from '../../types';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
@@ -65,8 +66,9 @@ export function connectionRouter(config: StreamByConfig): Router {
         ...(description !== undefined && { description }),
         ...(token !== undefined && { token }),
       });
+      await addToWorkflow(projectId, 'api', connection);
 
-      return res.status(201).json({ data: sanitizeConnection(connection) });
+      return res.status(201).json({ data: sanitizeConnection(connection), connections: sanitizeConnections((await Project.findOne({ _id: projectId }))?.connections) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to add connection', details: err.message });
     }
@@ -173,8 +175,9 @@ export function connectionRouter(config: StreamByConfig): Router {
       }
 
       await deleteConnection(config, projectId, connectionId);
+      await removeFromWorkflow(projectId, 'api', connectionId);
 
-      return res.status(200).json({ message: 'Connection deleted successfully.' });
+      return res.status(200).json({ message: 'Connection deleted successfully.', connections: sanitizeConnections((await Project.findOne({ _id: projectId }))?.connections) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete connection', details: err.message });
     }

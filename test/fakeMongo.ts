@@ -1,5 +1,5 @@
 // A MongoDB database in memory, with what the routes use of it: equality, $in, $exists and
-// $or filters; $set, $unset and $pull updates (and upserts); find with sort and limit.
+// $or filters; $set, $unset and $pull updates (and upserts); find with sort, limit and projection.
 
 type Doc = Record<string, any>;
 
@@ -27,6 +27,12 @@ export class FakeCollection {
         return cursor;
       },
       limit: (n: number) => { result = result.slice(0, n); return cursor; },
+      // A projection keeps the fields asked for (1s only), as the routes use it.
+      project: (fields: Doc) => {
+        const keep = Object.keys(fields).filter(k => fields[k]);
+        result = result.map(d => Object.fromEntries(keep.filter(k => k in d).map(k => [k, d[k]])));
+        return cursor;
+      },
       toArray: async () => result.map(d => ({ ...d })),
     };
     return cursor;

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { Auth, ExternalDbType, IntegrationKind, ServiceProviderType, StorageProviderType, StreamByConfig } from '../../types';
 import { assertBuiltinAccess, BUILTIN_DB_DISPLAY, BUILTIN_STORAGE_DISPLAY } from '../../utils/builtinAccess';
 import {
@@ -9,7 +10,8 @@ import {
   listUserIntegrations,
   updateUserIntegration,
 } from '../../services/userIntegration';
-import { sanitizeUserIntegration } from '../../utils/sanitize';
+import { sanitizeConnections, sanitizeUserIntegration } from '../../utils/sanitize';
+import { getModel } from '../../models/manager';
 
 const VALID_KINDS: IntegrationKind[] = ['database', 'storage', 'service'];
 const VALID_DB_PROVIDERS: ExternalDbType[] = ['postgresql', 'mongodb'];
@@ -115,14 +117,52 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
     }
   });
 
+  // The projects' connections that use one of the user's integrations: a connection can't
+  // work without it, so deleting it disconnects them.
+  const LISTS = [['dbConnections', 'db'], ['storageConnections', 'storage'], ['integrationConnections', 'service']] as const;
+  async function connectionsUsing(integrationId: string) {
+    const projects: any[] = await getModel('projects').find({});
+    return projects.flatMap(project => LISTS.flatMap(([list, kind]) => ((project[list] ?? []) as any[])
+      .filter(c => c.integrationId === integrationId && c.source !== 'builtin')
+      .map(c => ({ projectId: String(project._id ?? project.id), projectName: project.name, kind, list, connectionId: c.id, name: c.name }))));
+  }
+
+  router.get('/user/integrations/:integrationId/dependents', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const integration = await getModel('user_integrations').findOne({ id: req.params.integrationId, userId: auth.userId });
+      if (!integration) return res.status(404).json({ message: 'Integration not found' });
+      const found = await connectionsUsing(req.params.integrationId);
+      res.json({ dependents: found.map(({ list: _list, ...d }) => d) });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ─── Delete ────────────────────────────────────────────────────────────────
   router.delete('/user/integrations/:integrationId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       const deleted = await deleteUserIntegration(auth.userId, req.params.integrationId);
       if (!deleted) return res.status(404).json({ message: 'Integration not found' });
+      const Project = getModel('projects');
+      const disconnected = await connectionsUsing(req.params.integrationId);
+      for (const c of disconnected) {
+        await Project.update({ _id: c.projectId }, { $pull: { [c.list]: { id: c.connectionId } } });
+        await removeFromWorkflow(c.projectId, c.kind, c.connectionId);
+      }
+      // Each project it was disconnected from, with its connections as they are now.
+      const affected = await Promise.all([...new Set(disconnected.map(c => c.projectId))].map(async projectId => {
+        const project: any = await Project.findOne({ _id: projectId });
+        return {
+          projectId,
+          dbConnections: sanitizeConnections(project?.dbConnections),
+          storageConnections: sanitizeConnections(project?.storageConnections),
+          integrationConnections: sanitizeConnections(project?.integrationConnections),
+        };
+      }));
 
-      res.json({ message: 'Integration deleted' });
+      res.json({ message: 'Integration deleted', disconnected: disconnected.length, affected });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete integration', details: err.message });
     }

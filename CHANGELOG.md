@@ -18,6 +18,26 @@
   license. Routes `GET /projects/:projectId/credits-sheets` and `.../credits-sheets/:docId`
   (`rights:read`). Types `CreditsSheet`, `SheetRow`, `SheetSources` and `SheetStatus`.
 - MCP: `get_credits_sheet`; `request_asset_upload` takes the license metadata.
+- **The workflow defines the project.** Each resource is a node of it, bound by the resource's
+  id in its data. A resource added or removed from its section (`POST`/`DELETE` of a connection,
+  an API, an export, a pipeline, a project integration) adds or removes its node; saving the
+  workflow connects what its nodes were set to (`"__connect__:<integrationId>"`), makes the APIs
+  drafted on them (`data.connectionDraft`) and removes the resources whose nodes are gone,
+  answering `{ data, project, errors }`. With `baseUpdatedAt`, a save over a newer version is a 409.
+  A workflow made before this is brought to it once, when it's read (`resourceNodesAt`).
+- **What depends on a resource**, asked before removing it: `GET /projects/:id/dependents/:kind/:resourceId`
+  (connections, exports, pipelines): the workflow's, exports' and pipelines' nodes that use it,
+  and the files, folders, deliverables and shots kept for it. `GET /user/integrations/:id/dependents`:
+  the project connections that use an account's integration.
+- **A change to a project's resources answers its list as it is then**, for the client to show
+  without asking again: connecting or disconnecting a database (`dbConnections`), a storage
+  (`storageConnections`, with built-ins' `available`) or an API (`connections`), deleting an
+  export (`exports`) or a pipeline (`pipelines`); `POST`/`DELETE /projects/:id/integrations`
+  answer the `project`; deleting an account's integration, each project it was disconnected
+  from (`affected`).
+- **A built-in connected again keeps the id it had** (`disconnectedBuiltins` on the project; a
+  new `disconnectedBuiltins` column in a PostgreSQL projects table, added at startup), so its
+  files and records are its own again.
 
 ### Changed
 
@@ -29,6 +49,13 @@
 ### Fixed
 
 - Deleting an asset or a project deletes its license metadata (it was left behind).
+- A built-in database or storage can be disconnected from a project (it was refused with a 403,
+  though the backfill already left a disconnected one alone): what the project keeps in it stays.
+- Deleting an account's integration disconnects the project connections that use it (they were
+  left pointing at nothing).
+- `POST .../connections/db` and `.../connections/storage` with an `integrationId` connect a
+  built-in too (they refused it as an unknown integration, and checked the pool's `sql`/`nosql`
+  as the type): with an integration, its name and type are the integration's.
 
 ## 0.42.0
 

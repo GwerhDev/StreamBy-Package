@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { deleteDeliverablesOf } from '../../services/deliverables';
 import { Auth, StreamByConfig } from '../../types';
 import { exportSummaries } from '../../utils/sanitize';
@@ -284,6 +285,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const dbType = mainDb?.type ?? 'nosql';
 
       const result = await createExport(config, projectId, description, name, dbType, exportType, isPrivate, allowedOrigin, resolvedNodeSchema, useConnections, useCredentials, storageDbId);
+      await addToWorkflow(projectId, 'export', { id: result.exportId, name, method: 'GET' });
 
       res.status(201).json({ data: result, message: result.message });
     } catch (err: any) {
@@ -346,8 +348,9 @@ export function exportRouter(config: StreamByConfig): Router {
 
       await deleteExport(config, projectId, exportId, project.dbType);
       await deleteDeliverablesOf(projectId, { exportId });
+      await removeFromWorkflow(projectId, 'export', exportId);
 
-      res.status(200).json({ message: 'Export deleted successfully' });
+      res.status(200).json({ message: 'Export deleted successfully', exports: exportSummaries((await Project.findOne({ _id: projectId }))?.exports) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete export', details: err.message });
     }

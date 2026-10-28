@@ -82,3 +82,40 @@ export async function classifyIntegrationId(
     },
   };
 }
+
+const LIST_OF = { database: 'dbConnections', storage: 'storageConnections', service: 'integrationConnections' } as const;
+const NOUN_OF = { database: 'a database', storage: 'a storage', service: 'a service' } as const;
+
+/**
+ * Connects an integration to a project: a built-in (the host's database or storage) or one of
+ * the user's own. A built-in it was disconnected from comes back with the id it had, so what
+ * was kept for it (its files, its records) is its own again. With `kind`, only one of that kind.
+ */
+export async function connectIntegration(
+  project: any,
+  integrationId: string,
+  auth: Auth,
+  config: StreamByConfig,
+  options: { kind?: keyof typeof LIST_OF; description?: string } = {},
+): Promise<ClassifyResult> {
+  const projectId = String(project._id ?? project.id);
+  const alreadyConnected = [...(project.dbConnections ?? []), ...(project.storageConnections ?? []), ...(project.integrationConnections ?? [])]
+    .some((c: any) => c.integrationId === integrationId);
+  if (alreadyConnected) return { error: 'This integration is already connected to the project', status: 400 };
+
+  const result = await classifyIntegrationId(integrationId, auth, config, projectId);
+  if ('error' in result) return result;
+  if (options.kind && result.kind !== options.kind) return { error: `This integration isn't ${NOUN_OF[options.kind]}`, status: 400 };
+
+  const before = (project.disconnectedBuiltins ?? []).find((d: any) => d.integrationId === integrationId);
+  const connection: any = {
+    ...result.connection,
+    ...(before && result.connection.source === 'builtin' ? { id: before.connectionId } : {}),
+    ...(options.description ? { description: options.description } : {}),
+  };
+  const Project = getModel('projects');
+  await Project.update({ _id: projectId }, { $push: { [LIST_OF[result.kind]]: connection } });
+  // By integrationId alone: a SQL project's $pull matches one key.
+  if (before) await Project.update({ _id: projectId }, { $pull: { disconnectedBuiltins: { integrationId } } });
+  return { kind: result.kind, connection } as ClassifyResult;
+}
