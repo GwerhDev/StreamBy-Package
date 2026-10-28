@@ -134,7 +134,7 @@ hash is stored, with a short prefix to tell it apart.
 | Exports | `exports:read`, `exports:write` | The project's exports. |
 | Rights | `rights:read`, `rights:write` | Assets' rights. |
 | Jobs | `jobs:read`, `jobs:run` | Following jobs; starting them (transcoding, rendering, AI, publishing a deliverable). |
-| Documents | `docs:read`, `docs:write`, `docs:delete` | The project's documents: reading them and their history; creating, editing, moving and publishing them; deleting them. |
+| Documents | `docs:read`, `docs:write`, `docs:publish`, `docs:delete` | The project's documents: reading them and their history; creating, editing and moving them; publishing them (the version its exports deliver, and whether they deliver it); deleting them. |
 | Account | `projects:create` | Creating projects. A user's token only; the token reaches what it creates. |
 
 `PROJECT_PERMISSIONS` and `ACCOUNT_PERMISSIONS` are exported. A route no permission covers
@@ -193,8 +193,9 @@ No scope grants deleting (`*:delete`, `project:delete`) nor managing members. An
 write permissions also reach routes that delete (`project:update` a connection, a worker or an
 integration; `workflow:write` a pipeline; `exports:write` an export), **an app's `DELETE` is
 refused (403) whatever its route**, but taking a deliverable's mark off, which only forgets the
-mark (the asset stays). API tokens aren't affected. Other scopes (`profile`, `email`) grant
-nothing in StreamBy. `OAUTH_SCOPE_PERMISSIONS` is exported.
+mark (the asset stays). Nor does an app publish a document (`POST .../publish`, or a `PATCH`
+changing `exportable`), whatever its scopes: what it edits stays a draft until someone publishes
+it. API tokens aren't affected. Other scopes (`profile`, `email`) grant nothing in StreamBy. `OAUTH_SCOPE_PERMISSIONS` is exported.
 
 **Telling clients where to sign in**
 
@@ -477,14 +478,18 @@ or collections), each one in a single project, in folders.
 | `GET /projects/:projectId/documents`: the tree, without contents | `docs:read` |
 | `POST /projects/:projectId/documents` `{ title, content?, kind?: 'document' \| 'folder', parentId?, position? }` | `docs:write` |
 | `GET /projects/:projectId/documents/:docId` | `docs:read` |
-| `PATCH /projects/:projectId/documents/:docId` `{ baseVersion, title?, content? }` (a new version) and/or `{ parentId?, position?, exportable? }` | `docs:write` |
+| `PATCH /projects/:projectId/documents/:docId` `{ baseVersion, title?, content? }` (a new version) and/or `{ parentId?, position? }` | `docs:write` |
+| `PATCH /projects/:projectId/documents/:docId` `{ exportable }` | `docs:write` and `docs:publish` |
 | `PATCH /projects/:projectId/documents/:docId/sections` `{ baseVersion, heading, content }` | `docs:write` |
 | `GET /projects/:projectId/documents/:docId/versions` and `/versions/:version` | `docs:read` |
-| `POST /projects/:projectId/documents/:docId/publish` `{ version }` (`null`: none) | `docs:write` |
+| `POST /projects/:projectId/documents/:docId/publish` `{ version }` (`null`: none) | `docs:publish` |
 | `DELETE /projects/:projectId/documents/:docId` (a folder, with everything in it) | `docs:delete` |
 
 Editors and admins create, edit, publish and delete them; viewers read them. An app connected
-with OAuth reads and edits them, but deletes none.
+with OAuth reads and edits them, but publishes and deletes none: what it edits stays a draft.
+
+In MongoDB, a save writes the document and its version in a transaction when the server has them
+(a replica set or a sharded cluster). A standalone server doesn't: there they're two writes.
 
 ---
 

@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { MongoClient } from 'mongodb';
+import { ClientSession, MongoClient } from 'mongodb';
 import { getConnection, getConnectedIds } from '../adapters/database/connectionManager';
 import { Auth, DocumentAuthor, DocumentVersion, ProjectDocument, StreamByConfig } from '../types';
 
@@ -142,6 +142,16 @@ const sqlStore = (pool: Pool): DocumentStore => {
 
 // ── MongoDB ──
 
+// A save writes the document and then its version: in a transaction, both or neither, when
+// the server supports them (a replica set or a sharded cluster, as Atlas is). A standalone
+// server doesn't: there they're two writes, and if the version's failed after the document's,
+// the document would be at a version its history lacks.
+let mongoTransactions: boolean | undefined;
+const noTransactions = (err: unknown) => {
+  const { code, message } = (err ?? {}) as { code?: number; message?: string };
+  return code === 20 || /Transaction numbers are only allowed|replica set/i.test(message ?? '');
+};
+
 const mongoStore = (client: MongoClient): DocumentStore => {
   const docs = () => client.db().collection('documents');
   const versions = () => client.db().collection('document_versions');
@@ -149,6 +159,23 @@ const mongoStore = (client: MongoClient): DocumentStore => {
     if (!doc) return null;
     const { _id, ...rest } = doc;
     return rest as T;
+  };
+  const together = async <T>(work: (session?: ClientSession) => Promise<T>): Promise<T> => {
+    if (mongoTransactions !== false && typeof client.startSession === 'function') {
+      const session = client.startSession();
+      try {
+        let result!: T;
+        await session.withTransaction(async () => { result = await work(session); });
+        mongoTransactions = true;
+        return result;
+      } catch (err) {
+        if (!noTransactions(err)) throw err;
+        mongoTransactions = false;
+      } finally {
+        await session.endSession();
+      }
+    }
+    return work();
   };
   return {
     async list(projectId) {
@@ -159,20 +186,24 @@ const mongoStore = (client: MongoClient): DocumentStore => {
       return strip<ProjectDocument>(await docs().findOne({ projectId, id }));
     },
     async create(d) {
-      await docs().insertOne({ ...d });
-      await versions().insertOne({ documentId: d.id, projectId: d.projectId, version: d.version, title: d.title, content: d.content, author: d.createdBy, createdAt: d.createdAt });
-      return d;
+      return together(async session => {
+        await docs().insertOne({ ...d }, { session });
+        await versions().insertOne({ documentId: d.id, projectId: d.projectId, version: d.version, title: d.title, content: d.content, author: d.createdBy, createdAt: d.createdAt }, { session });
+        return d;
+      });
     },
     async save(projectId, id, baseVersion, change, author, at) {
-      // Conditional on the version: of two saves made on the same one, only the first goes through.
-      const saved = strip<ProjectDocument>(await docs().findOneAndUpdate(
-        { projectId, id, version: baseVersion },
-        { $set: { ...change, version: baseVersion + 1, updatedAt: at, updatedBy: author } },
-        { returnDocument: 'after' },
-      ));
-      if (!saved) return null;
-      await versions().insertOne({ documentId: id, projectId, version: saved.version, ...change, author, createdAt: at });
-      return saved;
+      return together(async session => {
+        // Conditional on the version: of two saves made on the same one, only the first goes through.
+        const saved = strip<ProjectDocument>(await docs().findOneAndUpdate(
+          { projectId, id, version: baseVersion },
+          { $set: { ...change, version: baseVersion + 1, updatedAt: at, updatedBy: author } },
+          { returnDocument: 'after', session },
+        ));
+        if (!saved) return null;
+        await versions().insertOne({ documentId: id, projectId, version: saved.version, ...change, author, createdAt: at }, { session });
+        return saved;
+      });
     },
     async update(projectId, id, patch) {
       const $set = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
@@ -188,8 +219,10 @@ const mongoStore = (client: MongoClient): DocumentStore => {
     },
     async remove(projectId, ids) {
       if (!ids.length) return;
-      await versions().deleteMany({ projectId, documentId: { $in: ids } });
-      await docs().deleteMany({ projectId, id: { $in: ids } });
+      await together(async session => {
+        await versions().deleteMany({ projectId, documentId: { $in: ids } }, { session });
+        await docs().deleteMany({ projectId, id: { $in: ids } }, { session });
+      });
     },
     async deleteProject(projectId) {
       await versions().deleteMany({ projectId });

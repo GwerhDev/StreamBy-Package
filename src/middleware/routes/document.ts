@@ -5,6 +5,7 @@ import { getModel } from '../../models/manager';
 import { activeMemberOf, canEditProject, isProjectMember } from '../../utils/auth';
 import { emitToUser } from '../../services/wsHub';
 import { authorOf, documentStore, DocumentSummary, replaceSection, withDescendants } from '../../services/documents';
+import { tokenAllows } from '../../services/auth';
 
 const MAX_TITLE = 200;
 const MAX_CONTENT = 1_000_000;
@@ -162,6 +163,10 @@ export function documentRouter(_config: StreamByConfig): Router {
         place.position = body.position;
       }
       if (body.exportable !== undefined) {
+        // Whether its exports deliver it is publishing it: a token needs docs:publish.
+        if (auth.apiToken && !tokenAllows(auth.apiToken, 'docs:publish')) {
+          return res.status(403).json({ error: "This API token doesn't have the 'docs:publish' permission" });
+        }
         if (typeof body.exportable !== 'boolean') return res.status(400).json({ message: 'exportable is true or false' });
         if (current.kind === 'folder') return res.status(400).json({ message: 'A folder isn\'t exported: its documents are' });
         place.exportable = body.exportable;

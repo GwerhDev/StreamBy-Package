@@ -65,7 +65,11 @@ const authProvider = async (req: any) => {
   if (app) {
     return {
       userId: user, username: user, role: 'viewer' as const,
-      apiToken: { tokenId: `oauth:${app}:${user}`, kind: 'user' as const, permissions: permissionsForOAuthScopes(['streamby:read', 'streamby:write']), projectIds: '*' as const },
+      apiToken: {
+        tokenId: `oauth:${app}:${user}`, kind: 'user' as const, projectIds: '*' as const,
+        // 'x-test-oauth-grants': what a scope might grant some day, beyond today's.
+        permissions: [...permissionsForOAuthScopes(['streamby:read', 'streamby:write']), ...((req.headers['x-test-oauth-grants'] as string | undefined)?.split(',') ?? [])] as any,
+      },
       oauth: { clientId: `dyn_${app}`, clientName: app },
     };
   }
@@ -77,10 +81,11 @@ app.use('/streamby', createStreamByRouter({ storageProviders: [], adapter: {} as
 
 const tokenFor = async (permissions: string[], userId = 'eli') =>
   (await createApiToken({ kind: 'user', userId }, { name: 'agent', permissions: permissions as any, projectIds: ['p1'], expiresInDays: 30 }, { databases: [] } as any)).token;
-const as = (who: { user?: string; token?: string; oauth?: string }) => {
+const as = (who: { user?: string; token?: string; oauth?: string; grants?: string }) => {
   const auth = (r: request.Test) => {
     if (who.token) return r.set('Authorization', `Bearer ${who.token}`);
     r.set('x-test-user', who.user!);
+    if (who.grants) r.set('x-test-oauth-grants', who.grants);
     return who.oauth ? r.set('x-test-oauth', who.oauth) : r;
   };
   return {
@@ -221,6 +226,32 @@ describe('who may do what', () => {
 
     const deleter = as({ token: await tokenFor(['docs:delete']) });
     expect((await deleter.delete(`${D}/${doc.id}`)).status).toBe(200);
+  });
+
+  // Publishing is choosing what the exports deliver: apart from writing.
+  it('a token publishes only with docs:publish, writing being not enough', async () => {
+    const doc = await create({ title: 'Architecture', content: 'v1' });
+    const writer = as({ token: await tokenFor(['docs:read', 'docs:write']) });
+    expect((await writer.post(`${D}/${doc.id}/publish`, { version: 1 })).status).toBe(403);
+    expect((await writer.patch(`${D}/${doc.id}`, { exportable: true })).status).toBe(403);
+    expect((await writer.patch(`${D}/${doc.id}`, { parentId: null })).status).toBe(200); // moving is writing
+
+    const publisher = as({ token: await tokenFor(['docs:read', 'docs:write', 'docs:publish']) });
+    expect((await publisher.patch(`${D}/${doc.id}`, { exportable: true })).body.document.exportable).toBe(true);
+    expect((await publisher.post(`${D}/${doc.id}/publish`, { version: 1 })).body.document.publishedVersion).toBe(1);
+  });
+
+  it("an app connected with OAuth publishes nothing: what it edits stays a draft", async () => {
+    const doc = await create({ title: 'Architecture', content: 'v1' });
+    await claude.patch(`${D}/${doc.id}`, { baseVersion: 1, content: 'by Claude' });
+    expect((await claude.post(`${D}/${doc.id}/publish`, { version: 2 })).status).toBe(403);
+    expect((await claude.patch(`${D}/${doc.id}`, { exportable: true })).status).toBe(403);
+    expect((await eli.get(`${D}/${doc.id}`)).body.document).toMatchObject({ exportable: false, publishedVersion: null });
+
+    // Not even if a scope granted docs:publish some day.
+    const granted = as({ user: 'eli', oauth: 'Claude', grants: 'docs:publish' });
+    expect((await granted.post(`${D}/${doc.id}/publish`, { version: 2 })).status).toBe(403);
+    expect((await granted.patch(`${D}/${doc.id}`, { exportable: true })).status).toBe(403);
   });
 
   it('an app connected with OAuth reads and edits them, signs as itself for the user, and deletes none', async () => {

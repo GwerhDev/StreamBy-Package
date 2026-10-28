@@ -53,6 +53,19 @@ const OAUTH_DELETE_ALLOWED = new RegExp(`^/projects/[^/]+/deliverables/[^/]+/?$`
 export const oauthMayDelete = (method: string, path: string): boolean =>
   method.toUpperCase() !== 'DELETE' || OAUTH_DELETE_ALLOWED.test(path);
 
+// Nor does an app publish: what it edits stays a draft until someone publishes it. Publishing
+// is choosing a document's version for its exports (POST .../publish) or whether they deliver
+// it (`exportable`). Refused whatever its scopes grant, as deleting is.
+const DOCUMENT_PUBLISH = /^\/projects\/[^/]+\/documents\/[^/]+\/publish\/?$/;
+const DOCUMENT = /^\/projects\/[^/]+\/documents\/[^/]+\/?$/;
+
+/** Whether a request publishes a document (its version, or whether it's exported). */
+export const publishesDocument = (method: string, path: string, body: unknown): boolean => {
+  const upper = method.toUpperCase();
+  if (upper === 'POST' && DOCUMENT_PUBLISH.test(path)) return true;
+  return upper === 'PATCH' && DOCUMENT.test(path) && typeof body === 'object' && body !== null && 'exportable' in body;
+};
+
 export const enforceApiTokenScope = (req: Request, res: Response, next: NextFunction) => {
   const auth = (req as any).auth as Auth | undefined;
   const scope = auth?.apiToken;
@@ -61,6 +74,9 @@ export const enforceApiTokenScope = (req: Request, res: Response, next: NextFunc
   if (req.path === '/mcp') return next();
   if (auth?.oauth && !oauthMayDelete(req.method, req.path)) {
     return res.status(403).json({ error: 'An app connected with OAuth can\'t delete' });
+  }
+  if (auth?.oauth && publishesDocument(req.method, req.path, req.body)) {
+    return res.status(403).json({ error: 'An app connected with OAuth can\'t publish: what it edits stays a draft' });
   }
 
   const rule = routeRuleFor(req.method, req.path);

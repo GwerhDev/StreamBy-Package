@@ -12,7 +12,7 @@ export const PROJECT_PERMISSIONS = [
   'exports:read', 'exports:write',
   'rights:read', 'rights:write',
   'jobs:read', 'jobs:run',
-  'docs:read', 'docs:write', 'docs:delete',
+  'docs:read', 'docs:write', 'docs:publish', 'docs:delete',
 ] as const;
 
 /** Permissions on the account: only a user's token has them. */
@@ -125,9 +125,12 @@ const RULES = [
   rule('read', `${P}/jobs`, 'jobs:read'),
   rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/publish)`, 'jobs:run'),
 
-  // Documents: writing them is saving a version, moving them or publishing one.
+  // Documents: writing them is saving a version or moving them; publishing one (choosing what
+  // the exports deliver, or whether they deliver it at all) is apart. A PATCH that changes
+  // `exportable` needs docs:publish too (see routes/document).
   rule('read', `${P}/documents(/.+)?`, 'docs:read'),
-  rule('write', `${P}/documents(/[^/]+(/sections|/publish)?)?`, 'docs:write'),
+  rule(['POST'], `${P}/documents/[^/]+/publish`, 'docs:publish'),
+  rule('write', `${P}/documents(/[^/]+(/sections)?)?`, 'docs:write'),
   rule('delete', `${P}/documents/[^/]+`, 'docs:delete'),
 ];
 

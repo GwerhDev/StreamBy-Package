@@ -14,8 +14,13 @@
     section's (`PATCH .../sections`), moving and marking exportable, the history
     (`.../versions[/:version]`), publishing a version (`POST .../publish`) and deleting (a folder
     with everything in it). Deleting a project deletes its documents.
-  - Permissions `docs:read`, `docs:write` and `docs:delete`. The OAuth scopes grant reading
-    (`streamby:read`) and writing (`streamby:write`); an app deletes none.
+  - Permissions `docs:read`, `docs:write`, `docs:publish` and `docs:delete`. Publishing (a
+    version for the exports, or whether they deliver it: `POST .../publish`, `PATCH` with
+    `exportable`) needs `docs:publish`, not `docs:write`. The OAuth scopes grant reading
+    (`streamby:read`) and writing (`streamby:write`); an app publishes and deletes none, whatever
+    its scopes: what it edits stays a draft.
+  - In MongoDB, a save writes the document and its version in a transaction when the server has
+    them (a replica set or a sharded cluster); on a standalone server, two writes.
   - MCP tools `list_documents`, `get_document`, `list_document_versions`, `create_document`,
     `update_document` and `update_document_section`.
   - An export's `documentsNode` delivers the published version of the project's exportable
