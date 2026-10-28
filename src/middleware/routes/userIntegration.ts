@@ -121,7 +121,8 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
   // work without it, so deleting it disconnects them.
   const LISTS = [['dbConnections', 'db'], ['storageConnections', 'storage'], ['integrationConnections', 'service']] as const;
   async function connectionsUsing(integrationId: string) {
-    const projects: any[] = await getModel('projects').find({});
+    // Only the projects using it, asked of the database (not every project, read and filtered).
+    const projects: any[] = await getModel('projects').find({ connectedIntegration: integrationId });
     return projects.flatMap(project => LISTS.flatMap(([list, kind]) => ((project[list] ?? []) as any[])
       .filter(c => c.integrationId === integrationId && c.source !== 'builtin')
       .map(c => ({ projectId: String(project._id ?? project.id), projectName: project.name, kind, list, connectionId: c.id, name: c.name }))));

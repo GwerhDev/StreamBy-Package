@@ -41,4 +41,25 @@ describe('projects in PostgreSQL', () => {
     expect(stored.renderFarmConnections.map((c: any) => c.id)).toEqual(['r1']);
     expect(stored.members.map((m: any) => m.userId)).toEqual(['u1']);
   });
+
+  // Deleting an account's integration disconnects the project connections using it: the
+  // projects are asked for by it, not all read and filtered.
+  it("finds the projects one of whose connections uses an integration, by it", async () => {
+    const Project = getModel('projects');
+    const made = async (suffix: string, lists: Record<string, unknown[]>) => {
+      const created: any = await Project.create({
+        dbType: 'sql', name: `${NAME}${suffix}`, description: '', image: '', allowedOrigin: [], public: false, category: 'film',
+        members: [{ userId: 'u1', username: 'u1', role: 'admin', status: 'active', archived: false }],
+        dbConnections: [], storageConnections: [], integrationConnections: [], ...lists,
+      } as any);
+      return String(created._id ?? created.id);
+    };
+    const usesIt = await made('-db', { dbConnections: [{ id: 'c1', integrationId: 'int-find', source: 'integration' }] });
+    const usesItToo = await made('-svc', { integrationConnections: [{ id: 'c2', integrationId: 'int-find', source: 'integration' }] });
+    await made('-other', { storageConnections: [{ id: 'c3', integrationId: 'int-other', source: 'integration' }] });
+    const found: any[] = await Project.find({ connectedIntegration: 'int-find' });
+    expect(found.map(p => String(p._id ?? p.id)).sort()).toEqual([usesIt, usesItToo].sort());
+    const pool = getConnection('pg-projects').client as Pool;
+    await pool.query('DELETE FROM streamby.projects WHERE name LIKE $1', [`${NAME}-%`]);
+  });
 });

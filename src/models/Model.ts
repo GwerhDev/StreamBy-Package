@@ -50,7 +50,16 @@ export class Model<T extends Document> {
         }
 
         let sqlResults: any[] = [];
-        if (this.tableName === 'projects' && processedFilter.members && processedFilter.members.$elemMatch) {
+        if (this.tableName === 'projects' && typeof processedFilter.connectedIntegration === 'string') {
+          // The projects one of whose connections uses an integration (its id in any of their lists).
+          const schema = this.schema || 'streamby';
+          const has = JSON.stringify([{ integrationId: processedFilter.connectedIntegration }]);
+          const result = await (connection as Pool).query(
+            `SELECT * FROM "${schema}"."projects" WHERE "dbConnections" @> $1::jsonb OR "storageConnections" @> $1::jsonb OR "integrationConnections" @> $1::jsonb`,
+            [has],
+          );
+          sqlResults = result.rows;
+        } else if (this.tableName === 'projects' && processedFilter.members && processedFilter.members.$elemMatch) {
           // Handle members filter for SQL projects
           const userId = processedFilter.members.$elemMatch.userId;
           const schema = this.schema || 'streamby'; // Default to 'streamby' if schema not provided
@@ -90,6 +99,10 @@ export class Model<T extends Document> {
           allResults.push(transformedItem);
         }
       } else if (dbType === 'nosql') {
+        if (this.tableName === 'projects' && typeof processedFilter.connectedIntegration === 'string') {
+          const integrationId = processedFilter.connectedIntegration;
+          processedFilter = { $or: ['dbConnections', 'storageConnections', 'integrationConnections'].map(list => ({ [`${list}.integrationId`]: integrationId })) };
+        }
         const nosqlResults = await nosqlAdapter.find(connection as MongoClient, this.tableName, processedFilter);
         for (const item of nosqlResults) {
           allResults.push(this.transformResult(item));

@@ -8,12 +8,16 @@ import { FakeDb, matches } from './fakeMongo';
 // memory, with $push and $pull as the SQL ones do them: a $pull matching one key).
 const mongo = vi.hoisted(() => ({ db: null as any }));
 const store: Record<string, any[]> = {};
+const finds: any[] = [];
 const matchesRecord = (record: any, filter: any = {}) =>
   Object.entries(filter).every(([k, v]) => (k === '_id' ? record._id === v || record.id === v : record[k] === v));
 const fakeModel = (name: string): any => {
   const rows = () => (store[name] ??= []);
   const model: any = {
-    find: async (filter: any) => rows().filter(r => matchesRecord(r, filter)),
+    // The projects using an integration, as the models ask for them (Model.find's connectedIntegration).
+    find: async (filter: any) => (finds.push(filter), filter?.connectedIntegration
+      ? rows().filter(r => ['dbConnections', 'storageConnections', 'integrationConnections'].some(l => (r[l] ?? []).some((c: any) => c.integrationId === filter.connectedIntegration)))
+      : rows().filter(r => matchesRecord(r, filter))),
     findOne: async (filter: any) => rows().find(r => matchesRecord(r, filter)) ?? null,
     create: async (doc: any) => { rows().push(doc); return doc; },
     delete: async (filter: any) => { const before = rows().length; store[name] = rows().filter(r => !matchesRecord(r, filter)); return before - store[name].length; },
@@ -184,6 +188,9 @@ describe("an account's integration", () => {
 
     const deleted = await eli.delete('/user/integrations/ui-1');
     expect(deleted.body).toMatchObject({ disconnected: 1 });
+    // The projects using it, asked for by it: not every project read.
+    expect(finds.some(f => f?.connectedIntegration === 'ui-1')).toBe(true);
+    expect(finds.some(f => f && !Object.keys(f).length)).toBe(false);
     expect(deleted.body.affected).toEqual([expect.objectContaining({ projectId: 'p1', dbConnections: [expect.objectContaining({ id: 'db-mongo' }), expect.objectContaining({ id: 'db-pg' })] })]);
     expect(project().dbConnections.map((c: any) => c.id)).toEqual(['db-mongo', 'db-pg']);
   });
