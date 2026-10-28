@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.43.0
+
+### Added
+
+- **License metadata of assets**, for crediting the ones taken from others: `sourceUrl`,
+  `creatorName`, `creatorUrl`, `licenseType` and `comments`, all optional, in `asset_rights`.
+  The license is one of a closed list (`LICENSE_TYPES`: CC BY, CC BY-SA, CC BY-ND, CC BY-NC,
+  CC BY-NC-SA, CC BY-NC-ND, CC0, Free Standard, Standard, Editorial), checked by the server; the
+  links are http(s) URLs. It can be given with an upload (query params of `GET .../upload-url`;
+  an API token needs `rights:write` too). An `assetRightsEvent` to the project's active members
+  on each change, and when an asset is deleted.
+- **Credits sheets**: project documents of a new kind, `credits`, that a workflow's Credits sheet
+  node makes (`CREDITS_SHEET_NODE`). One keeps only its sources (assets and Storage folders picked,
+  and the Ingest nodes connected to its node); its rows are made when it's read, from each asset's
+  metadata, with its status: complete when it has an asset and each has its creator, source and
+  license. Routes `GET /projects/:projectId/credits-sheets` and `.../credits-sheets/:docId`
+  (`rights:read`). Types `CreditsSheet`, `SheetRow`, `SheetSources` and `SheetStatus`.
+- MCP: `get_credits_sheet`; `request_asset_upload` takes the license metadata.
+
+### Changed
+
+- **`asset_rights` holds the license metadata only.** `rightsHolder`, `licenseUrl`, `territory`,
+  `expiresAt`, `usageRestrictions` and `notes` are gone: not read, and dropped from a record when
+  it's next saved; a `licenseType` off the list reads as none. `set_asset_rights` and
+  `get_asset_rights` take and give the new fields.
+
+### Fixed
+
+- Deleting an asset or a project deletes its license metadata (it was left behind).
+
 ## 0.42.0
 
 ### Added

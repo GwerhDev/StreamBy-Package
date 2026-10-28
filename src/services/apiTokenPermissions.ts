@@ -99,6 +99,7 @@ const RULES = [
   // Rights.
   rule('read', `${P}/assets/[^/]+/rights`, 'rights:read'),
   rule(['PUT'], `${P}/assets/[^/]+/rights`, 'rights:write'),
+  rule('read', `${P}/credits-sheets(/[^/]+)?`, 'rights:read'),
 
   // Connections (API, database, storage, distribution, workers): the project's settings.
   rule('read', `${P}/(connections|get-connection|distribution-connections|workers)(/.+)?`, 'project:read'),

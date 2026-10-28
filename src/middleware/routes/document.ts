@@ -6,6 +6,7 @@ import { activeMemberOf, canEditProject, isProjectMember } from '../../utils/aut
 import { emitToUser } from '../../services/wsHub';
 import { authorOf, documentStore, DocumentSummary, replaceSection, withDescendants } from '../../services/documents';
 import { tokenAllows } from '../../services/auth';
+import { checkSheetContent } from '../../services/creditsSheets';
 
 const MAX_TITLE = 200;
 const MAX_CONTENT = 1_000_000;
@@ -29,7 +30,8 @@ function checkTitle(value: unknown): string | { error: string } {
   return value.trim();
 }
 
-function checkContent(value: unknown): string | { error: string } {
+function checkContent(value: unknown, kind: DocumentKind = 'document'): string | { error: string } {
+  if (kind === 'credits') return checkSheetContent(value);
   if (typeof value !== 'string') return { error: 'content must be text (markdown)' };
   if (value.length > MAX_CONTENT) return { error: `A document has at most ${MAX_CONTENT} characters` };
   return value;
@@ -82,12 +84,12 @@ export function documentRouter(_config: StreamByConfig): Router {
       const found = await projectFor(req, res, true);
       if (!found) return;
       const { project, auth, projectId } = found;
-      const kind: DocumentKind = req.body?.kind === 'folder' ? 'folder' : 'document';
-      if (req.body?.kind !== undefined && !['document', 'folder'].includes(req.body.kind)) return res.status(400).json({ message: "kind is 'document' or 'folder'" });
+      if (req.body?.kind !== undefined && !['document', 'folder', 'credits'].includes(req.body.kind)) return res.status(400).json({ message: "kind is 'document', 'folder' or 'credits'" });
+      const kind: DocumentKind = req.body?.kind ?? 'document';
       const title = checkTitle(req.body?.title);
       if (failed(title)) return res.status(400).json({ message: title.error });
       if (kind === 'folder' && req.body?.content) return res.status(400).json({ message: 'A folder has no content' });
-      const content = kind === 'folder' ? '' : checkContent(req.body?.content ?? '');
+      const content = kind === 'folder' ? '' : checkContent(req.body?.content ?? '', kind);
       if (failed(content)) return res.status(400).json({ message: content.error });
 
       const store = documentStore();
@@ -148,7 +150,7 @@ export function documentRouter(_config: StreamByConfig): Router {
         const title = body.title === undefined ? current.title : checkTitle(body.title);
         if (failed(title)) return res.status(400).json({ message: title.error });
         if (current.kind === 'folder' && body.content) return res.status(400).json({ message: 'A folder has no content' });
-        const content = body.content === undefined ? current.content : checkContent(body.content);
+        const content = body.content === undefined ? current.content : checkContent(body.content, current.kind);
         if (failed(content)) return res.status(400).json({ message: content.error });
         text = { title, content };
       }
@@ -210,6 +212,7 @@ export function documentRouter(_config: StreamByConfig): Router {
       const current = await store.get(projectId, docId);
       if (!current) return res.status(404).json({ message: 'Document not found' });
       if (current.kind === 'folder') return res.status(400).json({ message: 'A folder has no content' });
+      if (current.kind === 'credits') return res.status(400).json({ message: 'A credits sheet has no sections: its content is its sources' });
       // A section of another version than the one it was read on could be another text.
       if (current.version !== baseVersion) return conflict(res, current);
 

@@ -132,7 +132,7 @@ hash is stored, with a short prefix to tell it apart.
 | Production | `production:read`, `production:write`, `production:delete` | Sequences, shots and tasks. |
 | Workflow | `workflow:read`, `workflow:write` | The workflow and its pipelines. |
 | Exports | `exports:read`, `exports:write` | The project's exports. |
-| Rights | `rights:read`, `rights:write` | Assets' rights. |
+| Rights | `rights:read`, `rights:write` | Assets' license metadata, and reading credits sheets. |
 | Jobs | `jobs:read`, `jobs:run` | Following jobs; starting them (transcoding, rendering, AI, publishing a deliverable). |
 | Documents | `docs:read`, `docs:write`, `docs:publish`, `docs:delete` | The project's documents: reading them and their history; creating, editing and moving them; publishing them (the version its exports deliver, and whether they deliver it); deleting them. |
 | Account | `projects:create` | Creating projects. A user's token only; the token reaches what it creates. |
@@ -285,7 +285,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `list_assets` (by category, optionally in one storage connection, and filtered by name), `get_asset_metadata` | `assets:read` |
 | `update_asset_metadata` | `assets:write` |
 | `delete_asset` | `assets:delete` |
-| `get_asset_rights` / `set_asset_rights` | `rights:read` / `rights:write` |
+| `get_asset_rights`, `get_credits_sheet` / `set_asset_rights` | `rights:read` / `rights:write` |
 | `get_workflow`, `list_pipelines`, `get_pipeline` | `workflow:read` |
 | `create_pipeline`, `update_pipeline` | `workflow:write` |
 | `list_exports` | `project:read` and `exports:read` |
@@ -298,7 +298,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `create_sequence`, `create_shot`, `create_task` | `production:write` and `workflow:write` |
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
-| `request_asset_upload`, `mark_deliverable`, `remove_deliverable` | `assets:write` |
+| `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable` | `assets:write` |
 | `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
 | `create_document`, `update_document`, `update_document_section` | `docs:write` |
 
@@ -476,7 +476,7 @@ or collections), each one in a single project, in folders.
 | Route | Permission |
 |---|---|
 | `GET /projects/:projectId/documents`: the tree, without contents | `docs:read` |
-| `POST /projects/:projectId/documents` `{ title, content?, kind?: 'document' \| 'folder', parentId?, position? }` | `docs:write` |
+| `POST /projects/:projectId/documents` `{ title, content?, kind?: 'document' \| 'folder' \| 'credits', parentId?, position? }` | `docs:write` |
 | `GET /projects/:projectId/documents/:docId` | `docs:read` |
 | `PATCH /projects/:projectId/documents/:docId` `{ baseVersion, title?, content? }` (a new version) and/or `{ parentId?, position? }` | `docs:write` |
 | `PATCH /projects/:projectId/documents/:docId` `{ exportable }` | `docs:write` and `docs:publish` |
@@ -490,6 +490,44 @@ with OAuth reads and edits them, but publishes and deletes none: what it edits s
 
 In MongoDB, a save writes the document and its version in a transaction when the server has them
 (a replica set or a sharded cluster). A standalone server doesn't: there they're two writes.
+
+---
+
+## ©️ License metadata and credits sheets
+
+Each asset can carry its **license metadata**, for all its versions: where it was taken from
+(`sourceUrl`), who made it (`creatorName`, `creatorUrl`), its license (`licenseType`) and
+`comments`. All are optional; the links are http(s) URLs, and the license is one of
+`CC BY`, `CC BY-SA`, `CC BY-ND`, `CC BY-NC`, `CC BY-NC-SA`, `CC BY-NC-ND`, `CC0`, `Free Standard`,
+`Standard` and `Editorial` (`LICENSE_TYPES`, exported). It's kept in the `asset_rights`
+collection, the only place it lives, and goes with its asset or its project when they're deleted.
+It can be given with the upload: `licenseType`, `sourceUrl`, `creatorName`, `creatorUrl` and
+`comments` as query params of `GET .../upload-url` (an API token needs `rights:write` too).
+
+A **credits sheet** is a project document of kind `credits`, made by a Credits sheet node of the
+workflow (its `data.documentId`). It keeps only what feeds it, as its content:
+`{ "assetIds": [...], "folderIds": [...] }` (assets and Storage folders picked, with everything
+inside them); the Ingest nodes connected to its node feed it too, with the asset each imports
+(`data.fileId`). Its rows are made each time it's read, from each asset's metadata, so two sheets
+with the same asset show the same, and editing a row is setting its asset's metadata. Deleting
+the node leaves the document; an asset deleted leaves the sheet.
+
+A sheet is **complete** when it has an asset and each one has its creator, source and license;
+**incomplete** otherwise, each row listing what it lacks (`missing`).
+
+- **In real time**, an `assetRightsEvent` reaches the project's active members on each change:
+  `{ projectId, action: 'saved' | 'deleted', assetIds, rights? }` (`deleted`: the asset is gone).
+
+| Route | Permission |
+|---|---|
+| `GET /projects/:projectId/assets/:assetId/rights` | `rights:read` |
+| `PUT /projects/:projectId/assets/:assetId/rights` `{ sourceUrl?, creatorName?, creatorUrl?, licenseType?, comments? }` (the fields given; empty or `null` clears one) | `rights:write` |
+| `GET /projects/:projectId/credits-sheets`: each with `{ id, title, status, rows, incomplete }` | `rights:read` |
+| `GET /projects/:projectId/credits-sheets/:docId`: `{ document, sources, rows, status }` | `rights:read` |
+
+Each row: `{ assetId, name, category, sourceUrl, creatorName, creatorUrl, licenseType, comments, missing, from }`,
+`from` saying how it got there (`asset`, `folder`, `ingest`). Editors and admins set the metadata
+(as they edit the asset); every member reads it.
 
 ---
 

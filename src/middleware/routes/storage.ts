@@ -13,6 +13,8 @@ import crypto from 'crypto';
 import { signedUrlTtl } from '../../services/signedUrls';
 import { archiveCurrentVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions } from '../../services/assetVersions';
 import { deleteDeliverablesOf } from '../../services/deliverables';
+import { broadcastRights, deleteRightsOf, rightsFromQuery, RightsValues, saveRights } from '../../services/rights';
+import { tokenAllows } from '../../services/auth';
 
 import { StorageCategory, VALID_CATEGORIES, validateContentType } from '../../utils/assetCategories';
 
@@ -121,6 +123,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      const rights = uploadRights(req, res);
+      if (rights === false) return;
 
       if (!adapter.getPresignedUploadUrl) {
         return res.status(501).json({ message: 'Storage adapter does not support presigned uploads' });
@@ -145,6 +149,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         };
         await collection.insertOne(fileDoc);
         await recordFirstVersion(fileDoc);
+        if (rights) await saveRights(project, fileId, rights, auth.userId);
       }
 
       const expiresIn = signedUrlTtl(auth, config, 'upload');
@@ -249,6 +254,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       await deleteAsset(fileDoc, adapter);
       await collection.deleteOne({ fileId, projectId });
+      broadcastRights(project, { action: 'deleted', assetIds: [fileId] });
 
       res.json({ message: 'File deleted successfully' });
     } catch (err: any) {
@@ -367,6 +373,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      const rights = uploadRights(req, res);
+      if (rights === false) return;
 
       const connAdapter = await resolveConnAdapter(connId, project, auth);
       if ('error' in connAdapter) return res.status(connAdapter.status).json({ message: connAdapter.error });
@@ -392,6 +400,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         };
         await collection.insertOne(fileDoc);
         await recordFirstVersion(fileDoc);
+        if (rights) await saveRights(project, fileId, rights, auth.userId);
       }
 
       const expiresIn = signedUrlTtl(auth, config, 'upload');
@@ -554,6 +563,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       await deleteAsset(fileDoc, connAdapter);
       await collection.deleteOne(connFilter(projectId, connId, project, { fileId }));
+      broadcastRights(project, { action: 'deleted', assetIds: [fileId] });
 
       res.json({ message: 'File deleted successfully' });
     } catch (err: any) {
@@ -882,11 +892,27 @@ async function resolveFileUrl(file: any, adapter: StorageAdapter, expiresIn?: nu
 const expiry = (expiresIn: number | undefined) =>
   expiresIn ? { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() } : {};
 
-// An asset's files (every version), its versions and its deliverables. Its record is the
-// caller's to delete.
+// The license metadata given with an upload (licenseType, sourceUrl, creatorName, creatorUrl,
+// comments as query params), checked: null if none, false if it was refused (and answered).
+// An API token sets it only with rights:write.
+function uploadRights(req: Request, res: Response): RightsValues | null | false {
+  const checked = rightsFromQuery(req.query as Record<string, unknown>);
+  if (!checked) return null;
+  const auth = (req as any).auth as Auth;
+  if (auth.apiToken && !tokenAllows(auth.apiToken, 'rights:write')) {
+    res.status(403).json({ error: "This API token doesn't have the 'rights:write' permission" });
+    return false;
+  }
+  if ('error' in checked) { res.status(400).json({ message: checked.error }); return false; }
+  return checked.values;
+}
+
+// An asset's files (every version), its versions, its deliverables and its license metadata.
+// Its record is the caller's to delete.
 async function deleteAsset(fileDoc: any, adapter: StorageAdapter): Promise<void> {
   const keys = await versionStorageKeys(fileDoc.projectId, fileDoc.fileId, fileDoc.storageKey);
   if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key);
   await deleteVersions(fileDoc.projectId, fileDoc.fileId);
   await deleteDeliverablesOf(fileDoc.projectId, { assetId: fileDoc.fileId });
+  await deleteRightsOf(fileDoc.projectId, fileDoc.fileId);
 }

@@ -671,7 +671,9 @@ export interface DocumentAuthor {
   clientName?: string;
 }
 
-export type DocumentKind = 'document' | 'folder';
+// A credits sheet (made by the workflow's Credits sheet node) keeps its sources as its content:
+// its rows are made when it's read (see services/creditsSheets).
+export type DocumentKind = 'document' | 'folder' | 'credits';
 
 /** A project's document as it is now (a folder only groups others: it has no content). */
 export interface ProjectDocument {

@@ -1,5 +1,5 @@
 // A MongoDB database in memory, with what the routes use of it: equality, $in, $exists and
-// $or filters; $set and $pull updates; find with sort and limit.
+// $or filters; $set, $unset and $pull updates (and upserts); find with sort and limit.
 
 type Doc = Record<string, any>;
 
@@ -39,10 +39,15 @@ export class FakeCollection {
 
   async insertOne(doc: Doc) { this.docs.push({ ...doc }); return { insertedId: doc._id }; }
 
-  async updateOne(filter: Doc, update: Doc) {
-    const doc = this.docs.find(d => matches(d, filter));
+  async updateOne(filter: Doc, update: Doc, options: { upsert?: boolean } = {}) {
+    let doc = this.docs.find(d => matches(d, filter));
+    if (!doc && options.upsert) {
+      doc = Object.fromEntries(Object.entries(filter).filter(([k, v]) => !k.startsWith('$') && (typeof v !== 'object' || v === null)));
+      this.docs.push(doc);
+    }
     if (!doc) return { matchedCount: 0, modifiedCount: 0 };
     if (update.$set) Object.assign(doc, update.$set);
+    for (const key of Object.keys(update.$unset ?? {})) delete doc[key];
     for (const [key, cond] of Object.entries(update.$pull ?? {})) {
       doc[key] = (doc[key] ?? []).filter((item: Doc) => !matches(item, cond as Doc));
     }

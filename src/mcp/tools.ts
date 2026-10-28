@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ApiTokenPermission } from '../services/apiTokenPermissions';
 import type { WorkflowNodeRequirement } from './workflowNodes';
+import { LICENSE_TYPES } from '../services/rights';
 
 // The MCP server's tools. Each one is a call to StreamBy's own REST API, made with the
 // caller's API token: it reaches exactly what the token does (and, for a user's token, its
@@ -60,14 +61,13 @@ const taskFields = {
   dueDate: z.string().optional().describe('An ISO 8601 date'),
   notes: z.string().optional(),
 };
+// An asset's license metadata: what crediting it takes. Each is optional; an empty one clears it.
 const rightsFields = {
-  rightsHolder: z.string().optional(),
-  licenseType: z.string().optional().describe('e.g. CC0, CC BY 4.0, proprietary'),
-  licenseUrl: z.string().optional(),
-  territory: z.string().optional(),
-  expiresAt: z.string().optional().describe('An ISO 8601 date'),
-  usageRestrictions: z.string().optional(),
-  notes: z.string().optional(),
+  sourceUrl: z.string().optional().describe('Where the asset was taken from (an http(s) URL)'),
+  creatorName: z.string().optional().describe('Who made it'),
+  creatorUrl: z.string().optional().describe("The creator's page (an http(s) URL)"),
+  licenseType: z.enum(LICENSE_TYPES).or(z.literal('')).optional().describe('Its license'),
+  comments: z.string().optional(),
 };
 
 // Only the fields given (an unset optional field isn't sent as undefined).
@@ -123,7 +123,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'get_asset_rights', title: "Get an asset's rights", permissions: ['rights:read'],
-    description: "An asset's rights: holder, license, territory, expiry and restrictions.",
+    description: "An asset's license metadata: where it was taken from, its creator (name and link), its license and comments; null if it has none.",
     input: { projectId, assetId: id('asset') },
     projectOf: byProject,
     call: ({ projectId, assetId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/rights` }),
@@ -202,7 +202,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'set_asset_rights', title: "Set an asset's rights", permissions: ['rights:write'], write: true,
-    description: "Sets an asset's rights: holder, license, territory, expiry, restrictions and notes. They show in the file's Rights tab, in Storage.",
+    description: `Sets an asset's license metadata (the fields given; an empty one clears it): where it was taken from, its creator (name and link), its license (one of: ${LICENSE_TYPES.join(', ')}) and comments. It shows in the file's Rights tab, in Storage, and in every credits sheet the asset is in.`,
     input: { projectId, assetId: id('asset'), ...rightsFields },
     projectOf: byProject,
     call: ({ projectId, assetId, ...rights }) => ({ method: 'PUT', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/rights`, body: defined(rights) }),
@@ -284,6 +284,7 @@ export const TOOLS = [
       "It doesn't upload anything: the file is sent by the tool that has it (for example Blender's MCP, running Python), with an HTTP PUT of its bytes to `upload.url` and the `upload.headers` given, before `expiresAt`.",
       "The URL works for that file only. A new version keeps the asset's URL (it replaces what it serves); the earlier ones are archived and can still be downloaded.",
       "Categories: images, audios, videos, 3d-models (.glb, .gltf, .obj, .fbx, .stl, .ply); contentType must match it.",
+      "For a new asset taken from someone else (a CC model, a stock image), give its license metadata too, so it's credited (it needs the rights:write permission); for a new version, set_asset_rights changes it.",
     ].join(' '),
     input: {
       projectId,
@@ -292,10 +293,14 @@ export const TOOLS = [
       contentType: z.string().min(1).describe('Its MIME type (e.g. model/gltf-binary, image/png, video/mp4)'),
       assetId: z.string().optional().describe('An existing asset to upload a new version of; a new asset if not given'),
       connectionId: z.string().optional().describe("A storage connection to store it in; the project's built-in storage if not given"),
+      ...rightsFields,
     },
     projectOf: byProject,
-    call: ({ projectId, category, fileName, contentType, assetId, connectionId }) => {
-      const query = new URLSearchParams({ fileName, contentType, ...(connectionId && !assetId ? { category } : {}) });
+    call: ({ projectId, category, fileName, contentType, assetId, connectionId, ...rights }) => {
+      const query = new URLSearchParams({
+        fileName, contentType, ...(connectionId && !assetId ? { category } : {}),
+        ...(assetId ? {} : defined(rights) as Record<string, string>),
+      });
       const files = connectionId ? `/projects/${enc(projectId)}/connections/storage/${enc(connectionId)}` : `/projects/${enc(projectId)}/storage`;
       const path = assetId
         ? `${files}/files/${enc(assetId)}/replace-url`
@@ -397,6 +402,16 @@ export const TOOLS = [
     projectOf: byProject,
     call: ({ projectId, jobId }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/jobs/${enc(jobId)}/retry` }),
     pick: (data) => data?.job,
+  }),
+
+  // ── Credits sheets ──
+  tool({
+    name: 'get_credits_sheet', title: 'Read a credits sheet', permissions: ['rights:read'],
+    description: "A credits sheet (a document of kind 'credits', made by a Credits sheet node of the workflow; list_documents lists them): a row per asset fed to it (picked on it, in a Storage folder picked, or imported by an Ingest node connected to it) with that asset's license metadata as it is now, and its status: 'complete' when it has an asset and each has its creator, source and license; 'incomplete' otherwise, each row listing what it lacks (`missing`). To fill a row in, set_asset_rights on its asset.",
+    input: { projectId, documentId: id('credits sheet') },
+    projectOf: byProject,
+    call: ({ projectId, documentId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/credits-sheets/${enc(documentId)}` }),
+    pick: (data) => data && { id: data.document?.id, title: data.document?.title, status: data.status, rows: data.rows },
   }),
 
   // ── Documents ──
