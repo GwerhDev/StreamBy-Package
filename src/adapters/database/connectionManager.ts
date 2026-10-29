@@ -125,6 +125,7 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
         archived     BOOLEAN NOT NULL DEFAULT FALSE,
         "archivedBy" VARCHAR(255),
         "archivedAt" TIMESTAMP WITH TIME ZONE,
+        "invitedBy"  VARCHAR(255),
         "createdAt"  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         "updatedAt"  TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         UNIQUE ("projectId", "userId")
@@ -133,6 +134,8 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
 
     await pool.query(`
       ALTER TABLE streamby.project_members ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'active';
+      -- Who invited a pending member (or the member, asking to join): told when it's answered.
+      ALTER TABLE streamby.project_members ADD COLUMN IF NOT EXISTS "invitedBy" VARCHAR(255);
     `);
     console.log('✅ "project_members" table ensured to exist.');
 

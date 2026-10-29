@@ -94,6 +94,7 @@ export class Model<T extends Document> {
               role: member.role,
               status: member.status,
               archived: member.archived,
+              ...(member.invitedBy ? { invitedBy: member.invitedBy } : {}),
             }));
           }
           allResults.push(transformedItem);
@@ -153,6 +154,7 @@ export class Model<T extends Document> {
               role: member.role,
               status: member.status,
               archived: member.archived,
+              ...(member.invitedBy ? { invitedBy: member.invitedBy } : {}),
             }));
           }
           // Track which connection found this record so update() routes correctly

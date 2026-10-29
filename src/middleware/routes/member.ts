@@ -191,15 +191,24 @@ export function memberRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Invitation is no longer pending' });
       }
 
-      const updatedMembers = project.members.map((m: any) =>
-        m.userId?.toString() === targetUserId ? { ...m, status: 'active' } : m
-      );
-      await Project.update({ _id: projectId }, { members: updatedMembers });
+      if (project.dbType === 'sql') {
+        // A SQL project's members are rows of project_members, not a field of the project.
+        const connection = getSqlConnection();
+        if (!connection) {
+          return res.status(503).json({ message: 'SQL connection not available' });
+        }
+        await sqlAdapter.update(connection as any, 'project_members', { projectId, userId: targetUserId }, { status: 'active' }, 'streamby');
+      } else {
+        const updatedMembers = project.members.map((m: any) =>
+          m.userId?.toString() === targetUserId ? { ...m, status: 'active' } : m
+        );
+        await Project.update({ _id: projectId }, { members: updatedMembers });
+      }
 
       await createNotification(
         member.invitedBy,
         'member_accepted',
-        `${member.username} aceptó la invitación al proyecto "${project.name}"`,
+        `${member.username ?? auth.username} aceptó la invitación al proyecto "${project.name}"`,
         { projectId, userId: targetUserId },
       );
 
@@ -231,12 +240,20 @@ export function memberRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Invitation is no longer pending' });
       }
 
-      await Project.update({ _id: projectId }, { $pull: { members: { userId: targetUserId } } });
+      if (project.dbType === 'sql') {
+        const connection = getSqlConnection();
+        if (!connection) {
+          return res.status(503).json({ message: 'SQL connection not available' });
+        }
+        await sqlAdapter.delete(connection as any, 'project_members', { projectId, userId: targetUserId }, 'streamby');
+      } else {
+        await Project.update({ _id: projectId }, { $pull: { members: { userId: targetUserId } } });
+      }
 
       await createNotification(
         member.invitedBy,
         'member_rejected',
-        `${member.username} rechazó la invitación al proyecto "${project.name}"`,
+        `${member.username ?? auth.username} rechazó la invitación al proyecto "${project.name}"`,
         { projectId, userId: targetUserId },
       );
 

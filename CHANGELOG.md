@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.43.1
+
+### Fixed
+
+- **Inviting a member to a SQL project, or asking to join one, answered 500**: both write who
+  invited the member (`invitedBy`), a column `streamby.project_members` didn't have. It's added
+  at startup to existing tables, and is in the table made new.
+- **Accepting or rejecting an invitation to a SQL project failed too**: they changed the project's
+  `members` as a MongoDB project has them, a field a SQL project doesn't have (its members are
+  rows of `project_members`); they change the member's row now. A SQL project's members are read
+  with `invitedBy`, so whoever invited them is told the answer.
+
 ## 0.43.0
 
 ### Added
