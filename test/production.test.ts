@@ -114,6 +114,23 @@ describe('editing', () => {
     expect((await ada.patch(`${P}/sequences/${seq.id}`, { name: '' })).status).toBe(400);
   });
 
+  it("lists a sequence's shots with how their tasks go: done of total, and the top open priority", async () => {
+    const seq = await sequence();
+    const a = await shot(seq.id, { name: 'SH010' });
+    await shot(seq.id, { name: 'SH020' });
+    await task(a.id, { priority: 'low' });
+    await task(a.id, { priority: 'medium' });
+    await task(a.id, { priority: 'high', status: 'done' });
+    const other = await shot((await sequence('Chase')).id);
+    await task(other.id, { priority: 'high' });
+
+    const { shots } = (await ada.get(`${P}/sequences/${seq.id}/shots`)).body;
+    expect(shots.map((sh: any) => [sh.name, sh.taskSummary])).toEqual([
+      ['SH010', { done: 1, total: 3, priority: 'medium' }],
+      ['SH020', { done: 0, total: 0, priority: null }],
+    ]);
+  });
+
   it("changes a shot's name, description, due date and assignees", async () => {
     const sh = await shot((await sequence()).id);
     const res = await ada.patch(`${P}/shots/${sh.id}`, { name: 'SH011', description: 'Wide', dueDate: '2026-12-01', assignedTo: ['eli'] });

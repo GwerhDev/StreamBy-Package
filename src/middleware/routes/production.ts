@@ -18,6 +18,15 @@ function getDb() {
 const SHOT_FIELDS = ['name', 'description', 'status', 'assignees', 'assetId', 'exportId', 'dueDate', 'order'] as const;
 const TASK_FIELDS = ['name', 'status', 'priority', 'assignee', 'dueDate', 'notes'] as const;
 
+const PRIORITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3 };
+
+const summaryOf = (tasks: { status?: string; priority?: string }[]) => {
+  const open = tasks.filter(t => t.status !== 'done');
+  const priority = open.reduce<string | null>((top, t) =>
+    (t.priority && (PRIORITY_RANK[t.priority] ?? 0) > (top ? PRIORITY_RANK[top] : 0) ? t.priority : top), null);
+  return { done: tasks.length - open.length, total: tasks.length, priority };
+};
+
 export function productionRouter(_config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
@@ -151,7 +160,15 @@ export function productionRouter(_config: StreamByConfig): Router {
         .sort({ order: 1, createdAt: 1 })
         .toArray();
 
-      res.json({ shots });
+      // Each shot with how its tasks go, as a board's card shows it: how many are done of how
+      // many, and the highest priority among those still open.
+      const tasks = shots.length
+        ? await db.collection('production_tasks')
+          .find({ projectId, shotId: { $in: shots.map(sh => sh.id) } })
+          .project({ shotId: 1, status: 1, priority: 1 })
+          .toArray()
+        : [];
+      res.json({ shots: shots.map(sh => ({ ...sh, taskSummary: summaryOf(tasks.filter(t => t.shotId === sh.id)) })) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
