@@ -59,26 +59,6 @@ export class Model<T extends Document> {
             [has],
           );
           sqlResults = result.rows;
-        } else if (this.tableName === 'projects' && processedFilter.members && processedFilter.members.$elemMatch) {
-          // Handle members filter for SQL projects
-          const userId = processedFilter.members.$elemMatch.userId;
-          const schema = this.schema || 'streamby'; // Default to 'streamby' if schema not provided
-          const query = `
-            SELECT p.*, pm."userId" as memberUserId, pm.role as memberRole, pm.status as memberStatus, pm.archived as memberArchived
-            FROM "${schema}"."projects" p
-            JOIN "${schema}"."project_members" pm ON p.id = pm."projectId"
-            WHERE pm."userId" = $1
-          `;
-          const result = await (connection as Pool).query(query, [userId]);
-          sqlResults = result.rows.map(row => ({
-            ...row,
-            members: [{
-              userId: row.memberUserId,
-              role: row.memberRole,
-              status: row.memberStatus,
-              archived: row.memberArchived,
-            }]
-          }));
         } else {
           // General SQL find
           sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter, this.schema);
@@ -87,7 +67,7 @@ export class Model<T extends Document> {
         for (const item of sqlResults) {
           const transformedItem = this.transformResult(item);
           if (this.tableName === 'projects' && !transformedItem.members) {
-            // For projects, if members not already populated by join, fetch from project_members table
+            // A SQL project's members are rows of project_members, read with it
             const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id }, this.schema);
             (transformedItem as any).members = projectMembers.map((member: any) => ({
               userId: member.userId,
