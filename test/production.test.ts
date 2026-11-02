@@ -189,8 +189,9 @@ describe('deleting', () => {
   });
 });
 
-it('a project says whether it has production data', async () => {
-  expect((await ada.get('/projects/p1')).body.project.hasProductionData).toBe(false);
+it("a project's answer says nothing of its production data", async () => {
   await sequence();
-  expect((await ada.get('/projects/p1')).body.project.hasProductionData).toBe(true);
+  const { project } = (await ada.get('/projects/p1')).body;
+  expect(project.id).toBe('p1');
+  expect(project).not.toHaveProperty('hasProductionData');
 });

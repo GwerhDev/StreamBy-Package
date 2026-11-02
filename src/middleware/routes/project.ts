@@ -10,7 +10,6 @@ import { classifyIntegrationId, connectIntegration } from '../../services/projec
 import { rememberDisconnectedBuiltin } from './projectResources';
 import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
-import { nosqlDb } from '../../utils/nosqlDb';
 import { deleteProductionData } from '../../services/production';
 import { jobStore } from '../../services/jobStore';
 import { documentStore } from '../../services/documents';
@@ -216,10 +215,7 @@ export function projectRouter(config: StreamByConfig): Router {
       const exports = exportSummaries(project.exports);
 
       const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, connections: project.connections || [], exports });
-      // Whether it has production data, for its Production section to show even without a
-      // production node in its workflow.
-      const hasProductionData = !!(await nosqlDb()?.collection('production_sequences').findOne({ projectId }));
-      res.json({ project: { ...sanitized, hasProductionData }, message: 'Project fetched successfully' });
+      res.json({ project: sanitized, message: 'Project fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch project', details: err.message });
     }

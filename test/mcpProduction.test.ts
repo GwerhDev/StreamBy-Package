@@ -80,66 +80,51 @@ const connect = async (token: string) => {
   return client;
 };
 const call = (client: Client, name: string, args: object) => client.callTool({ name, arguments: args as any }) as Promise<any>;
-const nodesOf = () => store.projects[0].workflow?.nodeSchema?.nodes ?? [];
-const WRITER = ['production:write', 'workflow:write'];
+const PRODUCER = ['production:write'];
 
-describe('production through the workflow', () => {
-  it('the tools that make production data need workflow:write too', async () => {
-    const names = (await (await connect(await tokenFor(['production:write', 'production:read']))).listTools()).tools.map(t => t.name);
-    expect(names).not.toContain('create_sequence');
-    expect(names).not.toContain('create_shot');
-    expect(names).toContain('update_shot');
-    expect((await (await connect(await tokenFor(WRITER))).listTools()).tools.map(t => t.name)).toEqual(expect.arrayContaining(['create_sequence', 'create_shot', 'create_task']));
+describe('production through MCP', () => {
+  it('the tools that make production data need only production:write', async () => {
+    const { tools } = await (await connect(await tokenFor(PRODUCER))).listTools();
+    const names = tools.map(t => t.name);
+    expect(names).toEqual(expect.arrayContaining(['create_sequence', 'create_shot', 'create_task']));
+    expect(names).not.toContain('create_pipeline');
+    for (const name of ['create_sequence', 'create_shot', 'create_task']) {
+      expect(tools.find(t => t.name === name)!.description).not.toMatch(/workflow|node/i);
+    }
   });
 
-  it('a sequence in a project without a production node adds a Shot node first, as the UI does', async () => {
-    const client = await connect(await tokenFor(WRITER));
-    const result = await call(client, 'create_sequence', { projectId: 'p1', name: 'Opening' });
-    expect(result.isError).toBeFalsy();
-    // Beside the orchestrator, there in every workflow.
-    expect(nodesOf()).toEqual([expect.objectContaining({ id: 'streamby', type: 'orchestratorNode' }), expect.objectContaining({
-      type: 'shotNode', id: expect.stringMatching(/^shotNode-/), data: expect.objectContaining({ label: 'Shot', subtitle: 'Raw video clip' }),
-    })]);
-    expect(mongo.db.docs('production_sequences').map((s: any) => s.name)).toEqual(['Opening']);
+  const make = async (client: Client) => {
+    const sequence = await call(client, 'create_sequence', { projectId: 'p1', name: 'Opening' });
+    expect(sequence.isError).toBeFalsy();
+    const seqId = mongo.db.docs('production_sequences')[0].id;
+    expect((await call(client, 'create_shot', { projectId: 'p1', sequenceId: seqId, name: 'SH010' })).isError).toBeFalsy();
+    const shotId = mongo.db.docs('production_shots')[0].id;
+    expect((await call(client, 'create_task', { projectId: 'p1', shotId, name: 'Layout' })).isError).toBeFalsy();
+    expect(mongo.db.docs('production_tasks').map((t: any) => t.name)).toEqual(['Layout']);
+  };
 
-    // Once it's there, nothing more is added.
-    await call(client, 'create_sequence', { projectId: 'p1', name: 'Chase' });
-    expect(nodesOf()).toHaveLength(2);
+  it("a sequence, a shot and a task leave a project that has no workflow yet without one", async () => {
+    await make(await connect(await tokenFor(PRODUCER)));
+    expect(store.projects[0].workflow).toBeUndefined();
   });
 
-  it("keeps the workflow's other nodes and edges", async () => {
-    const schema = {
-      nodes: [{ id: 'streamby', type: 'orchestratorNode' }, { id: 'pipeline-x', type: 'pipelineRefNode' }],
-      edges: [{ id: 'e-streamby-pipeline-x', source: 'streamby', target: 'pipeline-x' }],
+  it('a sequence, a shot and a task leave a saved workflow exactly as it was', async () => {
+    const workflow = {
+      id: 'w1', name: 'Workflow', updatedAt: '2026-10-28T10:00:00.000Z', resourceNodesAt: '2026-10-28T10:00:00.000Z',
+      nodeSchema: {
+        nodes: [{ id: 'streamby', type: 'orchestratorNode' }, { id: 'pipeline-x', type: 'pipelineRefNode' }],
+        edges: [{ id: 'e-streamby-pipeline-x', source: 'streamby', target: 'pipeline-x' }],
+      },
     };
-    store.projects[0].workflow = { id: 'w1', name: 'Workflow', nodeSchema: schema };
-    await call(await connect(await tokenFor(WRITER)), 'create_sequence', { projectId: 'p1', name: 'Opening' });
-    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode', 'pipelineRefNode', 'shotNode']);
-    expect(store.projects[0].workflow.nodeSchema.edges).toEqual(schema.edges);
+    store.projects[0].workflow = JSON.parse(JSON.stringify(workflow));
+    await make(await connect(await tokenFor(PRODUCER)));
+    expect(store.projects[0].workflow).toEqual(workflow);
   });
 
-  it('counts any production node (an Assembly, a Master) as one', async () => {
-    store.projects[0].workflow = { id: 'w1', name: 'Workflow', nodeSchema: { nodes: [{ id: 'a', type: 'assemblyNode' }], edges: [] } };
-    await call(await connect(await tokenFor(WRITER)), 'create_sequence', { projectId: 'p1', name: 'Opening' });
-    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode', 'assemblyNode']);
-  });
-
-  it("makes nothing when the node can't be added, and says why", async () => {
-    // Vic is a viewer: the workflow refuses them, and so nothing is made.
-    const result = await call(await connect(await tokenFor(WRITER, 'vic')), 'create_sequence', { projectId: 'p1', name: 'Opening' });
+  it("a viewer's token makes nothing, and says why", async () => {
+    const result = await call(await connect(await tokenFor(PRODUCER, 'vic')), 'create_sequence', { projectId: 'p1', name: 'Opening' });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Couldn't add a production node/);
-    // Read, it's brought to define the project (its orchestrator), but no node was added.
-    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode']);
     expect(mongo.db.docs('production_sequences')).toEqual([]);
     expect(store.mcp_audit.at(-1)).toMatchObject({ tool: 'create_sequence', ok: false, projectId: 'p1' });
-  });
-
-  it('a shot and a task add the node too, for production data made before it', async () => {
-    mongo.db.collection('production_sequences').docs.push({ id: 'q1', projectId: 'p1', name: 'Old' });
-    const client = await connect(await tokenFor(WRITER));
-    const shot = await call(client, 'create_shot', { projectId: 'p1', sequenceId: 'q1', name: 'SH010' });
-    expect(shot.isError).toBeFalsy();
-    expect(nodesOf().map((n: any) => n.type)).toEqual(['orchestratorNode', 'shotNode']);
   });
 });

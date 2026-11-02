@@ -295,18 +295,16 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `process_asset`, `retry_job` | `jobs:run` |
 | `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
-| `create_sequence`, `create_shot`, `create_task` | `production:write` and `workflow:write` |
+| `create_sequence`, `create_shot`, `create_task` | `production:write` |
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
 | `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable` | `assets:write` |
 | `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
 | `create_document`, `update_document`, `update_document_section` | `docs:write` |
 
-The tools take the path a user does in the UI, and each one's description says where its
-result shows there. Production data lives under a production node of the project's workflow:
-if the workflow has none yet, `create_sequence`, `create_shot` and `create_task` first add a
-Shot node to it, as dropping one on the canvas does (so they need `workflow:write`), and make
-nothing if it can't be added.
+Each tool's description says where its result shows in the UI. Production data isn't part of
+the workflow: `create_sequence`, `create_shot` and `create_task` leave it as it is, and what
+they make shows in the Production section of the project's dashboard.
 
 The tools that delete are marked as destructive (`destructiveHint`), so a client can ask before
 running them.

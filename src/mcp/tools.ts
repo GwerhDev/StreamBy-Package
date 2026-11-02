@@ -1,13 +1,11 @@
 import { z } from 'zod';
 import { ApiTokenPermission } from '../services/apiTokenPermissions';
-import type { WorkflowNodeRequirement } from './workflowNodes';
 import { LICENSE_TYPES } from '../services/rights';
 
 // The MCP server's tools. Each one is a call to StreamBy's own REST API, made with the
 // caller's API token: it reaches exactly what the token does (and, for a user's token, its
-// owner's role in each project), and a change is saved just as one made from the UI. A tool
-// takes the same path a user does: what depends on a workflow node gets that node first, and
-// each description says where its result shows in the UI.
+// owner's role in each project), and a change is saved just as one made from the UI. Each
+// description says where its result shows in the UI.
 
 export interface ToolCall {
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -24,8 +22,6 @@ export interface ToolDefinition<S extends z.ZodRawShape = z.ZodRawShape> {
   // It changes something (it isn't only a read); and whether what it does can't be undone.
   write?: boolean;
   destructive?: boolean;
-  // A node the project's workflow needs before this is made (see workflowNodes).
-  workflowNode?: WorkflowNodeRequirement;
   input: S;
   // The project it acts on, when it acts on one (for the audit log).
   projectOf?: (args: z.infer<z.ZodObject<S>>) => string | undefined;
@@ -222,8 +218,8 @@ export const TOOLS = [
     call: ({ projectId, pipelineId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/pipelines/${enc(pipelineId)}`, body: defined(fields) }),
   }),
   tool({
-    name: 'create_sequence', title: 'Create a production sequence', permissions: ['production:write', 'workflow:write'], write: true, workflowNode: 'production',
-    description: "Creates a production sequence in a project, shown in its Production board. If the project's workflow has no production node yet, it first adds one (a Shot node, as dropping it on the canvas does), so the project's Production section shows it: that's why it also needs workflow:write.",
+    name: 'create_sequence', title: 'Create a production sequence', permissions: ['production:write'], write: true,
+    description: "Creates a production sequence in a project, shown in its Production board (a section of its dashboard).",
     input: { projectId, name: z.string().min(1), description: z.string().optional(), order: z.number().optional() },
     projectOf: byProject,
     call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/production/sequences`, body: defined(fields) }),
@@ -236,8 +232,8 @@ export const TOOLS = [
     call: ({ projectId, sequenceId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/production/sequences/${enc(sequenceId)}`, body: defined(fields) }),
   }),
   tool({
-    name: 'create_shot', title: 'Create a shot', permissions: ['production:write', 'workflow:write'], write: true, workflowNode: 'production',
-    description: "Creates a shot in a production sequence, shown in its Production board. If the project's workflow has no production node yet, it first adds one (a Shot node, as dropping it on the canvas does), so the project's Production section shows it: that's why it also needs workflow:write.",
+    name: 'create_shot', title: 'Create a shot', permissions: ['production:write'], write: true,
+    description: "Creates a shot in a production sequence, shown as a card in its Production board (a section of its dashboard).",
     input: { projectId, sequenceId: id('sequence'), name: z.string().min(1), ...shotFields },
     projectOf: byProject,
     call: ({ projectId, sequenceId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/production/sequences/${enc(sequenceId)}/shots`, body: defined(fields) }),
@@ -250,8 +246,8 @@ export const TOOLS = [
     call: ({ projectId, shotId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/production/shots/${enc(shotId)}`, body: defined(fields) }),
   }),
   tool({
-    name: 'create_task', title: 'Create a shot task', permissions: ['production:write', 'workflow:write'], write: true, workflowNode: 'production',
-    description: "Creates a task in a shot, shown in the shot's panel in the Production board. If the project's workflow has no production node yet, it first adds one (a Shot node, as dropping it on the canvas does), so the project's Production section shows it: that's why it also needs workflow:write.",
+    name: 'create_task', title: 'Create a shot task', permissions: ['production:write'], write: true,
+    description: "Creates a task in a shot, shown in the shot's card in the Production board (a section of its dashboard).",
     input: { projectId, shotId: id('shot'), name: z.string().min(1), ...taskFields },
     projectOf: byProject,
     call: ({ projectId, shotId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/production/shots/${enc(shotId)}/tasks`, body: defined(fields) }),
@@ -341,7 +337,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'mark_deliverable', title: 'Mark a deliverable', permissions: ['assets:write'], write: true,
-    description: "Marks an asset (or one of its versions) as a deliverable of a production shot or of an export. It shows in the shot's panel in the Production board, or in the export's Deliverables tab. Give shotId or exportId, one of them. Upload the file first (request_asset_upload).",
+    description: "Marks an asset (or one of its versions) as a deliverable of a production shot or of an export. It shows in the shot's card in the Production board, or in the export's Deliverables tab. Give shotId or exportId, one of them. Upload the file first (request_asset_upload).",
     input: {
       projectId,
       assetId: id('asset'),
