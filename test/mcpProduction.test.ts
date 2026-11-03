@@ -121,6 +121,26 @@ describe('production through MCP', () => {
     expect(store.projects[0].workflow).toEqual(workflow);
   });
 
+  it('assigns people and teams to a shot and a task', async () => {
+    mongo.db.collection('project_teams').docs.push({ id: 'team-a', projectId: 'p1', name: 'Animation', memberIds: ['vic'] });
+    const client = await connect(await tokenFor(PRODUCER));
+    await call(client, 'create_sequence', { projectId: 'p1', name: 'Opening' });
+    const sequenceId = mongo.db.docs('production_sequences')[0].id;
+    const shot = await call(client, 'create_shot', { projectId: 'p1', sequenceId, name: 'SH010', assignedTo: ['eli', 'vic'], teamIds: ['team-a'] });
+    expect(shot.isError).toBeFalsy();
+    const shotId = mongo.db.docs('production_shots')[0].id;
+    expect(mongo.db.docs('production_shots')[0]).toMatchObject({ assignedTo: ['eli', 'vic'], teamIds: ['team-a'] });
+
+    expect((await call(client, 'create_task', { projectId: 'p1', shotId, name: 'Layout', assignedTo: ['eli'], teamIds: ['team-a'] })).isError).toBeFalsy();
+    const taskId = mongo.db.docs('production_tasks')[0].id;
+    expect((await call(client, 'update_task', { projectId: 'p1', shotId, taskId, assignedTo: ['eli', 'vic'], teamIds: [] })).isError).toBeFalsy();
+    expect(mongo.db.docs('production_tasks')[0]).toMatchObject({ assignedTo: ['eli', 'vic'], teamIds: [] });
+
+    const refused = await call(client, 'update_shot', { projectId: 'p1', shotId, teamIds: ['not-a-team'] });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/teams of the project/);
+  });
+
   it("a viewer's token makes nothing, and says why", async () => {
     const result = await call(await connect(await tokenFor(PRODUCER, 'vic')), 'create_sequence', { projectId: 'p1', name: 'Opening' });
     expect(result.isError).toBe(true);

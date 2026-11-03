@@ -102,7 +102,73 @@ describe('creating', () => {
     const sh = await shot((await sequence()).id, { assignedTo: ['eli', 'ada', 'eli'], dueDate: '2026-11-30' });
     expect(sh.assignedTo).toEqual(['eli', 'ada']);
     expect(new Date(sh.dueDate).toISOString()).toBe('2026-11-30T00:00:00.000Z');
-    expect((await task(sh.id, { assignedTo: 'vic' })).assignedTo).toBe('vic');
+    expect((await task(sh.id, { assignedTo: ['vic', 'eli'] })).assignedTo).toEqual(['vic', 'eli']);
+    // A task is assigned to people, a list, as a shot is.
+    expect((await ada.post(`${P}/shots/${sh.id}/tasks`, { name: 'Layout', assignedTo: 'vic' })).status).toBe(400);
+  });
+});
+
+describe('assigning people and teams', () => {
+  const team = async (name: string, memberIds: string[] = []) =>
+    (await ada.post('/projects/p1/teams', { name, memberIds })).body.teams.find((t: any) => t.name === name).id;
+
+  it('a shot and a task take two people and a team', async () => {
+    const animation = await team('Animation', ['vic']);
+    const sh = await shot((await sequence()).id, { assignedTo: ['eli', 'ada'], teamIds: [animation] });
+    expect(sh).toMatchObject({ assignedTo: ['eli', 'ada'], teamIds: [animation] });
+    const t = await task(sh.id, { assignedTo: ['eli', 'ada'], teamIds: [animation, animation] });
+    expect(t).toMatchObject({ assignedTo: ['eli', 'ada'], teamIds: [animation] });
+
+    const changed = await ada.patch(`${P}/shots/${sh.id}`, { assignedTo: ['vic'], teamIds: [] });
+    expect(changed.body.shot).toMatchObject({ assignedTo: ['vic'], teamIds: [] });
+    const { tasks } = (await ada.get(`${P}/shots/${sh.id}/tasks`)).body;
+    expect(tasks[0]).toMatchObject({ assignedTo: ['eli', 'ada'], teamIds: [animation] });
+  });
+
+  it("only takes the project's teams", async () => {
+    const theirs = (await ada.post('/projects/p2/teams', { name: 'Theirs' })).body.teams[0].id;
+    const seq = await sequence();
+    for (const teamIds of [[theirs], ['nope'], 'x', [3]]) {
+      const res = await ada.post(`${P}/sequences/${seq.id}/shots`, { name: 'SH010', teamIds });
+      expect(res.status, JSON.stringify(teamIds)).toBe(400);
+      expect(res.body.message).toMatch(/teams of the project/);
+    }
+    const sh = await shot(seq.id);
+    expect((await ada.patch(`${P}/shots/${sh.id}`, { teamIds: [theirs] })).status).toBe(400);
+    expect((await ada.post(`${P}/shots/${sh.id}/tasks`, { name: 'Layout', teamIds: [theirs] })).status).toBe(400);
+    const t = await task(sh.id);
+    expect((await ada.patch(`${P}/shots/${sh.id}/tasks/${t.id}`, { teamIds: [theirs] })).status).toBe(400);
+  });
+
+  it('a deleted team leaves the shots and tasks it had, which stay', async () => {
+    const animation = await team('Animation');
+    const sound = await team('Sound');
+    const sh = await shot((await sequence()).id, { teamIds: [animation, sound] });
+    const t = await task(sh.id, { teamIds: [animation] });
+    const teamsLeft = await ada.delete(`/projects/p1/teams/${animation}`);
+    expect(teamsLeft.status).toBe(200);
+    expect(docs('production_shots')).toEqual([expect.objectContaining({ id: sh.id, teamIds: [sound] })]);
+    expect(docs('production_tasks')).toEqual([expect.objectContaining({ id: t.id, teamIds: [] })]);
+  });
+
+  it("a task saved with one person, or nobody, is answered with a list", async () => {
+    const sh = await shot((await sequence()).id);
+    mongo.db.collection('production_tasks').docs.push(
+      { id: 'old-1', shotId: sh.id, projectId: 'p1', name: 'Old', assignedTo: 'eli', createdAt: new Date(1) },
+      { id: 'old-2', shotId: sh.id, projectId: 'p1', name: 'Older', assignedTo: null, createdAt: new Date(2) },
+    );
+    const { tasks } = (await ada.get(`${P}/shots/${sh.id}/tasks`)).body;
+    expect(tasks.map((t: any) => [t.assignedTo, t.teamIds])).toEqual([[['eli'], []], [[], []]]);
+  });
+
+  it("a shot's summary says who its tasks are assigned to, for a board to find it by them", async () => {
+    const animation = await team('Animation');
+    const seq = await sequence();
+    const sh = await shot(seq.id);
+    await task(sh.id, { assignedTo: ['eli'], teamIds: [animation] });
+    await task(sh.id, { assignedTo: ['eli', 'vic'], status: 'done' });
+    const [listed] = (await ada.get(`${P}/sequences/${seq.id}/shots`)).body.shots;
+    expect(listed.taskSummary).toMatchObject({ assignedTo: ['eli', 'vic'], teamIds: [animation] });
   });
 });
 
@@ -126,8 +192,8 @@ describe('editing', () => {
 
     const { shots } = (await ada.get(`${P}/sequences/${seq.id}/shots`)).body;
     expect(shots.map((sh: any) => [sh.name, sh.taskSummary])).toEqual([
-      ['SH010', { done: 1, total: 3, priority: 'medium' }],
-      ['SH020', { done: 0, total: 0, priority: null }],
+      ['SH010', { done: 1, total: 3, priority: 'medium', assignedTo: [], teamIds: [] }],
+      ['SH020', { done: 0, total: 0, priority: null, assignedTo: [], teamIds: [] }],
     ]);
   });
 
@@ -139,11 +205,11 @@ describe('editing', () => {
     expect((await ada.patch(`${P}/shots/${sh.id}`, { assignedTo: ['stranger'] })).status).toBe(400);
   });
 
-  it("changes a task's name, notes, due date and assignee", async () => {
+  it("changes a task's name, notes, due date and assignees", async () => {
     const t = await task((await shot((await sequence()).id)).id);
-    const res = await ada.patch(`${P}/shots/${t.shotId}/tasks/${t.id}`, { name: 'Blocking', notes: 'Use the old rig', assignedTo: 'eli', dueDate: '2026-11-01' });
-    expect(res.body.task).toMatchObject({ name: 'Blocking', notes: 'Use the old rig', assignedTo: 'eli' });
-    expect((await ada.patch(`${P}/shots/${t.shotId}/tasks/${t.id}`, { assignedTo: null })).body.task.assignedTo).toBeNull();
+    const res = await ada.patch(`${P}/shots/${t.shotId}/tasks/${t.id}`, { name: 'Blocking', notes: 'Use the old rig', assignedTo: ['eli'], dueDate: '2026-11-01' });
+    expect(res.body.task).toMatchObject({ name: 'Blocking', notes: 'Use the old rig', assignedTo: ['eli'] });
+    expect((await ada.patch(`${P}/shots/${t.shotId}/tasks/${t.id}`, { assignedTo: [] })).body.task.assignedTo).toEqual([]);
   });
 
   it("a viewer can't", async () => {

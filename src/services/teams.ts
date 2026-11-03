@@ -82,6 +82,26 @@ export async function deleteTeam(projectId: string, teamId: string): Promise<boo
   return result.deletedCount > 0;
 }
 
+/** Of `ids`, one that isn't a team of the project, if any (null when they all are). */
+export async function teamNotOf(projectId: string, ids: string[] | undefined): Promise<string | null> {
+  if (!ids?.length) return null;
+  const known = new Set((await teams()?.find({ projectId }).toArray() ?? []).map(t => t.id));
+  return ids.find(id => !known.has(id)) ?? null;
+}
+
+/** A deleted team leaves the shots and tasks it was assigned to; they stay. */
+export async function unassignTeam(projectId: string, teamId: string): Promise<void> {
+  const db = nosqlDb();
+  if (!db) return;
+  for (const name of ['production_shots', 'production_tasks']) {
+    const col = db.collection(name);
+    const assigned = (await col.find({ projectId }).toArray()).filter(doc => Array.isArray(doc.teamIds) && doc.teamIds.includes(teamId));
+    for (const doc of assigned) {
+      await col.updateOne({ projectId, id: doc.id }, { $set: { teamIds: doc.teamIds.filter((id: string) => id !== teamId), updatedAt: new Date() } });
+    }
+  }
+}
+
 /** Someone who's left a project leaves its teams too. */
 export async function removeFromTeams(projectId: string, userId: string): Promise<void> {
   const col = teams();

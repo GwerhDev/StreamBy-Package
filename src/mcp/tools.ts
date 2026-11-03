@@ -44,7 +44,8 @@ const STATUSES = ['todo', 'in_progress', 'review', 'done'] as const;
 const shotFields = {
   description: z.string().optional(),
   status: z.enum(STATUSES).optional(),
-  assignedTo: z.array(z.string()).optional().describe("The assignees' user ids: members of the project"),
+  assignedTo: z.array(z.string()).optional().describe("The people it's assigned to: user ids of members of the project"),
+  teamIds: z.array(z.string()).optional().describe("The teams it's assigned to: ids of teams of the project (list_teams)"),
   assetId: z.string().optional(),
   exportId: z.string().optional(),
   dueDate: z.string().optional().describe('An ISO 8601 date'),
@@ -53,7 +54,8 @@ const shotFields = {
 const taskFields = {
   status: z.enum(STATUSES).optional(),
   priority: z.enum(['low', 'medium', 'high']).optional(),
-  assignedTo: z.string().optional().describe("The assignee's user id: a member of the project"),
+  assignedTo: z.array(z.string()).optional().describe("The people it's assigned to: user ids of members of the project"),
+  teamIds: z.array(z.string()).optional().describe("The teams it's assigned to: ids of teams of the project (list_teams)"),
   dueDate: z.string().optional().describe('An ISO 8601 date'),
   notes: z.string().optional(),
 };
@@ -248,7 +250,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'update_shot', title: 'Update a shot', permissions: ['production:write'], write: true,
-    description: 'Changes a shot (its name, status, assignee, due date...).',
+    description: 'Changes a shot (its name, status, the people and teams it is assigned to, due date...). Lists given replace the ones it had.',
     input: { projectId, shotId: id('shot'), name: z.string().min(1).optional(), ...shotFields },
     projectOf: byProject,
     call: ({ projectId, shotId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/production/shots/${enc(shotId)}`, body: defined(fields) }),
@@ -262,7 +264,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'update_task', title: 'Update a shot task', permissions: ['production:write'], write: true,
-    description: 'Changes a task (its name, status, priority, assignee, due date, notes).',
+    description: 'Changes a task (its name, status, priority, the people and teams it is assigned to, due date, notes). Lists given replace the ones it had.',
     input: { projectId, shotId: id('shot'), taskId: id('task'), name: z.string().min(1).optional(), ...taskFields },
     projectOf: byProject,
     call: ({ projectId, shotId, taskId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/production/shots/${enc(shotId)}/tasks/${enc(taskId)}`, body: defined(fields) }),

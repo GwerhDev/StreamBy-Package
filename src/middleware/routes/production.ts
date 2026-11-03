@@ -7,7 +7,8 @@ import { getModel } from '../../models/manager';
 import { Auth } from '../../types';
 import crypto from 'crypto';
 import { deleteDeliverablesOf } from '../../services/deliverables';
-import { checkProductionFields } from '../../services/productionFields';
+import { checkProductionFields, withAssignees } from '../../services/productionFields';
+import { teamNotOf } from '../../services/teams';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -15,16 +16,29 @@ function getDb() {
   return (getConnection(ids[0]).client as MongoClient).db();
 }
 
-const SHOT_FIELDS = ['name', 'description', 'status', 'assignees', 'assetId', 'exportId', 'dueDate', 'order'] as const;
-const TASK_FIELDS = ['name', 'status', 'priority', 'assignee', 'dueDate', 'notes'] as const;
+const SHOT_FIELDS = ['name', 'description', 'status', 'assignees', 'teams', 'assetId', 'exportId', 'dueDate', 'order'] as const;
+const TASK_FIELDS = ['name', 'status', 'priority', 'assignees', 'teams', 'dueDate', 'notes'] as const;
 
 const PRIORITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3 };
 
-const summaryOf = (tasks: { status?: string; priority?: string }[]) => {
+// How a shot's tasks go: done of total, the top priority of the open ones, and who they're
+// assigned to (people and teams), for a board to find the shot by them.
+const summaryOf = (tasks: { status?: string; priority?: string; assignedTo?: unknown; teamIds?: unknown }[]) => {
   const open = tasks.filter(t => t.status !== 'done');
   const priority = open.reduce<string | null>((top, t) =>
     (t.priority && (PRIORITY_RANK[t.priority] ?? 0) > (top ? PRIORITY_RANK[top] : 0) ? t.priority : top), null);
-  return { done: tasks.length - open.length, total: tasks.length, priority };
+  const assigned = tasks.map(withAssignees);
+  return {
+    done: tasks.length - open.length, total: tasks.length, priority,
+    assignedTo: [...new Set(assigned.flatMap(t => t.assignedTo))],
+    teamIds: [...new Set(assigned.flatMap(t => t.teamIds))],
+  };
+};
+
+// The teams a shot or a task is given, checked to be the project's.
+const teamsError = async (projectId: string, values: Record<string, any>) => {
+  const unknown = await teamNotOf(projectId, values.teamIds);
+  return unknown ? 'teamIds must be a list of teams of the project' : null;
 };
 
 export function productionRouter(_config: StreamByConfig): Router {
@@ -165,10 +179,10 @@ export function productionRouter(_config: StreamByConfig): Router {
       const tasks = shots.length
         ? await db.collection('production_tasks')
           .find({ projectId, shotId: { $in: shots.map(sh => sh.id) } })
-          .project({ shotId: 1, status: 1, priority: 1 })
+          .project({ shotId: 1, status: 1, priority: 1, assignedTo: 1, teamIds: 1 })
           .toArray()
         : [];
-      res.json({ shots: shots.map(sh => ({ ...sh, taskSummary: summaryOf(tasks.filter(t => t.shotId === sh.id)) })) });
+      res.json({ shots: shots.map(sh => ({ ...withAssignees(sh), taskSummary: summaryOf(tasks.filter(t => t.shotId === sh.id)) })) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -185,6 +199,8 @@ export function productionRouter(_config: StreamByConfig): Router {
       const checked = checkProductionFields(req.body, SHOT_FIELDS, project, { creating: true });
       if ('error' in checked) return res.status(400).json({ message: checked.error });
       const { values } = checked;
+      const badTeams = await teamsError(projectId, values);
+      if (badTeams) return res.status(400).json({ message: badTeams });
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
@@ -202,6 +218,7 @@ export function productionRouter(_config: StreamByConfig): Router {
         order: values.order ?? 0,
         status: values.status ?? 'todo',
         assignedTo: values.assignedTo ?? [],
+        teamIds: values.teamIds ?? [],
         assetId: values.assetId ?? null,
         exportId: values.exportId ?? null,
         dueDate: values.dueDate ?? null,
@@ -230,6 +247,8 @@ export function productionRouter(_config: StreamByConfig): Router {
 
       const checked = checkProductionFields(req.body, SHOT_FIELDS, project);
       if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const badTeams = await teamsError(projectId, checked.values);
+      if (badTeams) return res.status(400).json({ message: badTeams });
       const $set: Record<string, any> = { ...checked.values, updatedAt: new Date() };
 
       const result = await db.collection('production_shots').findOneAndUpdate(
@@ -239,7 +258,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       );
 
       if (!result) return res.status(404).json({ message: 'Shot not found' });
-      res.json({ shot: result });
+      res.json({ shot: withAssignees(result) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -284,7 +303,7 @@ export function productionRouter(_config: StreamByConfig): Router {
         .sort({ createdAt: 1 })
         .toArray();
 
-      res.json({ tasks });
+      res.json({ tasks: tasks.map(withAssignees) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -301,6 +320,8 @@ export function productionRouter(_config: StreamByConfig): Router {
       const checked = checkProductionFields(req.body, TASK_FIELDS, project, { creating: true });
       if ('error' in checked) return res.status(400).json({ message: checked.error });
       const { values } = checked;
+      const badTeams = await teamsError(projectId, values);
+      if (badTeams) return res.status(400).json({ message: badTeams });
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
@@ -316,7 +337,8 @@ export function productionRouter(_config: StreamByConfig): Router {
         name: values.name,
         status: values.status ?? 'todo',
         priority: values.priority ?? 'medium',
-        assignedTo: values.assignedTo ?? null,
+        assignedTo: values.assignedTo ?? [],
+        teamIds: values.teamIds ?? [],
         dueDate: values.dueDate ?? null,
         notes: values.notes ?? null,
         createdBy: auth.userId,
@@ -344,6 +366,8 @@ export function productionRouter(_config: StreamByConfig): Router {
 
       const checked = checkProductionFields(req.body, TASK_FIELDS, project);
       if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const badTeams = await teamsError(projectId, checked.values);
+      if (badTeams) return res.status(400).json({ message: badTeams });
       const $set: Record<string, any> = { ...checked.values, updatedAt: new Date() };
 
       const result = await db.collection('production_tasks').findOneAndUpdate(
@@ -353,7 +377,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       );
 
       if (!result) return res.status(404).json({ message: 'Task not found' });
-      res.json({ task: result });
+      res.json({ task: withAssignees(result) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

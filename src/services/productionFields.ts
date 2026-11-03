@@ -1,8 +1,8 @@
 import { activeMemberOf } from '../utils/auth';
 
 // What a production sequence, shot or task may be given, checked before it's saved: a name
-// that isn't blank, a known status and priority, assignees who are members of the project, a
-// due date that is a date.
+// that isn't blank, a known status and priority, assignees who are members of the project (and
+// teams, which the route checks are the project's: see checkTeamIdsOf), a due date that is a date.
 
 export const PRODUCTION_STATUSES = ['todo', 'in_progress', 'review', 'done'] as const;
 export const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
@@ -10,13 +10,13 @@ export const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
 const MAX_NAME = 200;
 const MAX_TEXT = 5000;
 
-type Field = 'name' | 'description' | 'notes' | 'status' | 'priority' | 'assignees' | 'assignee' | 'dueDate' | 'order' | 'assetId' | 'exportId';
+type Field = 'name' | 'description' | 'notes' | 'status' | 'priority' | 'assignees' | 'teams' | 'dueDate' | 'order' | 'assetId' | 'exportId';
 
 export type FieldsResult = { values: Record<string, any> } | { error: string };
 
 /**
- * The fields of `body` that `allowed` lists, checked and ready to save (`assignees` and
- * `assignee` are saved as `assignedTo`). With `creating`, a name is required.
+ * The fields of `body` that `allowed` lists, checked and ready to save (`assignees` is saved as
+ * `assignedTo`, `teams` as `teamIds`). With `creating`, a name is required.
  */
 export function checkProductionFields(body: any, allowed: readonly Field[], project: any, { creating = false } = {}): FieldsResult {
   const values: Record<string, any> = {};
@@ -51,9 +51,10 @@ export function checkProductionFields(body: any, allowed: readonly Field[], proj
     if (!Array.isArray(ids) || !ids.every(isMember)) return { error: 'assignedTo must be a list of members of the project' };
     values.assignedTo = [...new Set(ids)];
   }
-  if (has('assignee') && given('assignedTo')) {
-    if (body.assignedTo !== null && !isMember(body.assignedTo)) return { error: 'assignedTo must be a member of the project, or null' };
-    values.assignedTo = body.assignedTo;
+  if (has('teams') && given('teamIds')) {
+    const ids = body.teamIds;
+    if (!Array.isArray(ids) || !ids.every(id => typeof id === 'string' && id)) return { error: 'teamIds must be a list of teams of the project' };
+    values.teamIds = [...new Set(ids)];
   }
   if (has('dueDate') && given('dueDate')) {
     const date = body.dueDate === null || body.dueDate === '' ? null : new Date(body.dueDate);
@@ -70,4 +71,15 @@ export function checkProductionFields(body: any, allowed: readonly Field[], proj
     values[field] = body[field] || null;
   }
   return { values };
+}
+
+// Who a shot or a task is assigned to, as it's answered: people and teams, lists both. (A task
+// saved before it could have more than one has its one person, or nobody.)
+export function withAssignees<T extends Record<string, any>>(doc: T): T & { assignedTo: string[]; teamIds: string[] } {
+  const { assignedTo } = doc;
+  return {
+    ...doc,
+    assignedTo: Array.isArray(assignedTo) ? assignedTo : typeof assignedTo === 'string' && assignedTo ? [assignedTo] : [],
+    teamIds: Array.isArray(doc.teamIds) ? doc.teamIds : [],
+  };
 }

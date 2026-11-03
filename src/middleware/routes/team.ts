@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Auth, StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
 import { isProjectAdmin, isProjectMember } from '../../utils/auth';
-import { checkTeam, createTeam, deleteTeam, listTeams, Team, updateTeam } from '../../services/teams';
+import { checkTeam, createTeam, deleteTeam, listTeams, Team, unassignTeam, updateTeam } from '../../services/teams';
 
 // A project's teams: any member sees them, its admins make, change and delete them. Each change
 // answers the teams as they are then.
@@ -82,6 +82,8 @@ export function teamRouter(config: StreamByConfig): Router {
       if (!project) return;
       if (!(await listTeams(project))) return res.status(500).json({ message: 'Database not available' });
       if (!(await deleteTeam(req.params.id, req.params.teamId))) return res.status(404).json({ message: 'Team not found' });
+      // What it was assigned to stays, without it.
+      await unassignTeam(req.params.id, req.params.teamId);
       res.json({ teams: await answerTeams(project), message: 'Team deleted' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete the team', details: err.message });
