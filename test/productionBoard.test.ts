@@ -108,19 +108,66 @@ describe('card keys', () => {
     expect(listed.map((s: any) => [s.name, s.key]).sort((x: string[], y: string[]) => x[1].localeCompare(y[1]))).toEqual([['Earlier', 'POR-1'], ['Later', 'POR-2'], ['New', 'POR-3']]);
   });
 
-  it('old cards read by several requests at once are numbered once, from 1, and the next card follows', async () => {
-    const seqs = [await sequence(), await sequence(), await sequence()];
+  // Old cards numbered by several requests at once, as on a project's first load the board asks
+  // for each sequence's cards together. The requests after the first start `stagger` steps
+  // later each, so some read the cards while others are midway through numbering them.
+  const oldCards = async () => {
+    const seqs = [await sequence(), await sequence(), await sequence(), await sequence()];
     seqs.forEach((seq, i) => mongo.db.collection('production_shots').docs.push(
       { id: `old-${i}a`, sequenceId: seq.id, projectId: 'p1', name: `Old ${i}a`, status: 'todo', order: 0, createdAt: new Date(1000 + i * 2) },
       { id: `old-${i}b`, sequenceId: seq.id, projectId: 'p1', name: `Old ${i}b`, status: 'todo', order: 1, createdAt: new Date(1001 + i * 2) },
     ));
-    // As the board asks for each sequence's cards at once: each request numbers them.
+    return seqs;
+  };
+  // Each write takes its own while, as over a network: one request can get ahead of another.
+  const withLatency = (seed: number) => {
+    const shots = mongo.db.collection('production_shots');
+    const updateOne = shots.updateOne.bind(shots);
+    let n = seed;
+    shots.updateOne = async (...args: Parameters<typeof updateOne>) => {
+      n = (n * 1103515245 + 12345) % 2147483648;
+      for (let t = 0; t < n % 9; t++) await Promise.resolve();
+      return updateOne(...args);
+    };
+    return () => { shots.updateOne = updateOne; };
+  };
+  const numberAtOnce = async (requests: number, stagger: number) => {
     const { numberCards } = await import('../src/services/cardKeys');
-    await Promise.all([numberCards('p1'), numberCards('p1'), numberCards('p1')]);
-    await Promise.all(seqs.map(seq => ada.get(`${P}/sequences/${seq.id}/shots`)));
-    const numbers = docs('production_shots').map((d: any) => [d.name, d.number]).sort((x: any, y: any) => x[1] - y[1]);
-    expect(numbers).toEqual([['Old 0a', 1], ['Old 0b', 2], ['Old 1a', 3], ['Old 1b', 4], ['Old 2a', 5], ['Old 2b', 6]]);
-    expect((await shot(seqs[0].id, { name: 'New' })).key).toBe('POR-7');
+    const restore = withLatency(stagger + requests);
+    const running: Promise<void>[] = [];
+    for (let r = 0; r < requests; r++) {
+      if (r) for (let t = 0; t < stagger; t++) await Promise.resolve();
+      running.push(numberCards('p1'));
+    }
+    await Promise.all(running);
+    restore();
+    return [...docs('production_shots')].sort((a: any, b: any) => a.createdAt - b.createdAt).map((d: any) => d.number);
+  };
+
+  it('old cards numbered by several requests at once never share a number, oldest first', async () => {
+    for (const requests of [2, 4]) {
+      for (let stagger = 0; stagger <= 80; stagger++) {
+        mongo.db.collection('production_shots').docs = [];
+        mongo.db.collection('production_boards').docs = [];
+        await oldCards();
+        const numbers = await numberAtOnce(requests, stagger);
+        const run = `${requests} requests, ${stagger} steps apart: ${numbers}`;
+        expect(numbers.every((n: unknown) => typeof n === 'number'), run).toBe(true);
+        expect(new Set(numbers).size, run).toBe(numbers.length);
+        // Gaps are fine (a number taken by a request that lost the race goes unused); the order is kept.
+        expect(numbers, run).toEqual([...numbers].sort((a: number, b: number) => a - b));
+      }
+    }
+  });
+
+  it('a card made after old ones were numbered at once takes a number none of them has', async () => {
+    const seqs = await oldCards();
+    const numbers = await numberAtOnce(4, 7);
+    const created = await shot(seqs[0].id, { name: 'New' });
+    expect(Number(created.key.split('-')[1])).toBeGreaterThan(Math.max(...numbers));
+    const keys = (await Promise.all(seqs.map(seq => ada.get(`${P}/sequences/${seq.id}/shots`))))
+      .flatMap(res => res.body.shots.map((s: any) => s.key));
+    expect(new Set(keys).size).toBe(9);
   });
 
   it("an admin gives it another key; its cards keep their numbers", async () => {

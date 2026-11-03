@@ -36,7 +36,7 @@ export async function setKey(projectId: string, key: unknown): Promise<{ key: st
   return { key: upper };
 }
 
-// `count` numbers taken at once, for good: the first of them.
+// `count` numbers taken at once, for good (atomically: no other request takes them): the first.
 async function takeNumbers(projectId: string, count: number): Promise<number> {
   const board = await boards()!.findOneAndUpdate(
     { projectId }, { $inc: { lastNumber: count } }, { upsert: true, returnDocument: 'after' },
@@ -45,20 +45,20 @@ async function takeNumbers(projectId: string, count: number): Promise<number> {
 }
 
 /**
- * The project's cards without a number given theirs, by when they were made, after the last
- * number given. Requests that do it at once (a board reads its sequences' cards together) give
- * each card the same number: one that has one already keeps it, and the last number given only
- * goes up.
+ * The project's cards without a number given theirs, oldest first. Requests may do it at once (a
+ * board reads its sequences' cards together): each card is given a number taken for it alone, and
+ * only if it still has none. A number taken by a request that found the card numbered already is
+ * never given: numbers may skip, but no two cards share one.
  */
 export async function numberCards(projectId: string): Promise<void> {
   if (!boards() || !shots()) return;
   const unnumbered = await shots()!.find({ projectId, number: { $exists: false } }).sort({ createdAt: 1, id: 1 }).toArray();
-  if (!unnumbered.length) return;
-  const last = (await boards()!.findOne({ projectId }))?.lastNumber ?? 0;
-  for (const [i, card] of unnumbered.entries()) {
-    await shots()!.updateOne({ projectId, id: card.id, number: { $exists: false } }, { $set: { number: last + 1 + i } });
+  for (const card of unnumbered) {
+    // Numbered by another request since it was read: no number spent on it.
+    if (!(await shots()!.findOne({ projectId, id: card.id, number: { $exists: false } }))) continue;
+    const number = await takeNumbers(projectId, 1);
+    await shots()!.updateOne({ projectId, id: card.id, number: { $exists: false } }, { $set: { number } });
   }
-  await boards()!.updateOne({ projectId }, { $set: { projectId }, $max: { lastNumber: last + unnumbered.length } }, { upsert: true });
 }
 
 /** The number a new card is given (the cards before it numbered first). */
