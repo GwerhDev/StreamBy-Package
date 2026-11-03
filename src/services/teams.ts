@@ -94,11 +94,7 @@ export async function unassignTeam(projectId: string, teamId: string): Promise<v
   const db = nosqlDb();
   if (!db) return;
   for (const name of ['production_shots', 'production_tasks']) {
-    const col = db.collection(name);
-    const assigned = (await col.find({ projectId }).toArray()).filter(doc => Array.isArray(doc.teamIds) && doc.teamIds.includes(teamId));
-    for (const doc of assigned) {
-      await col.updateOne({ projectId, id: doc.id }, { $set: { teamIds: doc.teamIds.filter((id: string) => id !== teamId), updatedAt: new Date() } });
-    }
+    await db.collection(name).updateMany({ projectId, teamIds: teamId }, { $pull: { teamIds: teamId } as any, $set: { updatedAt: new Date() } });
   }
 }
 

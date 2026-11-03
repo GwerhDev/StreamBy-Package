@@ -1,5 +1,6 @@
-// A MongoDB database in memory, with what the routes use of it: equality, $in, $exists and
-// $or filters; $set, $unset and $pull updates (and upserts); find with sort, limit and projection.
+// A MongoDB database in memory, with what the routes use of it: equality (an array field matches
+// a value it holds), $in, $exists and $or filters; $set, $unset and $pull updates (and upserts),
+// one document or many; find with sort, limit and projection.
 
 type Doc = Record<string, any>;
 
@@ -8,6 +9,7 @@ const valueMatches = (actual: any, expected: any): boolean => {
     if ('$in' in expected) return expected.$in.includes(actual);
     if ('$exists' in expected) return (actual !== undefined) === expected.$exists;
   }
+  if (Array.isArray(actual) && !Array.isArray(expected)) return actual.some(item => valueMatches(item, expected));
   return actual === expected || (actual != null && expected != null && String(actual) === String(expected) && typeof expected !== 'object');
 };
 
@@ -55,9 +57,23 @@ export class FakeCollection {
     if (update.$set) Object.assign(doc, update.$set);
     for (const key of Object.keys(update.$unset ?? {})) delete doc[key];
     for (const [key, cond] of Object.entries(update.$pull ?? {})) {
-      doc[key] = (doc[key] ?? []).filter((item: Doc) => !matches(item, cond as Doc));
+      const pulled = (item: any) => (cond && typeof cond === 'object' ? matches(item, cond as Doc) : item === cond);
+      doc[key] = (doc[key] ?? []).filter((item: any) => !pulled(item));
     }
     return { matchedCount: 1, modifiedCount: 1 };
+  }
+
+  async updateMany(filter: Doc, update: Doc) {
+    const found = this.docs.filter(d => matches(d, filter));
+    for (const doc of found) {
+      if (update.$set) Object.assign(doc, update.$set);
+      for (const key of Object.keys(update.$unset ?? {})) delete doc[key];
+      for (const [key, cond] of Object.entries(update.$pull ?? {})) {
+        const pulled = (item: any) => (cond && typeof cond === 'object' ? matches(item, cond as Doc) : item === cond);
+        doc[key] = (doc[key] ?? []).filter((item: any) => !pulled(item));
+      }
+    }
+    return { matchedCount: found.length, modifiedCount: found.length };
   }
 
   // The document it changed, as it is after (returnDocument 'after'), even if the change made
