@@ -15,6 +15,7 @@ import { authRouter } from './routes/auth';
 import { userRouter } from './routes/user';
 import { exportRouter } from './routes/export';
 import { memberRouter } from './routes/member';
+import { teamRouter } from './routes/team';
 import { storageRouter } from './routes/storage';
 import { projectRouter } from './routes/project';
 import { databaseRouter } from './routes/database';
@@ -134,6 +135,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(mcpRouter(config));
   router.use(exportRouter(config));
   router.use(memberRouter(config));
+  router.use(teamRouter(config));
   router.use(storageRouter(config));
   router.use(projectRouter(config));
   router.use(databaseRouter(config));

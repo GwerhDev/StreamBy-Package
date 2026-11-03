@@ -6,6 +6,7 @@ import { getConnectedIds, getConnection } from '../../adapters/database/connecti
 import { sqlAdapter } from '../../adapters/database/sql';
 import { createNotification } from '../../services/notification';
 import { projectApiTokensMadeBy } from '../../services/apiTokens';
+import { removeFromTeams } from '../../services/teams';
 
 const VALID_ROLES = ['viewer', 'editor', 'admin'] as const;
 type MemberRole = typeof VALID_ROLES[number];
@@ -402,6 +403,8 @@ export function memberRouter(config: StreamByConfig): Router {
       } else {
         await Project.update({ _id: projectId }, { $pull: { members: { userId: targetUserId } } });
       }
+      // Who leaves the project leaves its teams.
+      await removeFromTeams(String(projectId), String(targetUserId));
 
       // A project's tokens they made keep working: its admins should know.
       const tokens = await projectApiTokensMadeBy(projectId, targetUserId);

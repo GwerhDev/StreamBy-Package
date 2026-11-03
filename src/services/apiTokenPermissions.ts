@@ -76,6 +76,10 @@ const RULES = [
   rule(['POST'], `${P}/members`, 'members:manage'),
   rule(['PATCH'], `${P}/members/[^/]+(/approve)?`, 'members:manage'),
   rule('delete', `${P}/members/[^/]+`, 'members:manage'),
+  rule('read', `${P}/teams`, 'members:read'),
+  rule(['POST'], `${P}/teams`, 'members:manage'),
+  rule(['PATCH'], `${P}/teams/[^/]+`, 'members:manage'),
+  rule('delete', `${P}/teams/[^/]+`, 'members:manage'),
 
   // Assets: the built-in storage, and a storage connection's files and folders.
   rule('read', `${P}/(storage|connections/storage/[^/]+)/(.+/)?(upload-url|replace-url)`, 'assets:write'),

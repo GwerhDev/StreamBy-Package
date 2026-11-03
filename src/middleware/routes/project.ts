@@ -11,6 +11,7 @@ import { rememberDisconnectedBuiltin } from './projectResources';
 import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
 import { deleteProductionData } from '../../services/production';
+import { deleteTeamsOf } from '../../services/teams';
 import { jobStore } from '../../services/jobStore';
 import { documentStore } from '../../services/documents';
 export function projectRouter(config: StreamByConfig): Router {
@@ -278,10 +279,11 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       await Project.useDbType(project.dbType).delete({ _id: projectId });
-      // Its tokens have nothing left to reach, and its production data and jobs nothing to
-      // belong to.
+      // Its tokens have nothing left to reach, and its production data, teams and jobs nothing
+      // to belong to.
       await deleteProjectApiTokens(String(projectId));
       await deleteProductionData(String(projectId));
+      await deleteTeamsOf(String(projectId));
       if (projectId) await jobStore().deleteProject(String(projectId));
       if (projectId) await documentStore().deleteProject(String(projectId));
 

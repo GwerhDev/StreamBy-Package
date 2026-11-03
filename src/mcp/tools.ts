@@ -80,6 +80,14 @@ export const TOOLS = [
     pick: (data) => data.projects,
   }),
   tool({
+    name: 'list_teams', title: "List a project's teams", permissions: ['members:read'],
+    description: "A project's teams (groups of its members), each with its members' user ids and usernames. They're shown, and managed by its admins, in its dashboard: Members, Teams tab.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/teams` }),
+    pick: (data) => data.teams,
+  }),
+  tool({
     name: 'get_project', title: 'Get a project', permissions: ['project:read'],
     description: "A project's details: its name, description, members, exports and connections.",
     input: { projectId },

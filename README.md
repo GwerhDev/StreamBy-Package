@@ -127,7 +127,7 @@ hash is stored, with a short prefix to tell it apart.
 | Resource | Permissions | Covers |
 |---|---|---|
 | Project | `project:read`, `project:update`, `project:delete` | The project, its settings and its connections (API, database, storage, distribution, render farm), integrations and allowed origins. |
-| Members | `members:read`, `members:manage` | Listing members; inviting, changing and removing them, and searching users. |
+| Members | `members:read`, `members:manage` | Listing members and teams; inviting, changing and removing members, searching users, and making, changing and deleting teams. |
 | Assets | `assets:read`, `assets:write`, `assets:delete` | Files and folders, upload URLs, metadata, versions, reviews and annotations, QC reports. |
 | Production | `production:read`, `production:write`, `production:delete` | Sequences, shots and tasks. |
 | Workflow | `workflow:read`, `workflow:write` | The workflow and its pipelines. |
@@ -293,6 +293,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `get_job`, `list_jobs` | `jobs:read` |
 | `list_workers` | `project:read` |
 | `process_asset`, `retry_job` | `jobs:run` |
+| `list_teams` | `members:read` |
 | `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
 | `create_sequence`, `create_shot`, `create_task` | `production:write` |
