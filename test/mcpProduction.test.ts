@@ -141,6 +141,18 @@ describe('production through MCP', () => {
     expect(refused.content[0].text).toMatch(/teams of the project/);
   });
 
+  it("answers the board's columns, and each card's column and status; puts a card in a column", async () => {
+    const client = await connect(await tokenFor(['production:read', 'production:write']));
+    const columns = JSON.parse((await call(client, 'list_board_columns', { projectId: 'p1' })).content[0].text);
+    expect(columns.map((c: any) => [c.id, c.status])).toEqual([['todo', 'todo'], ['in_progress', 'in_progress'], ['review', 'review'], ['done', 'done']]);
+
+    await call(client, 'create_sequence', { projectId: 'p1', name: 'Opening' });
+    const sequenceId = mongo.db.docs('production_sequences')[0].id;
+    expect((await call(client, 'create_shot', { projectId: 'p1', sequenceId, name: 'SH010', columnId: 'review' })).isError).toBeFalsy();
+    const shots = JSON.parse((await call(client, 'list_shots', { projectId: 'p1', sequenceId })).content[0].text).shots;
+    expect(shots.map((s: any) => [s.name, s.columnId, s.status])).toEqual([['SH010', 'review', 'review']]);
+  });
+
   it("a viewer's token makes nothing, and says why", async () => {
     const result = await call(await connect(await tokenFor(PRODUCER, 'vic')), 'create_sequence', { projectId: 'p1', name: 'Opening' });
     expect(result.isError).toBe(true);

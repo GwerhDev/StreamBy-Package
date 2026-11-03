@@ -43,7 +43,8 @@ const STATUSES = ['todo', 'in_progress', 'review', 'done'] as const;
 
 const shotFields = {
   description: z.string().optional(),
-  status: z.enum(STATUSES).optional(),
+  status: z.enum(STATUSES).optional().describe("Its status: it goes to the board's first column of it"),
+  columnId: z.string().optional().describe('The board column it goes to (list_board_columns); its status becomes the column\'s'),
   assignedTo: z.array(z.string()).optional().describe("The people it's assigned to: user ids of members of the project"),
   teamIds: z.array(z.string()).optional().describe("The teams it's assigned to: ids of teams of the project (list_teams)"),
   assetId: z.string().optional(),
@@ -184,8 +185,16 @@ export const TOOLS = [
     call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/sequences` }),
   }),
   tool({
+    name: 'list_board_columns', title: "List the Production board's columns", permissions: ['production:read'],
+    description: "A project's Production board columns, in order: each has an id, a name and the status (todo, in_progress, review, done) its cards take.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/board` }),
+    pick: (data) => data.columns,
+  }),
+  tool({
     name: 'list_shots', title: 'List shots', permissions: ['production:read'],
-    description: "A production sequence's shots.",
+    description: "A production sequence's shots, each with its board column (columnId) and status (the column's).",
     input: { projectId, sequenceId: id('sequence') },
     projectOf: byProject,
     call: ({ projectId, sequenceId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/sequences/${enc(sequenceId)}/shots` }),

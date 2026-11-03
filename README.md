@@ -294,7 +294,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `list_workers` | `project:read` |
 | `process_asset`, `retry_job` | `jobs:run` |
 | `list_teams` | `members:read` |
-| `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
+| `list_board_columns`, `list_sequences`, `list_shots`, `list_tasks` | `production:read` |
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
 | `create_sequence`, `create_shot`, `create_task` | `production:write` |
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |

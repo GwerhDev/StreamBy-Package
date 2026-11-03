@@ -10,7 +10,7 @@ export const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
 const MAX_NAME = 200;
 const MAX_TEXT = 5000;
 
-type Field = 'name' | 'description' | 'notes' | 'status' | 'priority' | 'assignees' | 'teams' | 'dueDate' | 'order' | 'assetId' | 'exportId';
+type Field = 'name' | 'description' | 'notes' | 'status' | 'priority' | 'assignees' | 'teams' | 'column' | 'dueDate' | 'order' | 'assetId' | 'exportId';
 
 export type FieldsResult = { values: Record<string, any> } | { error: string };
 
@@ -50,6 +50,10 @@ export function checkProductionFields(body: any, allowed: readonly Field[], proj
     const ids = body.assignedTo;
     if (!Array.isArray(ids) || !ids.every(isMember)) return { error: 'assignedTo must be a list of members of the project' };
     values.assignedTo = [...new Set(ids)];
+  }
+  if (has('column') && given('columnId')) {
+    if (typeof body.columnId !== 'string' || !body.columnId) return { error: 'columnId must be a column of the board' };
+    values.columnId = body.columnId;
   }
   if (has('teams') && given('teamIds')) {
     const ids = body.teamIds;
