@@ -194,10 +194,17 @@ export const TOOLS = [
   }),
   tool({
     name: 'list_shots', title: 'List shots', permissions: ['production:read'],
-    description: "A production sequence's shots, each with its board column (columnId) and status (the column's).",
+    description: "A production sequence's shots, each with its key (e.g. WOG-12), its board column (columnId) and status (the column's).",
     input: { projectId, sequenceId: id('sequence') },
     projectOf: byProject,
     call: ({ projectId, sequenceId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/sequences/${enc(sequenceId)}/shots` }),
+  }),
+  tool({
+    name: 'search_shots', title: 'Search shots', permissions: ['production:read'],
+    description: "A project's shots whose key (e.g. WOG-12) or name holds the query, case aside; a shot whose key is the query comes first. Each with its sequenceId.",
+    input: { projectId, query: z.string().min(1).describe('A key, or a part of one or of a name') },
+    projectOf: byProject,
+    call: ({ projectId, query }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/shots?${new URLSearchParams({ q: query })}` }),
   }),
   tool({
     name: 'list_tasks', title: 'List shot tasks', permissions: ['production:read'],

@@ -1,6 +1,6 @@
 // A MongoDB database in memory, with what the routes use of it: equality (an array field matches
-// a value it holds), $in, $exists and $or filters; $set, $unset and $pull updates (and upserts),
-// one document or many; find with sort, limit and projection.
+// a value it holds), $in, $exists and $or filters; $set, $unset, $inc, $max and $pull updates (and
+// upserts), one document or many; find with sort, limit and projection.
 
 type Doc = Record<string, any>;
 
@@ -17,6 +17,17 @@ export const matches = (doc: Doc, filter: Doc = {}): boolean =>
   Object.entries(filter).every(([key, expected]) =>
     key === '$or' ? (expected as Doc[]).some(f => matches(doc, f)) : valueMatches(doc[key], expected));
 
+const applyUpdate = (doc: Doc, update: Doc) => {
+  if (update.$set) Object.assign(doc, update.$set);
+  for (const key of Object.keys(update.$unset ?? {})) delete doc[key];
+  for (const [key, by] of Object.entries(update.$inc ?? {})) doc[key] = (doc[key] ?? 0) + (by as number);
+  for (const [key, value] of Object.entries(update.$max ?? {})) if (doc[key] === undefined || (value as number) > doc[key]) doc[key] = value;
+  for (const [key, cond] of Object.entries(update.$pull ?? {})) {
+    const pulled = (item: any) => (cond && typeof cond === 'object' ? matches(item, cond as Doc) : item === cond);
+    doc[key] = (doc[key] ?? []).filter((item: any) => !pulled(item));
+  }
+};
+
 export class FakeCollection {
   docs: Doc[] = [];
 
@@ -24,8 +35,15 @@ export class FakeCollection {
     let result = this.docs.filter(d => matches(d, filter));
     const cursor = {
       sort: (by: Doc) => {
-        const [[key, dir]] = Object.entries(by);
-        result = [...result].sort((a, b) => (a[key] > b[key] ? dir : a[key] < b[key] ? -dir : 0));
+        // By each key in turn, the next one breaking ties.
+        const keys = Object.entries(by);
+        result = [...result].sort((a, b) => {
+          for (const [key, dir] of keys) {
+            if (a[key] > b[key]) return dir;
+            if (a[key] < b[key]) return -dir;
+          }
+          return 0;
+        });
         return cursor;
       },
       limit: (n: number) => { result = result.slice(0, n); return cursor; },
@@ -54,35 +72,22 @@ export class FakeCollection {
       this.docs.push(doc);
     }
     if (!doc) return { matchedCount: 0, modifiedCount: 0 };
-    if (update.$set) Object.assign(doc, update.$set);
-    for (const key of Object.keys(update.$unset ?? {})) delete doc[key];
-    for (const [key, cond] of Object.entries(update.$pull ?? {})) {
-      const pulled = (item: any) => (cond && typeof cond === 'object' ? matches(item, cond as Doc) : item === cond);
-      doc[key] = (doc[key] ?? []).filter((item: any) => !pulled(item));
-    }
+    applyUpdate(doc, update);
     return { matchedCount: 1, modifiedCount: 1 };
   }
 
   async updateMany(filter: Doc, update: Doc) {
     const found = this.docs.filter(d => matches(d, filter));
-    for (const doc of found) {
-      if (update.$set) Object.assign(doc, update.$set);
-      for (const key of Object.keys(update.$unset ?? {})) delete doc[key];
-      for (const [key, cond] of Object.entries(update.$pull ?? {})) {
-        const pulled = (item: any) => (cond && typeof cond === 'object' ? matches(item, cond as Doc) : item === cond);
-        doc[key] = (doc[key] ?? []).filter((item: any) => !pulled(item));
-      }
-    }
+    for (const doc of found) applyUpdate(doc, update);
     return { matchedCount: found.length, modifiedCount: found.length };
   }
 
   // The document it changed, as it is after (returnDocument 'after'), even if the change made
   // it no longer match the filter.
-  async findOneAndUpdate(filter: Doc, update: Doc) {
-    const doc = this.docs.find(d => matches(d, filter));
-    if (!doc) return null;
-    await this.updateOne(filter, update);
-    return { ...doc };
+  async findOneAndUpdate(filter: Doc, update: Doc, options: { upsert?: boolean } = {}) {
+    if (!this.docs.some(d => matches(d, filter)) && !options.upsert) return null;
+    await this.updateOne(filter, update, options);
+    return { ...this.docs.find(d => matches(d, filter)) ?? this.docs.at(-1)! };
   }
 
   async deleteOne(filter: Doc) {

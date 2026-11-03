@@ -153,6 +153,19 @@ describe('production through MCP', () => {
     expect(shots.map((s: any) => [s.name, s.columnId, s.status])).toEqual([['SH010', 'review', 'review']]);
   });
 
+  it('answers cards with their key, and finds one by it', async () => {
+    const client = await connect(await tokenFor(['production:read', 'production:write']));
+    await call(client, 'create_sequence', { projectId: 'p1', name: 'Opening' });
+    const sequenceId = mongo.db.docs('production_sequences')[0].id;
+    await call(client, 'create_shot', { projectId: 'p1', sequenceId, name: 'SH010' });
+    await call(client, 'create_shot', { projectId: 'p1', sequenceId, name: 'SH020' });
+    const shots = JSON.parse((await call(client, 'list_shots', { projectId: 'p1', sequenceId })).content[0].text).shots;
+    const keys = shots.map((s: any) => s.key);
+    expect(keys).toHaveLength(2);
+    const found = JSON.parse((await call(client, 'search_shots', { projectId: 'p1', query: keys[1].toLowerCase() })).content[0].text).shots;
+    expect(found.map((s: any) => [s.key, s.name, s.sequenceId])).toEqual([[keys[1], 'SH020', sequenceId]]);
+  });
+
   it("a viewer's token makes nothing, and says why", async () => {
     const result = await call(await connect(await tokenFor(PRODUCER, 'vic')), 'create_sequence', { projectId: 'p1', name: 'Opening' });
     expect(result.isError).toBe(true);

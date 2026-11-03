@@ -24,7 +24,9 @@ export const DEFAULT_COLUMNS: BoardColumn[] = PRODUCTION_STATUSES.map(status => 
 
 const MAX_NAME = 60;
 
-const boards = () => nosqlDb()?.collection<{ projectId: string; columns: BoardColumn[]; updatedAt: Date }>('production_boards') ?? null;
+// The board's document also keeps the project's card key and the last card number given (see
+// cardKeys.ts).
+const boards = () => nosqlDb()?.collection<{ projectId: string; columns: BoardColumn[]; key?: string; lastNumber?: number; updatedAt: Date }>('production_boards') ?? null;
 
 /** A project's columns, in order. */
 export async function readColumns(projectId: string): Promise<BoardColumn[]> {

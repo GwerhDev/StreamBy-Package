@@ -47,6 +47,7 @@ const as = (user: string) => ({
   get: (p: string) => request(app).get(p).set('x-test-user', user),
   post: (p: string, body?: object) => request(app).post(p).set('x-test-user', user).send(body ?? {}),
   patch: (p: string, body?: object) => request(app).patch(p).set('x-test-user', user).send(body ?? {}),
+  put: (p: string, body?: object) => request(app).put(p).set('x-test-user', user).send(body ?? {}),
   delete: (p: string) => request(app).delete(p).set('x-test-user', user),
 });
 const ada = as('ada');
@@ -70,6 +71,92 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 const B = `${P}/board`;
+
+describe('card keys', () => {
+  it("a project's key is its name's initials, or the first letters of a single word", async () => {
+    const { defaultKeyOf } = await import('../src/services/cardKeys');
+    expect(defaultKeyOf('World of Gwerh')).toBe('WOG');
+    expect(defaultKeyOf('Portfolio')).toBe('POR');
+    expect(defaultKeyOf('Ñandú Ágil 3D')).toBe('NA3');
+    expect(defaultKeyOf('42')).toBe('CARD');
+    expect((await ada.get(B)).body.key).toBe('POR');
+  });
+
+  it('a new card takes the next number; a deleted one\'s is never given again', async () => {
+    const seq = await sequence();
+    const first = await shot(seq.id, { name: 'SH010' });
+    const second = await shot(seq.id, { name: 'SH020' });
+    expect([first.key, second.key]).toEqual(['POR-1', 'POR-2']);
+    expect((await ada.delete(`${P}/shots/${second.id}`)).status).toBe(200);
+    expect((await shot(seq.id, { name: 'SH030' })).key).toBe('POR-3');
+    // Each project counts its own.
+    const other = (await ada.post('/projects/p2/production/sequences', { name: 'Other' })).body.sequence;
+    expect((await ada.post(`/projects/p2/production/sequences/${other.id}/shots`, { name: 'X' })).body.shot.key).toBe('OTH-1');
+  });
+
+  it('cards made before keys are numbered by when they were made, before a new one', async () => {
+    const seq = await sequence();
+    mongo.db.collection('production_shots').docs.push(
+      { id: 'b', sequenceId: seq.id, projectId: 'p1', name: 'Later', status: 'todo', order: 1, createdAt: new Date(2000) },
+      { id: 'a', sequenceId: seq.id, projectId: 'p1', name: 'Earlier', status: 'todo', order: 0, createdAt: new Date(1000) },
+    );
+    // Listed, they're numbered (no new card needed).
+    const before = (await ada.get(`${P}/sequences/${seq.id}/shots`)).body.shots;
+    expect(before.map((s: any) => [s.name, s.key])).toEqual([['Earlier', 'POR-1'], ['Later', 'POR-2']]);
+    expect((await shot(seq.id, { name: 'New' })).key).toBe('POR-3');
+    const listed = (await ada.get(`${P}/sequences/${seq.id}/shots`)).body.shots;
+    expect(listed.map((s: any) => [s.name, s.key]).sort((x: string[], y: string[]) => x[1].localeCompare(y[1]))).toEqual([['Earlier', 'POR-1'], ['Later', 'POR-2'], ['New', 'POR-3']]);
+  });
+
+  it('old cards read by several requests at once are numbered once, from 1, and the next card follows', async () => {
+    const seqs = [await sequence(), await sequence(), await sequence()];
+    seqs.forEach((seq, i) => mongo.db.collection('production_shots').docs.push(
+      { id: `old-${i}a`, sequenceId: seq.id, projectId: 'p1', name: `Old ${i}a`, status: 'todo', order: 0, createdAt: new Date(1000 + i * 2) },
+      { id: `old-${i}b`, sequenceId: seq.id, projectId: 'p1', name: `Old ${i}b`, status: 'todo', order: 1, createdAt: new Date(1001 + i * 2) },
+    ));
+    // As the board asks for each sequence's cards at once: each request numbers them.
+    const { numberCards } = await import('../src/services/cardKeys');
+    await Promise.all([numberCards('p1'), numberCards('p1'), numberCards('p1')]);
+    await Promise.all(seqs.map(seq => ada.get(`${P}/sequences/${seq.id}/shots`)));
+    const numbers = docs('production_shots').map((d: any) => [d.name, d.number]).sort((x: any, y: any) => x[1] - y[1]);
+    expect(numbers).toEqual([['Old 0a', 1], ['Old 0b', 2], ['Old 1a', 3], ['Old 1b', 4], ['Old 2a', 5], ['Old 2b', 6]]);
+    expect((await shot(seqs[0].id, { name: 'New' })).key).toBe('POR-7');
+  });
+
+  it("an admin gives it another key; its cards keep their numbers", async () => {
+    const sh = await shot((await sequence()).id);
+    expect((await as('eli').put(`${B}/key`, { key: 'WOG' })).status).toBe(403);
+    for (const key of ['W', '1AB', 'WO G', 'ABCDEFGHIJK', 3]) {
+      expect((await ada.put(`${B}/key`, { key })).status, String(key)).toBe(400);
+    }
+    expect((await ada.put(`${B}/key`, { key: ' wog ' })).body).toEqual({ key: 'WOG' });
+    expect((await ada.get(B)).body.key).toBe('WOG');
+    const [listed] = (await ada.get(`${P}/sequences/${sh.sequenceId}/shots`)).body.shots;
+    expect(listed.key).toBe('WOG-1');
+    expect((await ada.patch(`${P}/shots/${sh.id}`, { name: 'Renamed' })).body.shot.key).toBe('WOG-1');
+  });
+
+  it("a card's number can't be given", async () => {
+    const sh = await shot((await sequence()).id);
+    await ada.patch(`${P}/shots/${sh.id}`, { number: 99 });
+    expect(docs('production_shots')[0].number).toBe(1);
+  });
+
+  it('searching by key finds the card, first; by a part of a name too', async () => {
+    const seq = await sequence();
+    for (const name of ['Opening', 'Chase', 'Chase B', 'Ending', 'Credits', 'Extra', 'Bonus', 'Blooper', 'Outro', 'Recap', 'Teaser', 'Trailer']) await shot(seq.id, { name });
+    const search = async (q: string) => (await ada.get(`${P}/shots?q=${encodeURIComponent(q)}`)).body.shots.map((s: any) => s.key);
+    expect((await search('por-1'))[0]).toBe('POR-1');
+    expect(await search('POR-1')).toEqual(['POR-1', 'POR-10', 'POR-11', 'POR-12']);
+    expect(await search('chase')).toEqual(['POR-2', 'POR-3']);
+    expect(await search('nothing')).toEqual([]);
+    // The card whose key it is comes before one that names it.
+    await ada.patch(`${P}/shots/${(docs('production_shots').find((d: any) => d.number === 1)).id}`, { name: 'Like POR-5' });
+    expect(await search('POR-5')).toEqual(['POR-5', 'POR-1']);
+    expect((await as('pat').get(`${P}/shots?q=x`)).status).toBe(403);
+  });
+});
+
 const columnsOf = async (user = ada) => (await user.get(B)).body.columns;
 const view = (columns: any[]) => columns.map((c: any) => `${c.name}:${c.status}`);
 const shotsOf = async (seqId: string) => (await ada.get(`${P}/sequences/${seqId}/shots`)).body.shots;

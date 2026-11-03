@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { MongoClient } from 'mongodb';
 import { StreamByConfig } from '../../types';
-import { canEditProject, isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { getModel } from '../../models/manager';
 import { Auth } from '../../types';
@@ -12,6 +12,7 @@ import { teamNotOf } from '../../services/teams';
 import {
   addColumn, BoardResult, changeColumn, columnOfCard, deleteColumn, firstColumnOf, orderColumns, readColumns, withColumn,
 } from '../../services/productionBoard';
+import { cardKey, matchesSearch, nextNumber, numberCards, readKey, setKey } from '../../services/cardKeys';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -61,6 +62,12 @@ async function placeCard(projectId: string, values: Record<string, any>, current
   return { columnId: column.id, status };
 }
 
+// A card as it's answered: in its column, with its status, its people and teams, and its key.
+const asCard = (columns: Awaited<ReturnType<typeof readColumns>>, projectKey: string, card: Record<string, any>) => {
+  const answered = withColumn(columns, withAssignees(card));
+  return { ...answered, key: cardKey(projectKey, answered) };
+};
+
 export function productionRouter(_config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
@@ -78,11 +85,45 @@ export function productionRouter(_config: StreamByConfig): Router {
   const answer = (res: Response, result: BoardResult & { moved?: number }) =>
     ('error' in result ? res.status(result.status ?? 400).json({ message: result.error }) : res.json(result));
 
-  // Its columns, in order: a card's status is its column's.
+  // Its columns, in order (a card's status is its column's), and the key its cards' keys start with.
   router.get('/projects/:projectId/production/board', async (req: Request, res: Response) => {
     try {
-      if (!(await projectFor(req, res, { edit: false }))) return;
-      res.json({ columns: await readColumns(req.params.projectId) });
+      const project = await projectFor(req, res, { edit: false });
+      if (!project) return;
+      res.json({ columns: await readColumns(req.params.projectId), key: await readKey(req.params.projectId, project.name) });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // The project's card key ({ key }): its admins only. Cards keep their numbers.
+  router.put('/projects/:projectId/production/board/key', async (req: Request, res: Response) => {
+    try {
+      const project = await projectFor(req, res, { edit: true });
+      if (!project) return;
+      if (!isProjectAdmin(project, ((req as any).auth as Auth).userId)) return res.status(403).json({ message: 'Only a project admin can change its key' });
+      const result = await setKey(req.params.projectId, req.body?.key);
+      if ('error' in result) return res.status(result.status ?? 400).json({ message: result.error });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // The project's cards found by a search (?q=): by key or name, case aside; a key that is the
+  // search first. Each with its sequence.
+  router.get('/projects/:projectId/production/shots', async (req: Request, res: Response) => {
+    try {
+      const project = await projectFor(req, res, { edit: false });
+      if (!project) return;
+      const { projectId } = req.params;
+      const q = typeof req.query.q === 'string' ? req.query.q : '';
+      await numberCards(projectId);
+      const [columns, key] = [await readColumns(projectId), await readKey(projectId, project.name)];
+      const all = await getDb()!.collection('production_shots').find({ projectId }).sort({ number: 1 }).toArray();
+      const found = all.map(sh => asCard(columns, key, sh)).filter(sh => matchesSearch(sh, q));
+      const exact = (sh: { key: string | null }) => (sh.key?.toLowerCase() === q.trim().toLowerCase() ? 0 : 1);
+      res.json({ shots: found.sort((a, b) => exact(a) - exact(b)) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -252,6 +293,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
+      await numberCards(projectId);
       const shots = await db.collection('production_shots')
         .find({ sequenceId: seqId, projectId })
         .sort({ order: 1, createdAt: 1 })
@@ -266,7 +308,8 @@ export function productionRouter(_config: StreamByConfig): Router {
           .toArray()
         : [];
       const columns = await readColumns(projectId);
-      res.json({ shots: shots.map(sh => ({ ...withColumn(columns, withAssignees(sh)), taskSummary: summaryOf(tasks.filter(t => t.shotId === sh.id)) })) });
+      const key = await readKey(projectId, project.name);
+      res.json({ shots: shots.map(sh => ({ ...asCard(columns, key, sh), taskSummary: summaryOf(tasks.filter(t => t.shotId === sh.id)) })) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -302,6 +345,7 @@ export function productionRouter(_config: StreamByConfig): Router {
         name: values.name,
         description: values.description ?? null,
         order: values.order ?? 0,
+        number: await nextNumber(projectId),
         status: placed!.status,
         columnId: placed!.columnId,
         assignedTo: values.assignedTo ?? [],
@@ -315,7 +359,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       };
 
       await db.collection('production_shots').insertOne({ ...shot });
-      res.status(201).json({ shot });
+      res.status(201).json({ shot: { ...shot, key: cardKey(await readKey(projectId, project.name), shot) } });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -349,7 +393,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       );
 
       if (!result) return res.status(404).json({ message: 'Shot not found' });
-      res.json({ shot: withColumn(await readColumns(projectId), withAssignees(result)) });
+      res.json({ shot: asCard(await readColumns(projectId), await readKey(projectId, project.name), result) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
