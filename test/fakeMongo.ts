@@ -1,22 +1,53 @@
 // A MongoDB database in memory, with what the routes use of it: equality (an array field matches
-// a value it holds), $in, $exists and $or filters; $set, $unset, $inc, $max and $pull updates (and
-// upserts), one document or many; find with sort, limit and projection; and unique indexes
+// a value it holds; a dotted key reaches into subdocuments and arrays of them; ObjectIds equal by
+// their value), $in, $ne, $exists, $regex (with $options) and $or filters; $set, $unset, $inc,
+// $max and $pull updates (and upserts), one document or many; find with sort, limit and
+// projection; an _id given to what's inserted without one, as the driver does; and unique indexes
 // (partial ones too), a write that breaks one refused with a duplicate key error (code 11000).
+
+import { ObjectId } from 'mongodb';
 
 type Doc = Record<string, any>;
 
+const isId = (value: any) => value instanceof ObjectId;
+// An ObjectId equals an ObjectId of its value, never a string (as in MongoDB).
+const same = (a: any, b: any) => {
+  if (isId(a) || isId(b)) return isId(a) && isId(b) && String(a) === String(b);
+  return a === b || (a != null && b != null && typeof b !== 'object' && String(a) === String(b));
+};
+
+// What a key holds in a document: a dotted one, each of the values it reaches (through arrays).
+const valuesAt = (doc: any, key: string): any[] => {
+  const [head, ...rest] = key.split('.');
+  const value = doc?.[head];
+  if (!rest.length) return [value];
+  const inner = Array.isArray(value) ? value : [value];
+  return inner.flatMap(item => (item && typeof item === 'object' ? valuesAt(item, rest.join('.')) : [undefined]));
+};
+
 const valueMatches = (actual: any, expected: any): boolean => {
-  if (expected && typeof expected === 'object' && !Array.isArray(expected) && !(expected instanceof Date)) {
-    if ('$in' in expected) return expected.$in.includes(actual);
+  if (expected && typeof expected === 'object' && !Array.isArray(expected) && !(expected instanceof Date) && !isId(expected)) {
+    if ('$in' in expected) return (Array.isArray(actual) ? actual : [actual]).some(a => expected.$in.some((e: any) => same(a, e)));
+    if ('$ne' in expected) return !(Array.isArray(actual) ? actual : [actual]).some(a => same(a, expected.$ne) || (a === undefined && expected.$ne === null));
     if ('$exists' in expected) return (actual !== undefined) === expected.$exists;
+    if ('$regex' in expected) {
+      const pattern = new RegExp(expected.$regex, expected.$options ?? '');
+      return (Array.isArray(actual) ? actual : [actual]).some(a => typeof a === 'string' && pattern.test(a));
+    }
   }
   if (Array.isArray(actual) && !Array.isArray(expected)) return actual.some(item => valueMatches(item, expected));
-  return actual === expected || (actual != null && expected != null && String(actual) === String(expected) && typeof expected !== 'object');
+  return same(actual, expected);
 };
 
 export const matches = (doc: Doc, filter: Doc = {}): boolean =>
-  Object.entries(filter).every(([key, expected]) =>
-    key === '$or' ? (expected as Doc[]).some(f => matches(doc, f)) : valueMatches(doc[key], expected));
+  Object.entries(filter).every(([key, expected]) => {
+    if (key === '$or') return (expected as Doc[]).some(f => matches(doc, f));
+    if (!key.includes('.')) return valueMatches(doc[key], expected);
+    const reached = valuesAt(doc, key);
+    // A negation holds when no value it reaches is the one negated.
+    if (expected && typeof expected === 'object' && '$ne' in expected) return reached.every(v => valueMatches(v, expected));
+    return reached.some(v => valueMatches(v, expected));
+  });
 
 const applyUpdate = (doc: Doc, update: Doc) => {
   if (update.$set) Object.assign(doc, update.$set);
@@ -93,6 +124,7 @@ export class FakeCollection {
   }
 
   async insertOne(doc: Doc) {
+    if (doc._id === undefined) doc._id = new ObjectId();
     const broken = this.broken(doc);
     if (broken) throw new DuplicateKeyError(broken);
     this.docs.push({ ...doc });

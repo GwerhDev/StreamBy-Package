@@ -136,8 +136,22 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
       ALTER TABLE streamby.project_members ADD COLUMN IF NOT EXISTS status VARCHAR(50) NOT NULL DEFAULT 'active';
       -- Who invited a pending member (or the member, asking to join): told when it's answered.
       ALTER TABLE streamby.project_members ADD COLUMN IF NOT EXISTS "invitedBy" VARCHAR(255);
+      -- A member's projects are asked for by their id (its unique key leads with the project's).
+      CREATE INDEX IF NOT EXISTS project_members_userid_idx ON streamby.project_members ("userId");
     `);
     console.log('✅ "project_members" table ensured to exist.');
+
+    // Users are searched by a part of their username, case aside (ILIKE '%…%'): a trigram index
+    // takes it. The accounts' table is the host's: where it isn't here, or the extension can't
+    // be made, the search still works, without it.
+    await pool.query(`
+      DO $$ BEGIN
+        IF to_regclass('accounts.users') IS NOT NULL THEN
+          CREATE EXTENSION IF NOT EXISTS pg_trgm;
+          CREATE INDEX IF NOT EXISTS users_username_trgm_idx ON accounts.users USING gin (username gin_trgm_ops);
+        END IF;
+      EXCEPTION WHEN OTHERS THEN NULL; END $$;
+    `);
 
     // Migrate projectId FK column from UUID to TEXT if table predates this schema version
     await pool.query(`

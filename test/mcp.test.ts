@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { bounded } from './modelFilters';
 import express from 'express';
 import http from 'http';
 import type { AddressInfo } from 'net';
@@ -13,7 +14,7 @@ const matches = (record: any, filter: any = {}) =>
 const fakeModel = (name: string): any => {
   const rows = () => (store[name] ??= []);
   const model: any = {
-    find: async (filter: any) => rows().filter(r => matches(r, filter)),
+    find: async (filter: any) => rows().filter(bounded(name, filter) ?? (r => matches(r, filter))),
     findOne: async (filter: any) => rows().find(r => matches(r, filter)) ?? null,
     create: async (doc: any) => {
       const { dbType: _d, ...row } = doc;

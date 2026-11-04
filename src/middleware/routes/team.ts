@@ -27,7 +27,9 @@ export function teamRouter(config: StreamByConfig): Router {
     const mainDb = config.databases?.find(db => db.main);
     const User = getModel('users', mainDb?.type);
     const ids = [...new Set(found.flatMap(t => t.memberIds))];
-    const users = new Map(await Promise.all(ids.map(async id => [id, await User.findOne({ _id: id }).catch(() => null)] as const)));
+    // All of them at once, not one by one.
+    const people = ids.length ? await User.find({ ids }) : [];
+    const users = new Map(people.map((u: any) => [String(u._id ?? u.id), u] as const));
     return found.map((team: Team) => ({
       id: team.id, name: team.name, createdAt: team.createdAt, updatedAt: team.updatedAt,
       grantsPermissions: granting.has(team.id),

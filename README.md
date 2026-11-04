@@ -822,6 +822,16 @@ nor one that starts a job.
 
 The library will only interact with the specified schema and will not touch other schemas in your database. The `reset` option is opt-in and will only drop and recreate the specified `streamby` schema if explicitly set to `true`.
 
+**Queries by what a request needs.** No request reads every project or user: a user's projects
+are asked for by their memberships (`project_members("userId")` in PostgreSQL, indexed;
+`members.userId` in MongoDB, indexed), exploring by the projects that aren't private, a project by
+its id. A SQL project's members are read for all the projects asked for in one query. Users are
+searched in the database (`ILIKE` in PostgreSQL, a case-insensitive escaped regular expression in
+MongoDB), the first 20. In PostgreSQL, where the host's `accounts.users` table is there at
+startup, StreamBy adds a trigram index on `username` for it (`pg_trgm`); where it can't, the search
+works without it. Only startup's passes (re-encrypting credentials, backfilling built-in
+connections) read them all, once.
+
 ### PostgreSQL Example
 
 ```ts

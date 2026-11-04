@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { DbConnection, StorageConnection, IntegrationConnection, StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
-import { activeMemberOf, canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
+import { activeMemberOf, canEditProject, isProjectAdmin, isProjectMember, projectOfPrincipal } from '../../utils/auth';
 import { getConnection } from '../../adapters/database/connectionManager';
 import { sqlAdapter } from '../../adapters/database/sql';
 import { exportSummaries, sanitizeIntegrationConnections, sanitizeProject } from '../../utils/sanitize';
@@ -31,15 +31,28 @@ export function projectRouter(config: StreamByConfig): Router {
     };
   };
 
+  // The projects someone is an active member of, as the routes that change one answer them: read
+  // by their memberships, never all of them.
+  const activeProjectsOf = async (userId: string) => (await Project.find({ memberUserId: String(userId) }))
+    .filter(project => {
+      const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === userId?.toString());
+      return !!currentUserMember && currentUserMember.status === 'active';
+    })
+    .map(project => mapProjectToResponseFormat(project, userId));
+
   router.get('/projects', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       const archivedQuery = req.query.archived;
       const filterArchived = archivedQuery !== undefined ? String(archivedQuery).toLowerCase() === 'true' : undefined;
 
-      const allProjects = await Project.find({}); // Fetch all projects
+      // Only the projects they're a member of: a project's token, its own project.
+      const tokenProject = projectOfPrincipal(auth.userId);
+      const memberOf = tokenProject !== undefined
+        ? [await Project.findOne({ _id: tokenProject })].filter(Boolean) as any[]
+        : await Project.find({ memberUserId: String(auth.userId) });
 
-      const projects = allProjects
+      const projects = memberOf
         .filter(project => {
           const currentUserMember = activeMemberOf(project, auth.userId?.toString());
           if (!currentUserMember) return false;
@@ -62,8 +75,9 @@ export function projectRouter(config: StreamByConfig): Router {
   router.get('/projects/explore', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
-      const allProjects = await Project.find({});
-      const result = allProjects
+      // Only the ones shown to explore (all but those made private).
+      const listed = await Project.find({ listed: true });
+      const result = listed
         .filter((p: any) => p.public !== false)
         .map((p: any) => ({
           id: p._id || p.id,
@@ -148,15 +162,7 @@ export function projectRouter(config: StreamByConfig): Router {
         if (stamped) newProject = stamped;
       }
 
-      const allProjects = await Project.find({});
-      const projects = allProjects
-        .filter(project => {
-          const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
-          if (!currentUserMember || currentUserMember.status !== 'active') return false;
-
-          return true;
-        })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+      const projects = await activeProjectsOf(auth.userId);
       res.status(200).json({ success: true, projects: projects, projectId: newProject._id || newProject.id, message: 'Project created successfully' });
     } catch (err: any) {
       console.error('Error creating project:', err);
@@ -248,15 +254,7 @@ export function projectRouter(config: StreamByConfig): Router {
       if (!updated) {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
-      const allProjects = await Project.find({});
-      const projects = allProjects
-        .filter(project => {
-          const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
-          if (!currentUserMember || currentUserMember.status !== 'active') return false;
-
-          return true;
-        })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+      const projects = await activeProjectsOf(auth.userId);
 
       res.status(200).json({ success: true, projects: projects, projectId: updated._id || updated.id, message: 'Project updated successfully' });
     } catch (err: any) {
@@ -289,15 +287,7 @@ export function projectRouter(config: StreamByConfig): Router {
       if (projectId) await jobStore().deleteProject(String(projectId));
       if (projectId) await documentStore().deleteProject(String(projectId));
 
-      const allProjects = await Project.find({});
-      const projects = allProjects
-        .filter(project => {
-          const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
-          if (!currentUserMember || currentUserMember.status !== 'active') return false;
-
-          return true;
-        })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+      const projects = await activeProjectsOf(auth.userId);
 
       res.status(200).json({ success: true, projects: projects, message: 'Project deleted successfully' });
     } catch (err: any) {
@@ -364,15 +354,8 @@ export function projectRouter(config: StreamByConfig): Router {
         await Project.update({ _id: projectId }, { members: project.members });
       }
 
-      // Re-fetch all projects for the user to ensure the list is up-to-date
-      const allProjects = await Project.find({});
-      const projects = allProjects
-        .filter(project => {
-          const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
-          if (!currentUserMember || currentUserMember.status !== 'active') return false;
-          return true;
-        })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+      // The user's projects as they are now.
+      const projects = await activeProjectsOf(auth.userId);
 
       res.status(200).json({ success: true, projects: projects, message: 'Project archived successfully' });
     } catch (err: any) {
@@ -410,15 +393,8 @@ export function projectRouter(config: StreamByConfig): Router {
         await Project.update({ _id: projectId }, { members: project.members });
       }
 
-      // Re-fetch all projects for the user to ensure the list is up-to-date
-      const allProjects = await Project.find({});
-      const projects = allProjects
-        .filter(project => {
-          const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === auth.userId?.toString());
-          if (!currentUserMember || currentUserMember.status !== 'active') return false;
-          return true;
-        })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+      // The user's projects as they are now.
+      const projects = await activeProjectsOf(auth.userId);
 
 
       res.status(200).json({ success: true, projects: projects, message: 'Project unarchived successfully' });

@@ -12,7 +12,7 @@ export const projectTokenPrincipal = (tokenId: string, projectId: string) => `${
 export const isProjectTokenPrincipal = (userId: unknown): boolean =>
   typeof userId === 'string' && userId.startsWith(PROJECT_TOKEN_PRINCIPAL);
 
-const projectOfPrincipal = (userId: string): string | undefined => {
+export const projectOfPrincipal = (userId: string): string | undefined => {
   if (!isProjectTokenPrincipal(userId)) return undefined;
   const rest = userId.slice(PROJECT_TOKEN_PRINCIPAL.length);
   return rest.slice(rest.indexOf(':') + 1) || undefined;

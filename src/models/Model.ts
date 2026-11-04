@@ -4,6 +4,21 @@ import { MongoClient, Document, ObjectId, UpdateFilter } from 'mongodb';
 import { sqlAdapter } from '../adapters/database/sql';
 import { nosqlAdapter } from '../adapters/database/nosql';
 
+const OBJECT_ID = /^[0-9a-f]{24}$/i;
+const idForms = (id: string): unknown[] => (OBJECT_ID.test(id) ? [id, new ObjectId(id)] : [id]);
+// What a search holds, taken as it is: in a LIKE pattern (escaped with \), in a regular expression.
+const likeEscaped = (text: string) => text.replace(/[\\%_]/g, c => `\\${c}`);
+const regexEscaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// A SQL project's member, as its project answers it.
+const memberOf = (member: any) => ({
+  userId: member.userId,
+  role: member.role,
+  status: member.status,
+  archived: member.archived,
+  ...(member.invitedBy ? { invitedBy: member.invitedBy } : {}),
+});
+
 export class Model<T extends Document> {
   private connectionIds: string[];
   private tableName: string;
@@ -33,7 +48,18 @@ export class Model<T extends Document> {
     return new Model<T>(filteredConnectionIds, this.tableName, this.schema);
   }
 
-  async find(filter: any): Promise<T[]> {
+  /**
+   * The records a filter matches: its fields, equal; or, asked by one of these (never all of a
+   * table read and filtered after), for projects:
+   *   - `memberUserId`: the projects someone is a member of (any status);
+   *   - `listed: true`: the ones shown to explore (all but those made private);
+   *   - `connectedIntegration`: the ones one of whose connections uses an integration;
+   * and for users:
+   *   - `usernameContains`: whose username holds it, case aside;
+   *   - `ids`: those of these ids.
+   * `limit` caps how many each database answers.
+   */
+  async find(filter: any, options: { limit?: number } = {}): Promise<T[]> {
     const allResults: T[] = [];
     const activeConnectionIds = this.connectionIds.filter(id => getConnectedIds().includes(id));
 
@@ -41,56 +67,94 @@ export class Model<T extends Document> {
       const clientEntry = getConnection(connectionId);
       const connection = clientEntry.client;
       const dbType = clientEntry.type;
-      let processedFilter = { ...filter };
+      const processedFilter = { ...filter };
 
       if (dbType === 'sql') {
         if (processedFilter._id) {
           processedFilter.id = processedFilter._id;
           delete processedFilter._id;
         }
-
-        let sqlResults: any[] = [];
-        if (this.tableName === 'projects' && typeof processedFilter.connectedIntegration === 'string') {
-          // The projects one of whose connections uses an integration (its id in any of their lists).
-          const schema = this.schema || 'streamby';
-          const has = JSON.stringify([{ integrationId: processedFilter.connectedIntegration }]);
-          const result = await (connection as Pool).query(
-            `SELECT * FROM "${schema}"."projects" WHERE "dbConnections" @> $1::jsonb OR "storageConnections" @> $1::jsonb OR "integrationConnections" @> $1::jsonb`,
-            [has],
-          );
-          sqlResults = result.rows;
-        } else {
-          // General SQL find
-          sqlResults = await sqlAdapter.find(connection as Pool, this.tableName, processedFilter, this.schema);
-        }
-
-        for (const item of sqlResults) {
-          const transformedItem = this.transformResult(item);
-          if (this.tableName === 'projects' && !transformedItem.members) {
-            // A SQL project's members are rows of project_members, read with it
-            const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedItem.id }, this.schema);
-            (transformedItem as any).members = projectMembers.map((member: any) => ({
-              userId: member.userId,
-              role: member.role,
-              status: member.status,
-              archived: member.archived,
-              ...(member.invitedBy ? { invitedBy: member.invitedBy } : {}),
-            }));
-          }
-          allResults.push(transformedItem);
-        }
+        const sqlResults = await this.findSql(connection as Pool, processedFilter, options);
+        const records = sqlResults.map(item => this.transformResult(item));
+        if (this.tableName === 'projects') await this.withSqlMembers(connection as Pool, records);
+        allResults.push(...records);
       } else if (dbType === 'nosql') {
-        if (this.tableName === 'projects' && typeof processedFilter.connectedIntegration === 'string') {
-          const integrationId = processedFilter.connectedIntegration;
-          processedFilter = { $or: ['dbConnections', 'storageConnections', 'integrationConnections'].map(list => ({ [`${list}.integrationId`]: integrationId })) };
-        }
-        const nosqlResults = await nosqlAdapter.find(connection as MongoClient, this.tableName, processedFilter);
+        const nosqlResults = await nosqlAdapter.find(connection as MongoClient, this.tableName, this.nosqlFilter(processedFilter), options);
         for (const item of nosqlResults) {
           allResults.push(this.transformResult(item));
         }
       }
     }
     return allResults;
+  }
+
+  private async findSql(connection: Pool, filter: any, { limit }: { limit?: number }): Promise<any[]> {
+    const schema = this.schema || 'streamby';
+    const table = `"${schema}"."${this.tableName}"`;
+    const limited = (sql: string, values: unknown[]) =>
+      (limit ? connection.query(`${sql} LIMIT $${values.length + 1}`, [...values, limit]) : connection.query(sql, values));
+    if (this.tableName === 'projects') {
+      if (typeof filter.connectedIntegration === 'string') {
+        // The projects one of whose connections uses an integration (its id in any of their lists).
+        const has = JSON.stringify([{ integrationId: filter.connectedIntegration }]);
+        return (await limited(`SELECT * FROM ${table} WHERE "dbConnections" @> $1::jsonb OR "storageConnections" @> $1::jsonb OR "integrationConnections" @> $1::jsonb`, [has])).rows;
+      }
+      if (typeof filter.memberUserId === 'string') {
+        return (await limited(
+          `SELECT * FROM ${table} WHERE id IN (SELECT "projectId" FROM "${schema}"."project_members" WHERE "userId" = $1)`,
+          [filter.memberUserId],
+        )).rows;
+      }
+      if (filter.listed === true) {
+        return (await limited(`SELECT * FROM ${table} WHERE public IS DISTINCT FROM FALSE`, [])).rows;
+      }
+    }
+    if (this.tableName === 'users') {
+      if (typeof filter.usernameContains === 'string') {
+        return (await limited(`SELECT * FROM ${table} WHERE username ILIKE $1 ESCAPE '\\'`, [`%${likeEscaped(filter.usernameContains)}%`])).rows;
+      }
+      if (Array.isArray(filter.ids)) {
+        if (!filter.ids.length) return [];
+        return (await limited(`SELECT * FROM ${table} WHERE id::text = ANY($1::text[])`, [filter.ids.map(String)])).rows;
+      }
+    }
+    const rows = await sqlAdapter.find(connection, this.tableName, filter, this.schema);
+    return limit ? rows.slice(0, limit) : rows;
+  }
+
+  // A SQL project's members are rows of project_members: read for all the projects at once.
+  private async withSqlMembers(connection: Pool, projects: any[]): Promise<void> {
+    const without = projects.filter(p => !p.members);
+    if (!without.length) return;
+    const schema = this.schema || 'streamby';
+    const { rows } = await connection.query(
+      `SELECT * FROM "${schema}"."project_members" WHERE "projectId" = ANY($1::text[])`,
+      [without.map(p => String(p.id))],
+    );
+    for (const project of without) {
+      project.members = rows.filter((m: any) => String(m.projectId) === String(project.id)).map(memberOf);
+    }
+  }
+
+  private nosqlFilter(filter: any): any {
+    if (this.tableName === 'projects') {
+      if (typeof filter.connectedIntegration === 'string') {
+        const integrationId = filter.connectedIntegration;
+        return { $or: ['dbConnections', 'storageConnections', 'integrationConnections'].map(list => ({ [`${list}.integrationId`]: integrationId })) };
+      }
+      // A member's id is kept as a string (an older project may keep an ObjectId).
+      if (typeof filter.memberUserId === 'string') return { 'members.userId': { $in: idForms(filter.memberUserId) } };
+      if (filter.listed === true) return { public: { $ne: false } };
+    }
+    if (this.tableName === 'users') {
+      if (typeof filter.usernameContains === 'string') {
+        return { username: { $regex: regexEscaped(filter.usernameContains), $options: 'i' } };
+      }
+      if (Array.isArray(filter.ids)) {
+        return { _id: { $in: filter.ids.map(String).filter((id: string) => OBJECT_ID.test(id)).map((id: string) => new ObjectId(id)) } };
+      }
+    }
+    return filter;
   }
 
   private transformResult(item: any): T {
@@ -129,13 +193,7 @@ export class Model<T extends Document> {
           if (this.tableName === 'projects') {
             // For projects, fetch members from project_members table
             const projectMembers = await sqlAdapter.find(connection as Pool, 'project_members', { projectId: transformedResult.id }, this.schema);
-            (transformedResult as any).members = projectMembers.map((member: any) => ({
-              userId: member.userId,
-              role: member.role,
-              status: member.status,
-              archived: member.archived,
-              ...(member.invitedBy ? { invitedBy: member.invitedBy } : {}),
-            }));
+            (transformedResult as any).members = projectMembers.map(memberOf);
           }
           // Track which connection found this record so update() routes correctly
           try { Object.defineProperty(transformedResult, '__foundByConnectionId', { value: connectionId, enumerable: false, writable: true }); } catch {}

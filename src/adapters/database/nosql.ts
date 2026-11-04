@@ -5,6 +5,8 @@ export const ensureCollectionsExist = async (client: MongoClient) => {
   const db = client.db();
 
   await db.collection('projects').findOne({});
+  // A member's projects are asked for by their id.
+  await db.collection('projects').createIndex({ 'members.userId': 1 }, { name: 'projects_members_userid' });
   console.log('✅ "projects" collection ensured to exist.');
 
   await db.collection('exports').findOne({});
@@ -37,10 +39,10 @@ export const createNoSQLExportCollection = async (
 };
 
 export const nosqlAdapter = {
-  find: async (connection: MongoClient, tableName: string, filter: any): Promise<Document[]> => {
+  find: async (connection: MongoClient, tableName: string, filter: any, { limit }: { limit?: number } = {}): Promise<Document[]> => {
     const db = connection.db();
-    const result = await db.collection(tableName).find(filter).toArray();
-    return result;
+    const cursor = db.collection(tableName).find(filter);
+    return (limit ? cursor.limit(limit) : cursor).toArray();
   },
 
   findOne: async (connection: MongoClient, tableName: string, filter: any): Promise<Document | null> => {

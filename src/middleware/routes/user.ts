@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { StreamByConfig, Auth } from '../../types';
 import { getModel } from '../../models/manager';
 
+const SEARCH_LIMIT = 20;
+
 export function userRouter(config: StreamByConfig): Router {
   const router = Router();
   const User = getModel('users');
@@ -15,12 +17,11 @@ export function userRouter(config: StreamByConfig): Router {
         return res.status(400).json({ message: 'Query param q is required' });
       }
 
-      const allUsers = await User.find({});
-      const lower = q.toLowerCase();
+      // Searched in the database (its username holding it, case aside), the first 20.
+      const found = await User.find({ usernameContains: q }, { limit: SEARCH_LIMIT });
 
-      const users = allUsers
-        .filter((u: any) => u.username?.toLowerCase().includes(lower))
-        .slice(0, 20)
+      const users = found
+        .slice(0, SEARCH_LIMIT)
         .map((u: any) => ({
           id: u._id || u.id,
           username: u.username,

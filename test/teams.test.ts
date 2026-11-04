@@ -6,6 +6,7 @@ import request from 'supertest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { FakeDb } from './fakeMongo';
+import { bounded } from './modelFilters';
 
 // Teams live in the NoSQL database (here in memory); projects, users and tokens in the models
 // (here in memory too). A NoSQL project, so removing a member takes them out of its members.
@@ -16,7 +17,7 @@ const matchesRecord = (record: any, filter: any = {}) =>
 const fakeModel = (name: string): any => {
   const rows = () => (store[name] ??= []);
   const model: any = {
-    find: async (filter: any) => rows().filter(r => matchesRecord(r, filter)),
+    find: async (filter: any) => rows().filter(bounded(name, filter) ?? (r => matchesRecord(r, filter))),
     findOne: async (filter: any) => rows().find(r => matchesRecord(r, filter)) ?? null,
     create: async (doc: any) => { const { dbType: _d, ...row } = doc; rows().push(row); return row; },
     update: async (filter: any, data: any) => {
