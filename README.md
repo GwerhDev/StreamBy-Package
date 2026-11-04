@@ -362,6 +362,14 @@ have no gates before them, is ready, as it always was. While it's blocked:
 - its export can't be published (`POST /projects/:projectId/deliverables/:exportId/publish`
   answers 409 with `blockedBy`).
 
+If the change that made it ready came from someone who can't run jobs (an API token without
+`jobs:run`), its workers stay held: the deliverable is answered with `workersWaiting: true`, and
+`POST /projects/:projectId/deliverables/:deliverableId/start-workers` (`jobs:run`, and being able
+to edit the project) starts them as the caller, answering the deliverable and the `jobs` started.
+A blocked one answers 409 with `blockedBy`; one not held (started already) answers no jobs. Of
+two starts, or a start and a gate change, at once, only one starts them. From the MCP server,
+`start_deliverable_workers`.
+
 `GET /projects/:projectId/deliverables/gates` answers the state of each Deliverable node of the
 workflow (`nodes`, by node id). When something a gate reads changes (a review decided, an
 asset's credits, a credits sheet, a file deleted, the workflow saved), each member gets a

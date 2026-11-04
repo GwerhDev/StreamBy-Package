@@ -348,7 +348,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'list_deliverables', title: 'List deliverables', permissions: ['assets:read'],
-    description: "A project's deliverables (assets delivered for a shot or an export), of one shot or export if given: each one's asset, version, note and what it's for, and its status: ready, or blocked by the gates before it in the workflow (a Review Gate whose review session isn't approved, a Credits sheet that isn't complete). A blocked one lists in blockedBy each gate that holds it and what it lacks; while blocked its automatic workers wait and its export can't be published.",
+    description: "A project's deliverables (assets delivered for a shot or an export), of one shot or export if given: each one's asset, version, note and what it's for, and its status: ready, or blocked by the gates before it in the workflow (a Review Gate whose review session isn't approved, a Credits sheet that isn't complete). A blocked one lists in blockedBy each gate that holds it and what it lacks; while blocked its automatic workers wait and its export can't be published. workersWaiting: it's ready, but its workers are still held (start_deliverable_workers starts them).",
     input: {
       projectId,
       shotId: z.string().optional().describe("A shot's id: only its deliverables"),
@@ -375,6 +375,13 @@ export const TOOLS = [
     projectOf: byProject,
     call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/deliverables`, body: defined(fields) }),
     pick: (data) => data?.deliverable,
+  }),
+  tool({
+    name: 'start_deliverable_workers', title: "Start a deliverable's waiting workers", permissions: ['jobs:run'], write: true,
+    description: "Starts the workers that process a ready deliverable's kind of asset by themselves, when they're still waiting (workersWaiting in list_deliverables): held while it was blocked, nothing started them when it got ready. It answers the deliverable and the jobs started (none if they had started already). A blocked one is refused, with what holds it.",
+    input: { projectId, deliverableId: id('deliverable') },
+    projectOf: byProject,
+    call: ({ projectId, deliverableId }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/deliverables/${enc(deliverableId)}/start-workers` }),
   }),
   tool({
     name: 'remove_deliverable', title: 'Remove a deliverable', permissions: ['assets:write'], write: true,

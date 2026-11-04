@@ -127,9 +127,9 @@ const RULES = [
   rule(['POST'], `${P}/exports`, 'exports:write'),
   rule(['PATCH', 'DELETE'], `${P}/exports/[^/]+`, 'exports:write'),
 
-  // Jobs: transcoding, rendering, AI, publishing a deliverable.
+  // Jobs: transcoding, rendering, AI, publishing a deliverable, starting its held workers.
   rule('read', `${P}/jobs`, 'jobs:read'),
-  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/publish)`, 'jobs:run'),
+  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/(publish|start-workers))`, 'jobs:run'),
 
   // Documents: writing them is saving a version or moving them; publishing one (choosing what
   // the exports deliver, or whether they deliver it at all) is apart. A PATCH that changes

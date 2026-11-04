@@ -28,7 +28,9 @@ export async function afterGateChange(req: Request, config: StreamByConfig, proj
 // A project's deliverables (see services/deliverables): marked, listed and removed, each with its
 // state (ready, or blocked by the gates before it in the workflow: see services/deliverableGates).
 // Removing one never deletes its asset. Marking one starts the workers set to process its kind of
-// asset by themselves; marking one that's blocked holds them until it's ready.
+// asset by themselves; marking one that's blocked holds them until it's ready. One ready whose
+// workers are still held (the change that made it ready came from someone who can't run jobs)
+// says so (workersWaiting), and they're started by hand.
 export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = Router();
   const Project = getModel('projects');
@@ -51,11 +53,12 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
       : [[], [], []];
     const states = await deliverableStates(project, deliverables);
     return deliverables.map((d, i) => {
-      const { heldJobs: _held, ...shown } = d;
+      const { heldJobs, ...shown } = d;
       const file: any = files.find((f: any) => f.fileId === d.assetId);
       const version: any = versions.find((v: any) => v.versionId === d.versionId);
       return {
         ...withState(shown, states[i]),
+        workersWaiting: !!heldJobs && states[i].status === 'ready',
         asset: file ? { displayName: file.displayName, category: file.category, contentType: file.contentType ?? null } : null,
         version: version ? version.version : null,
         shotName: d.shotId ? (shots.find((s: any) => s.id === d.shotId) as any)?.name ?? null : null,
@@ -153,6 +156,39 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
       res.status(201).json({ deliverable: described, jobs: jobs.map(publicJob) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to mark the deliverable', details: err.message });
+    }
+  });
+
+  // A ready deliverable's workers that are still held, started as the caller. Of two starts (or a
+  // start and a gate change) at once, only the one that takes the hold starts them; one not held
+  // (started already, or never held) is answered with no jobs.
+  router.post('/projects/:projectId/deliverables/:deliverableId/start-workers', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, deliverableId } = req.params;
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      if (!tokenAllows(auth.apiToken, 'jobs:run')) return res.status(403).json({ message: 'Starting workers needs jobs:run' });
+
+      const col = deliverablesCollection();
+      if (!col) return res.status(500).json({ message: 'Database not available' });
+      const found: any = await col.findOne({ projectId, id: deliverableId });
+      if (!found) return res.status(404).json({ message: 'Deliverable not found' });
+      const { _id, ...deliverable } = found;
+      const [described] = await describe(project, [deliverable as Deliverable]);
+      if (described.status === 'blocked') {
+        return res.status(409).json({ message: `Blocked: ${described.blockedBy.map(b => `${b.label} (${b.reason})`).join('; ')}`, blockedBy: described.blockedBy });
+      }
+
+      const taken = await col.updateOne({ projectId, id: deliverableId, heldJobs: true }, { $unset: { heldJobs: '' } });
+      const jobs = taken.modifiedCount
+        ? await enqueueAutomaticJobs(project, deliverable.assetId, deliverable.versionId ?? null, auth, config, callbackBaseOf(req, config))
+        : [];
+      const [now] = await describe(project, [{ ...(deliverable as Deliverable), heldJobs: undefined }]);
+      res.json({ deliverable: now, jobs: jobs.map(publicJob) });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to start the deliverable's workers", details: err.message });
     }
   });
 

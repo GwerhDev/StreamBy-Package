@@ -284,6 +284,78 @@ describe('a blocked deliverable', () => {
   });
 });
 
+describe("a ready deliverable's waiting workers", () => {
+  // Made ready by a token that approves reviews but can't run jobs: its workers stay held.
+  const readyByAToken = async () => {
+    const { session } = await releasing();
+    const made = (await mark({ exportId: 'e1' })).body.deliverable;
+    await eli.put(`${P}/assets/a1/rights`, complete);
+    const token = await tokenFor(['assets:read', 'assets:write'], 'ada');
+    expect((await as({ token }).post(`${P}/reviews/${session.id}/decision`, { decision: 'approve' })).status).toBe(200);
+    return made.id as string;
+  };
+  const start = (id: string, who = eli) => who.post(`${P}/deliverables/${id}/start-workers`);
+
+  it('says so, when nothing released them', async () => {
+    const id = await readyByAToken();
+    expect(started).toEqual([]);
+    const [listedOne] = await listed();
+    expect(listedOne).toMatchObject({ id, status: 'ready', workersWaiting: true });
+    expect(listedOne).not.toHaveProperty('heldJobs');
+  });
+
+  it('are started by hand, once, as who starts them, even with two starts at once', async () => {
+    const id = await readyByAToken();
+    const [one, two] = await Promise.all([start(id), start(id, ada)]);
+    expect([one.status, two.status]).toEqual([200, 200]);
+    expect(started).toHaveLength(1);
+    expect([...one.body.jobs, ...two.body.jobs]).toHaveLength(1);
+    expect(one.body.deliverable).toMatchObject({ id, status: 'ready', workersWaiting: false });
+    expect((await listed())[0].workersWaiting).toBe(false);
+    // Started already: answered, with no jobs.
+    const again = await start(id);
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({ deliverable: { id }, jobs: [] });
+    expect(started).toHaveLength(1);
+  });
+
+  it("aren't started while it's blocked", async () => {
+    await releasing();
+    const id = (await mark({ exportId: 'e1' })).body.deliverable.id;
+    const refused = await start(id);
+    expect(refused.status).toBe(409);
+    expect(refused.body.blockedBy.map((b: any) => b.nodeId)).toEqual(['gate', 'sheet']);
+    expect(started).toEqual([]);
+    // Held, but blocked: not waiting on anyone to start them.
+    expect((await listed())[0]).toMatchObject({ status: 'blocked', workersWaiting: false });
+    expect(mongo.db.docs('deliverables')[0].heldJobs).toBe(true);
+  });
+
+  it("aren't started by a token without jobs:run, nor by a viewer, nor for another project's", async () => {
+    const id = await readyByAToken();
+    const token = await tokenFor(['assets:read', 'assets:write'], 'eli');
+    expect((await start(id, as({ token }))).status).toBe(403);
+    expect((await start(id, vic)).status).toBe(403);
+    expect((await start('nope')).status).toBe(404);
+    expect(started).toEqual([]);
+    // A project whose editors don't run jobs: nor do they start these.
+    expect((await ada.put(`${P}/permissions`, { roles: { 'jobs:run': 'admin' } })).status).toBe(200);
+    expect((await start(id)).status).toBe(403);
+    expect((await ada.put(`${P}/permissions`, { roles: { 'jobs:run': 'editor' } })).status).toBe(200);
+    const allowed = await tokenFor(['assets:read', 'jobs:run'], 'eli');
+    expect((await start(id, as({ token: allowed }))).body.jobs).toHaveLength(1);
+  });
+
+  it('one that was never held answers with no jobs', async () => {
+    const id = (await mark({ exportId: 'e1' })).body.deliverable.id;
+    expect(started).toHaveLength(1);
+    const res = await start(id);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ deliverable: { id, status: 'ready', workersWaiting: false }, jobs: [] });
+    expect(started).toHaveLength(1);
+  });
+});
+
 describe("a gate's change", () => {
   it("tells the project's members to read the deliverables' states again", async () => {
     const { session, doc } = await releasing();
@@ -337,7 +409,25 @@ describe('from the MCP server', () => {
     expect(marked.error).toBeNull();
     expect(marked.data).toMatchObject({ status: 'blocked', blockedBy: [expect.objectContaining({ label: 'Art review' }), expect.objectContaining({ label: 'Model credits' })] });
     const list = await call(client, 'list_deliverables', { projectId: 'p1' });
-    expect(list.data).toEqual([expect.objectContaining({ id: marked.data.id, status: 'blocked', gated: true })]);
+    expect(list.data).toEqual([expect.objectContaining({ id: marked.data.id, status: 'blocked', gated: true, workersWaiting: false })]);
+    await client.close();
+  });
+
+  it("starts a ready deliverable's waiting workers", async () => {
+    const { session } = await releasing();
+    const id = (await mark({ exportId: 'e1' })).body.deliverable.id;
+    await eli.put(`${P}/assets/a1/rights`, complete);
+    // Approved by a token that can't run jobs: they wait.
+    const approver = await tokenFor(['assets:read', 'assets:write'], 'ada');
+    await as({ token: approver }).post(`${P}/reviews/${session.id}/decision`, { decision: 'approve' });
+    const client = new Client({ name: 'test-agent', version: '1.0.0' });
+    const token = await tokenFor(['assets:read', 'jobs:run'], 'eli');
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    expect((await call(client, 'list_deliverables', { projectId: 'p1' })).data[0].workersWaiting).toBe(true);
+    const res = await call(client, 'start_deliverable_workers', { projectId: 'p1', deliverableId: id });
+    expect(res.error).toBeNull();
+    expect(res.data.jobs).toHaveLength(1);
+    expect(started).toEqual([{ assetId: 'a1', userId: 'eli' }]);
     await client.close();
   });
 });
