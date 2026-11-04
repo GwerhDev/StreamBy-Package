@@ -827,9 +827,9 @@ are asked for by their memberships (`project_members("userId")` in PostgreSQL, i
 `members.userId` in MongoDB, indexed), exploring by the projects that aren't private, a project by
 its id. A SQL project's members are read for all the projects asked for in one query. Users are
 searched in the database (`ILIKE` in PostgreSQL, a case-insensitive escaped regular expression in
-MongoDB), the first 20. In PostgreSQL, where the host's `accounts.users` table is there at
-startup, StreamBy adds a trigram index on `username` for it (`pg_trgm`); where it can't, the search
-works without it. Only startup's passes (re-encrypting credentials, backfilling built-in
+MongoDB), the first 20 (the users' table is the host's: an index for it, such as a trigram one on
+`username`, is the host's to make). Ids are compared as text, whichever type a database keeps them
+in. Only startup's passes (re-encrypting credentials, backfilling built-in
 connections) read them all, once.
 
 ### PostgreSQL Example

@@ -88,6 +88,8 @@ export class Model<T extends Document> {
     return allResults;
   }
 
+  // Ids are compared as text on both sides: a database made by an older StreamBy may keep a
+  // project's id, or its members' "projectId", as uuid, the other as text.
   private async findSql(connection: Pool, filter: any, { limit }: { limit?: number }): Promise<any[]> {
     const schema = this.schema || 'streamby';
     const table = `"${schema}"."${this.tableName}"`;
@@ -101,7 +103,7 @@ export class Model<T extends Document> {
       }
       if (typeof filter.memberUserId === 'string') {
         return (await limited(
-          `SELECT * FROM ${table} WHERE id IN (SELECT "projectId" FROM "${schema}"."project_members" WHERE "userId" = $1)`,
+          `SELECT * FROM ${table} WHERE id::text IN (SELECT "projectId"::text FROM "${schema}"."project_members" WHERE "userId"::text = $1)`,
           [filter.memberUserId],
         )).rows;
       }
@@ -128,7 +130,7 @@ export class Model<T extends Document> {
     if (!without.length) return;
     const schema = this.schema || 'streamby';
     const { rows } = await connection.query(
-      `SELECT * FROM "${schema}"."project_members" WHERE "projectId" = ANY($1::text[])`,
+      `SELECT * FROM "${schema}"."project_members" WHERE "projectId"::text = ANY($1::text[])`,
       [without.map(p => String(p.id))],
     );
     for (const project of without) {
