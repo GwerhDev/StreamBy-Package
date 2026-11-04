@@ -8,7 +8,8 @@ import { getModel } from '../src/models/manager';
 // with a pending member), and so the same answers, each asked of the database by what it needs.
 
 export interface Seeded {
-  users: Record<'ada' | 'eli' | 'vic', string>;
+  // ghost: a member whose user is no longer there.
+  users: Record<'ada' | 'eli' | 'vic' | 'ghost', string>;
   projects: Record<'alpha' | 'beta' | 'gamma' | 'delta', string>;
 }
 
@@ -30,7 +31,7 @@ export async function seedProjects(dbType: 'sql' | 'nosql', stamp: string, users
     alpha: await made('alpha', true, [m(users.ada, 'admin'), m(users.eli, 'editor', 'active', true)]),
     beta: await made('beta', false, [m(users.ada, 'admin'), m(users.vic, 'viewer', 'pending')]),
     gamma: await made('gamma', true, [m(users.vic, 'admin'), m(users.eli, 'viewer', 'pending')]),
-    delta: await made('delta', null, [m(users.eli, 'viewer')]),
+    delta: await made('delta', null, [m(users.eli, 'viewer'), m(users.ghost, 'viewer')]),
   };
 }
 
@@ -66,9 +67,18 @@ export async function runScenario(app: express.Express, stamp: string, { users, 
   const explored = ours((await eli.get('/projects/explore')).body.projects);
   expect(explored).toEqual([
     { id: projects.alpha, name: `${P}-alpha`, description: '', image: '', memberCount: 2, isMember: true, hasPendingRequest: false },
-    { id: projects.delta, name: `${P}-delta`, description: '', image: '', memberCount: 1, isMember: true, hasPendingRequest: false },
+    { id: projects.delta, name: `${P}-delta`, description: '', image: '', memberCount: 2, isMember: true, hasPendingRequest: false },
     { id: projects.gamma, name: `${P}-gamma`, description: '', image: '', memberCount: 1, isMember: false, hasPendingRequest: true },
   ]);
+
+  // A project's members with their usernames (and pictures), read at once; one whose user is no
+  // longer there, Unknown.
+  const members = (await eli.get(`/projects/${projects.delta}/members`)).body.members;
+  const memberOf = (id: string) => members.find((m: any) => m.userId === id);
+  expect(members).toHaveLength(2);
+  expect(memberOf(users.ghost)).toEqual({ userId: users.ghost, username: 'Unknown', role: 'viewer', status: 'active', profilePic: null });
+  expect(memberOf(users.eli)).toMatchObject({ userId: users.eli, username: `${P}-eli`, role: 'viewer', status: 'active' });
+  expect(memberOf(users.eli).profilePic ?? null).toBeNull();
 
   // The routes that change a project answer the user's projects as they are then.
   const patched = await ada.patch(`/projects/${projects.beta}`, { description: 'Changed' });

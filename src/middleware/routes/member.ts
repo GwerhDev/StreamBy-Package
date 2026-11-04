@@ -39,20 +39,21 @@ export function memberRouter(config: StreamByConfig): Router {
         return res.status(500).json({ message: 'Main database not configured' });
       }
 
+      // Their users, all at once; one no longer there is answered as Unknown.
       const User = getModel('users', mainDb.type);
-      const membersWithUsernames = await Promise.all(
-        project.members.map(async (member: any) => {
-          const user = await User.findOne({ _id: member.userId });
-          
-          return {
-            userId: member.userId,
-            username: user ? user.username : 'Unknown',
-            role: member.role,
-            status: member.status,
-            profilePic: user ? user.profilePic : user.googlePic,
-          };
-        })
-      );
+      const ids = [...new Set((project.members ?? []).map((m: any) => String(m.userId)))];
+      const people = ids.length ? await User.find({ ids }) : [];
+      const users = new Map(people.map((u: any) => [String(u._id ?? u.id), u] as const));
+      const membersWithUsernames = (project.members ?? []).map((member: any) => {
+        const user: any = users.get(String(member.userId));
+        return {
+          userId: member.userId,
+          username: user ? user.username : 'Unknown',
+          role: member.role,
+          status: member.status,
+          profilePic: user ? user.profilePic : null,
+        };
+      });
 
       res.json({ members: membersWithUsernames, message: 'Project members fetched successfully' });
     } catch (err: any) {

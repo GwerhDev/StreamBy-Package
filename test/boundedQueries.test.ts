@@ -42,7 +42,7 @@ const STAMP = 'mongo';
 const seedUsers = () => {
   const users = Object.fromEntries((['ada', 'eli', 'vic'] as const).map(name => [name, new ObjectId()])) as Record<'ada' | 'eli' | 'vic', ObjectId>;
   for (const [name, _id] of Object.entries(users)) mongo.db.collection('users').docs.push({ _id, username: `${prefix(STAMP)}-${name}` });
-  return Object.fromEntries(Object.entries(users).map(([k, v]) => [k, v.toHexString()])) as Record<'ada' | 'eli' | 'vic', string>;
+  return { ...Object.fromEntries(Object.entries(users).map(([k, v]) => [k, v.toHexString()])), ghost: new ObjectId().toHexString() } as Record<'ada' | 'eli' | 'vic' | 'ghost', string>;
 };
 
 let finds: any[] = [];
@@ -79,6 +79,18 @@ describe('in MongoDB', () => {
     mongo.db.collection('projects').docs.push({ _id: new ObjectId(), name: 'Old', members: [{ userId: id, role: 'admin', status: 'active' }] });
     const found = await getModel('projects').find({ memberUserId: id.toHexString() });
     expect(found.map((p: any) => p.name)).toEqual(['Old']);
+  });
+
+  it("reads a project's members' users, and its teams', at once, not one by one", async () => {
+    const users = seedUsers();
+    const projects = await seedProjects('nosql', STAMP, users);
+    await request(app).post(`/streamby/projects/${projects.alpha}/teams`).set('x-test-user', users.ada).send({ name: 'Artists', memberIds: [users.ada, users.eli] });
+    const findOne = vi.spyOn(Model.prototype, 'findOne');
+    finds = [];
+    await request(app).get(`/streamby/projects/${projects.alpha}/members`).set('x-test-user', users.ada);
+    await request(app).get(`/streamby/projects/${projects.alpha}/teams`).set('x-test-user', users.ada);
+    expect(findOne.mock.contexts.filter((model: any) => model.getTableName() === 'users')).toEqual([]);
+    expect(finds.filter(f => f.table === 'users').map(f => f.filter.ids.length)).toEqual([2, 2]);
   });
 
   it('caps a search at 20 users', async () => {

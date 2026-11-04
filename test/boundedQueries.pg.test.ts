@@ -32,9 +32,11 @@ const { getModel } = await import('../src/models/manager');
 
 const STAMP = `pg${Date.now()}`;
 nosql.db = new FakeDb();
+// Made once the accounts' table is there (see beforeAll): StreamBy connects, and makes its
+// indexes, as its router is made.
 const app = express();
 app.use(express.json());
-app.use('/streamby', createStreamByRouter({
+const makeRouter = () => app.use('/streamby', createStreamByRouter({
   storageProviders: [], adapter: {} as any, databases: [{ id: PG, type: 'sql', main: true, connectionString }],
   authProvider: async (req: any) => {
     const user = req.headers['x-test-user'];
@@ -45,7 +47,7 @@ app.use('/streamby', createStreamByRouter({
 
 const pool = () => getConnection(PG).client as Pool;
 let madeAccounts = false;
-const users = { ada: randomUUID(), eli: randomUUID(), vic: randomUUID() };
+const users = { ada: randomUUID(), eli: randomUUID(), vic: randomUUID(), ghost: randomUUID() };
 
 beforeAll(async () => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -53,11 +55,12 @@ beforeAll(async () => {
   const direct = new Pool({ connectionString });
   madeAccounts = !(await direct.query(`SELECT to_regclass('accounts.users') AS t`)).rows[0].t;
   if (madeAccounts) await direct.query(`CREATE SCHEMA IF NOT EXISTS accounts; CREATE TABLE accounts.users (id UUID PRIMARY KEY, username TEXT NOT NULL, "profilePic" TEXT)`);
-  for (const [name, id] of Object.entries(users)) {
+  for (const [name, id] of Object.entries(users).filter(([name]) => name !== 'ghost')) {
     await direct.query('INSERT INTO accounts.users (id, username) VALUES ($1, $2)', [id, `${prefix(STAMP)}-${name}`]);
   }
   await direct.end();
-  // The router connects as its first request waits for it.
+  makeRouter();
+  // Its first request waits for it to be connected.
   await (await import('supertest')).default(app).get('/streamby/projects').set('x-test-user', users.ada);
 });
 
