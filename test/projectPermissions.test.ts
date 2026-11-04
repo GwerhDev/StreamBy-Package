@@ -221,6 +221,92 @@ describe('what a team adds for its editors', () => {
   });
 });
 
+describe('teams that grant permissions', () => {
+  const T = '/projects/p1/teams';
+  const teamOf = async (name: string, memberIds: string[] = []) =>
+    (await ada.post(T, { name, memberIds })).body.teams.find((t: any) => t.name === name).id;
+  // Editors manage teams here; one team grants docs:delete, another nothing.
+  const setup = async () => {
+    store.projects[0].members.push({ userId: 'zoe', role: 'editor', status: 'active' });
+    store.users.push({ _id: 'zoe', id: 'zoe', username: 'zoe' });
+    const granting = await teamOf('Docs', ['zoe']);
+    const plain = await teamOf('Layout', ['zoe']);
+    await ada.put('/projects/p1/permissions', { roles: { 'teams:manage': 'editor', 'docs:delete': 'admin' }, teams: { [granting]: ['docs:delete'] } });
+    return { granting, plain };
+  };
+  const refused = (res: any) => {
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/managed by the project's admins/);
+  };
+
+  it('each team says whether it grants permissions', async () => {
+    const { granting, plain } = await setup();
+    const { teams } = (await eli.get(T)).body;
+    expect(Object.fromEntries(teams.map((t: any) => [t.id, t.grantsPermissions]))).toEqual({ [granting]: true, [plain]: false });
+  });
+
+  it("an editor who manages teams makes one, renames a granting one, and changes and deletes one that grants nothing", async () => {
+    const { granting, plain } = await setup();
+    expect((await eli.post(T, { name: 'Sound', memberIds: ['eli'] })).status).toBe(201);
+    const renamed = await eli.patch(`${T}/${granting}`, { name: 'Writers' });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.teams.find((t: any) => t.id === granting)).toMatchObject({ name: 'Writers', grantsPermissions: true });
+    // The same members, with a new name, is renaming.
+    expect((await eli.patch(`${T}/${granting}`, { name: 'Docs', memberIds: ['zoe'] })).status).toBe(200);
+    expect((await eli.patch(`${T}/${plain}`, { memberIds: ['eli', 'zoe'] })).status).toBe(200);
+    expect((await eli.delete(`${T}/${plain}`)).status).toBe(200);
+  });
+
+  it("is refused changing a granting team's members, or deleting it: nobody gets a permission no admin gave them", async () => {
+    const { granting } = await setup();
+    refused(await eli.patch(`${T}/${granting}`, { memberIds: ['zoe', 'eli'] }));
+    refused(await eli.patch(`${T}/${granting}`, { name: 'Renamed too', memberIds: ['eli'] }));
+    refused(await eli.patch(`${T}/${granting}`, { memberIds: [] }));
+    refused(await eli.delete(`${T}/${granting}`));
+    const team = (await ada.get(T)).body.teams.find((t: any) => t.id === granting);
+    expect(team).toMatchObject({ name: 'Docs', members: [expect.objectContaining({ userId: 'zoe' })] });
+    // So eli still can't delete documents.
+    const doc = await newDocument('p1');
+    expect((await eli.delete(`/projects/p1/documents/${doc}`)).status).toBe(403);
+  });
+
+  it('also when an editor manages teams through a team of their own', async () => {
+    const { granting } = await setup();
+    const leads = await teamOf('Leads', ['eli']);
+    await ada.put('/projects/p1/permissions', { roles: { 'teams:manage': 'admin' }, teams: { [granting]: ['docs:delete'], [leads]: ['teams:manage'] } });
+    expect((await eli.post(T, { name: 'Sound' })).status).toBe(201);
+    refused(await eli.patch(`${T}/${granting}`, { memberIds: ['eli'] }));
+    // Leads grants a permission too: eli can't add others to it, nor take it away.
+    refused(await eli.patch(`${T}/${leads}`, { memberIds: ['eli', 'zoe'] }));
+    refused(await eli.delete(`${T}/${leads}`));
+  });
+
+  it('an admin changes and deletes any of them', async () => {
+    const { granting } = await setup();
+    expect((await ada.patch(`${T}/${granting}`, { memberIds: ['eli'] })).status).toBe(200);
+    expect((await ada.delete(`${T}/${granting}`)).status).toBe(200);
+  });
+
+  it("a project's token, which acts as an admin, changes and deletes them", async () => {
+    const { granting } = await setup();
+    const { token } = await createApiToken({ kind: 'project', userId: 'ada', username: 'ada', projectId: 'p1' }, { name: 'ci', permissions: ['members:read', 'members:manage'], expiresInDays: 30 }, { databases: [] } as any);
+    const auth = { Authorization: `Bearer ${token}` };
+    expect((await request(app).patch(`/streamby${T}/${granting}`).set(auth).send({ memberIds: ['eli'] })).status).toBe(200);
+    expect((await request(app).delete(`/streamby${T}/${granting}`).set(auth)).status).toBe(200);
+  });
+
+  it('a team becomes protected once an admin gives it permissions, and not before', async () => {
+    const { plain } = await setup();
+    expect((await eli.patch(`${T}/${plain}`, { memberIds: ['eli'] })).status).toBe(200);
+    await ada.put('/projects/p1/permissions', { teams: { [plain]: ['production:delete'] } });
+    refused(await eli.patch(`${T}/${plain}`, { memberIds: [] }));
+    refused(await eli.delete(`${T}/${plain}`));
+    // Given nothing again, it's anyone's who manages teams.
+    await ada.put('/projects/p1/permissions', { teams: {} });
+    expect((await eli.delete(`${T}/${plain}`)).status).toBe(200);
+  });
+});
+
 describe('apps connected to a project', () => {
   it("can't delete documents, until a project lets them: there, and only there", async () => {
     const here = await newDocument('p1');

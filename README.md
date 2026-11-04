@@ -718,6 +718,10 @@ whatever made it (a session, an API token, an app), before its route.
 - **Teams.** A team can add actions for the editors in it: an admins' only action, say, for the
   editors of the team that does it. A viewer in a team still only reads, and a deleted team (or
   who leaves it) adds nothing any more.
+  Who is in a team that grants permissions, and whether it's there at all, is the admins'
+  (only an admin grants a permission): someone else who manages teams can make new ones and
+  rename any, but can't change that team's members nor delete it (403).
+  `GET /projects/:projectId/teams` says it of each team (`grantsPermissions`).
 - **Apps.** An app connected with OAuth gets what its scopes grant, in every project: making and
   changing, never deleting nor publishing. A project can add, for the apps acting in it,
   `assets:delete`, `production:delete`, `docs:publish`, `docs:delete` and `members:manage`

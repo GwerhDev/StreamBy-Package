@@ -1,26 +1,36 @@
 import { Router, Request, Response } from 'express';
 import { Auth, StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectMember } from '../../utils/auth';
-import { forgetTeamPermissions, roleMay } from '../../services/projectPermissions';
+import { isProjectAdmin, isProjectMember } from '../../utils/auth';
+import { forgetTeamPermissions, readProjectPermissions, roleMay } from '../../services/projectPermissions';
 import { checkTeam, createTeam, deleteTeam, listTeams, Team, unassignTeam, updateTeam } from '../../services/teams';
 
-// A project's teams: any member sees them, its admins make, change and delete them. Each change
-// answers the teams as they are then.
+// A project's teams: any member sees them; its admins, and its editors if the project lets them,
+// make, change and delete them. Each change answers the teams as they are then.
+//
+// A team the project's permissions have actions for grants them to its editors: who is in it, and
+// whether it's there at all, is then the admins' to decide (only an admin grants a permission).
+// Someone else who manages teams may still make new ones (they grant nothing) and rename any.
 export function teamRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
-  // Its teams, each member with their username (and picture).
+  // Whether a team grants permissions: the project's permissions have actions for it.
+  const grantingTeams = async (projectId: string) =>
+    new Set(Object.entries((await readProjectPermissions(projectId)).teams).filter(([, actions]) => actions.length).map(([id]) => id));
+
+  // Its teams, each member with their username (and picture), and whether it grants permissions.
   const answerTeams = async (project: any) => {
     const found = await listTeams(project);
     if (!found) return null;
+    const granting = await grantingTeams(String(project._id ?? project.id));
     const mainDb = config.databases?.find(db => db.main);
     const User = getModel('users', mainDb?.type);
     const ids = [...new Set(found.flatMap(t => t.memberIds))];
     const users = new Map(await Promise.all(ids.map(async id => [id, await User.findOne({ _id: id }).catch(() => null)] as const)));
     return found.map((team: Team) => ({
       id: team.id, name: team.name, createdAt: team.createdAt, updatedAt: team.updatedAt,
+      grantsPermissions: granting.has(team.id),
       members: team.memberIds.map(userId => {
         const user: any = users.get(userId);
         return { userId, username: user?.username ?? 'Unknown', profilePic: user?.profilePic ?? user?.googlePic ?? null };
@@ -37,6 +47,17 @@ export function teamRouter(config: StreamByConfig): Router {
     if (admin && !(await roleMay(project, auth.userId, 'teams:manage'))) { res.status(403).json({ message: 'Your role in this project can\'t manage its teams' }); return null; }
     return project;
   };
+
+  // A team that grants permissions, changed by someone who isn't an admin: refused (an admin, or a
+  // project's token, which acts as one, may). True when the request was answered.
+  const PROTECTED = "This team grants permissions: its members are managed by the project's admins";
+  const refusedOnGrantingTeam = async (req: Request, res: Response, project: any) => {
+    if (isProjectAdmin(project, ((req as any).auth as Auth).userId)) return false;
+    if (!(await grantingTeams(req.params.id)).has(req.params.teamId)) return false;
+    res.status(403).json({ message: PROTECTED });
+    return true;
+  };
+  const sameMembers = (a: string[], b: string[]) => a.length === b.length && a.every(id => b.includes(id));
 
   router.get('/projects/:id/teams', async (req: Request, res: Response) => {
     try {
@@ -71,6 +92,11 @@ export function teamRouter(config: StreamByConfig): Router {
       if (!(await listTeams(project))) return res.status(500).json({ message: 'Database not available' });
       const checked = await checkTeam(project, req.body, { teamId: req.params.teamId });
       if ('error' in checked) return res.status(checked.status ?? 400).json({ message: checked.error });
+      // Renaming changes nothing of who has what; changing its members does.
+      if (checked.values.memberIds !== undefined) {
+        const current = (await listTeams(project))!.find(t => t.id === req.params.teamId);
+        if (current && !sameMembers(current.memberIds, checked.values.memberIds) && (await refusedOnGrantingTeam(req, res, project))) return;
+      }
       if (!(await updateTeam(req.params.id, req.params.teamId, checked.values))) return res.status(404).json({ message: 'Team not found' });
       res.json({ teams: await answerTeams(project), message: 'Team updated' });
     } catch (err: any) {
@@ -83,6 +109,7 @@ export function teamRouter(config: StreamByConfig): Router {
       const project = await projectOf(req, res, { admin: true });
       if (!project) return;
       if (!(await listTeams(project))) return res.status(500).json({ message: 'Database not available' });
+      if (await refusedOnGrantingTeam(req, res, project)) return;
       if (!(await deleteTeam(req.params.id, req.params.teamId))) return res.status(404).json({ message: 'Team not found' });
       // What it was assigned to stays, without it.
       await unassignTeam(req.params.id, req.params.teamId);
