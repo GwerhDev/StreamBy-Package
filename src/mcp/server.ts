@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { Auth, StreamByConfig } from '../types';
 import { TOOLS, ToolCall } from './tools';
 import { auditCallerOf, recordMcpCall } from './audit';
+import { APP_PERMISSIONS, isWritingApp } from '../services/projectPermissions';
 
 export const MCP_SERVER_NAME = 'streamby';
 
@@ -14,9 +15,16 @@ const errorText = (body: unknown, status: number) => {
   return typeof message === 'string' ? message : `StreamBy answered ${status}`;
 };
 
-/** The tools an API token may use: those whose every permission it has. */
-export const toolsFor = (scope: Auth['apiToken']) =>
-  TOOLS.filter(tool => tool.permissions.every(p => !!scope?.permissions.includes(p)));
+/**
+ * The tools an API token may use: those whose every permission it has. An app approved to write
+ * (`oauth`) also gets those a project may add for its apps (deleting a document, say): each call
+ * is checked in its project, and refused where the project doesn't.
+ */
+export const toolsFor = (scope: Auth['apiToken'], { oauth = false }: { oauth?: boolean } = {}) => {
+  const addable = oauth && isWritingApp(scope?.permissions);
+  return TOOLS.filter(tool => tool.permissions.every(p =>
+    !!scope?.permissions.includes(p) || (addable && (APP_PERMISSIONS as readonly string[]).includes(p))));
+};
 
 /**
  * An MCP server for one request made with an API token (`auth`): only the tools its permissions
@@ -29,7 +37,7 @@ export function createMcpServer(auth: Auth, api: ApiCaller, config: StreamByConf
     ? auth.apiToken.projectIds[0] ?? null
     : null;
 
-  for (const tool of toolsFor(auth.apiToken)) {
+  for (const tool of toolsFor(auth.apiToken, { oauth: !!auth.oauth })) {
     server.registerTool(tool.name, {
       title: tool.title,
       description: tool.description,

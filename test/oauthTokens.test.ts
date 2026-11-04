@@ -254,7 +254,9 @@ describe('StreamBy as an OAuth protected resource', () => {
     const writer = await connect(sign(claimsFor({ scope: 'streamby:write' })));
     const writeNames = (await writer.listTools()).tools.map(t => t.name);
     expect(writeNames).toEqual(expect.arrayContaining(['create_pipeline', 'update_shot', 'request_asset_upload']));
-    expect(writeNames).not.toContain('delete_asset');
+    // What a project may let its apps do is listed (each call checked in its project); deleting
+    // a project, which none may, isn't.
+    expect(writeNames).toEqual(expect.arrayContaining(['delete_asset', 'delete_document']));
     expect(writeNames).not.toContain('delete_project');
   });
 

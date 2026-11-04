@@ -6,7 +6,7 @@ import { initConnections } from '../adapters/database/connectionManager';
 import { backfillBuiltinConnections } from '../services/backfillBuiltinConnections';
 import { reencryptStoredCredentials } from '../services/reencryptCredentials';
 import { initWsHub } from '../services/wsHub';
-import { authenticate, enforceApiTokenScope } from '../services/auth';
+import { authenticate, enforceApiTokenScope, enforceProjectRoles } from '../services/auth';
 import { apiTokenRouter } from './routes/apiToken';
 import { mcpRouter } from './routes/mcp';
 import { setEncryptionKey } from '../utils/encryption';
@@ -129,6 +129,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(workerCallbackRouter({ ...config, adapter }));
   router.use(authenticate(config));
   router.use(enforceApiTokenScope);
+  router.use(enforceProjectRoles);
   router.use(ensureSubscription);
   router.use(userRouter(config));
   router.use(apiTokenRouter(config));

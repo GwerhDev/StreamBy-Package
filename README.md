@@ -301,7 +301,12 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
 | `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable` | `assets:write` |
 | `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
-| `create_document`, `update_document`, `update_document_section` | `docs:write` |
+| `create_document`, `update_document`, `update_document_section`, `move_document` | `docs:write` |
+| `delete_document` | `docs:delete` |
+
+An app connected with OAuth and approved to write is also listed the tools of what a project may
+let its apps do (deleting a document or an asset, say: see [Project roles](#-project-roles)). A
+call to one in a project that doesn't is refused (403).
 
 Each tool's description says where its result shows in the UI. Production data isn't part of
 the workflow: `create_sequence`, `create_shot` and `create_task` leave it as it is, and what
@@ -484,8 +489,9 @@ or collections), each one in a single project, in folders.
 | `POST /projects/:projectId/documents/:docId/publish` `{ version }` (`null`: none) | `docs:publish` |
 | `DELETE /projects/:projectId/documents/:docId` (a folder, with everything in it) | `docs:delete` |
 
-Editors and admins create, edit, publish and delete them; viewers read them. An app connected
-with OAuth reads and edits them, but publishes and deletes none: what it edits stays a draft.
+Editors and admins create, edit, publish and delete them; viewers read them (a project may keep
+publishing or deleting for its admins). An app connected with OAuth reads and edits them, but
+publishes and deletes none, unless its project lets its apps: what it edits stays a draft.
 
 In MongoDB, a save writes the document and its version in a transaction when the server has them
 (a replica set or a sharded cluster). A standalone server doesn't: there they're two writes.
@@ -695,7 +701,33 @@ What a user can do in a project depends on their role in that project, as an act
 |---|---|
 | `viewer` | See the project and its content, and archive the project in their own list. |
 | `editor` | Everything a viewer can, plus change the project: its details, connections, exports, files and folders, workflow, pipelines, production, reviews, rights, documents, and start jobs. |
-| `admin` | Everything an editor can, plus manage the project's members and delete the project. |
+| `admin` | Everything an editor can, plus manage the project's members and teams, and delete the project. |
+
+### A project's permissions
+
+Its admins can change that, project by project (the Permissions section of its settings), and
+until they do, it's the table above. The server reads it on every request on the project,
+whatever made it (a session, an API token, an app), before its route.
+
+- **Roles.** Each action is the editors' and the admins', or the admins' only: changing the
+  project's details and settings (`project:update`), managing its teams (`teams:manage`), writing
+  and deleting assets, production, the workflow, exports, rights, starting jobs, and writing,
+  publishing and deleting documents. Admins can always do all of it, and viewers only read.
+  Managing members (who's in, with which role) and deleting the project stay the admins': who
+  manages members hands out roles.
+- **Teams.** A team can add actions for the editors in it: an admins' only action, say, for the
+  editors of the team that does it. A viewer in a team still only reads, and a deleted team (or
+  who leaves it) adds nothing any more.
+- **Apps.** An app connected with OAuth gets what its scopes grant, in every project: making and
+  changing, never deleting nor publishing. A project can add, for the apps acting in it,
+  `assets:delete`, `production:delete`, `docs:publish`, `docs:delete` and `members:manage`
+  (its teams, for an app). Only for an app approved to write, and never more than its user's
+  role in the project lets them do.
+
+| Endpoint | Who |
+|---|---|
+| `GET /projects/:projectId/permissions` | Any member (and `project:read`): `{ permissions: { roles, teams, apps }, actions, appPermissions }` |
+| `PUT /projects/:projectId/permissions` `{ roles?, teams?, apps? }` | Its admins, from a session only: no token nor app can give itself more. |
 
 A project's public exports (`GET /streamby/:projectId/export/:exportName`) are read without a
 session. They only run nodes that read data: never a node that uses an account's credential,

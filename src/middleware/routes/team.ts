@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { Auth, StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { isProjectAdmin, isProjectMember } from '../../utils/auth';
+import { isProjectMember } from '../../utils/auth';
+import { forgetTeamPermissions, roleMay } from '../../services/projectPermissions';
 import { checkTeam, createTeam, deleteTeam, listTeams, Team, unassignTeam, updateTeam } from '../../services/teams';
 
 // A project's teams: any member sees them, its admins make, change and delete them. Each change
@@ -32,7 +33,8 @@ export function teamRouter(config: StreamByConfig): Router {
     const project = await Project.findOne({ _id: req.params.id });
     if (!project) { res.status(404).json({ message: 'Project not found' }); return null; }
     if (!isProjectMember(project, auth.userId)) { res.status(403).json({ message: 'Unauthorized project access' }); return null; }
-    if (admin && !isProjectAdmin(project, auth.userId)) { res.status(403).json({ message: 'Only a project admin can manage its teams' }); return null; }
+    // Its admins, and its editors if the project lets them (see projectPermissions).
+    if (admin && !(await roleMay(project, auth.userId, 'teams:manage'))) { res.status(403).json({ message: 'Your role in this project can\'t manage its teams' }); return null; }
     return project;
   };
 
@@ -84,6 +86,8 @@ export function teamRouter(config: StreamByConfig): Router {
       if (!(await deleteTeam(req.params.id, req.params.teamId))) return res.status(404).json({ message: 'Team not found' });
       // What it was assigned to stays, without it.
       await unassignTeam(req.params.id, req.params.teamId);
+      // Nor does it add anything for its members.
+      await forgetTeamPermissions(req.params.id, req.params.teamId);
       res.json({ teams: await answerTeams(project), message: 'Team deleted' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete the team', details: err.message });

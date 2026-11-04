@@ -12,6 +12,7 @@ import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
 import { deleteProductionData } from '../../services/production';
 import { deleteTeamsOf } from '../../services/teams';
+import { deletePermissionsOf, readProjectPermissions, setProjectPermissions, ROLE_ACTIONS, APP_PERMISSIONS } from '../../services/projectPermissions';
 import { jobStore } from '../../services/jobStore';
 import { documentStore } from '../../services/documents';
 export function projectRouter(config: StreamByConfig): Router {
@@ -284,6 +285,7 @@ export function projectRouter(config: StreamByConfig): Router {
       await deleteProjectApiTokens(String(projectId));
       await deleteProductionData(String(projectId));
       await deleteTeamsOf(String(projectId));
+      await deletePermissionsOf(String(projectId));
       if (projectId) await jobStore().deleteProject(String(projectId));
       if (projectId) await documentStore().deleteProject(String(projectId));
 
@@ -300,6 +302,35 @@ export function projectRouter(config: StreamByConfig): Router {
       res.status(200).json({ success: true, projects: projects, message: 'Project deleted successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to delete project', details: err.message });
+    }
+  });
+
+  // What the project lets each role do, and what it adds for its members' apps (see
+  // projectPermissions): any member sees it, with what can be set.
+  router.get('/projects/:id/permissions', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+      res.json({ permissions: await readProjectPermissions(req.params.id), actions: ROLE_ACTIONS, appPermissions: APP_PERMISSIONS });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Its admins change it, from a session only: no token nor app can give itself more.
+  router.put('/projects/:id/permissions', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectAdmin(project, auth.userId)) return res.status(403).json({ message: 'Only a project admin can change its permissions' });
+      const result = await setProjectPermissions(req.params.id, req.body);
+      if ('error' in result) return res.status(result.status ?? 400).json({ message: result.error });
+      res.json({ permissions: result });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
     }
   });
 

@@ -82,6 +82,12 @@ export async function deleteTeam(projectId: string, teamId: string): Promise<boo
   return result.deletedCount > 0;
 }
 
+/** The ids of a project's teams someone is in. */
+export async function teamIdsOf(projectId: string, userId: string | undefined): Promise<string[]> {
+  if (!userId) return [];
+  return (await teams()?.find({ projectId }).toArray() ?? []).filter(t => t.memberIds?.includes(userId)).map(t => t.id);
+}
+
 /** Of `ids`, one that isn't a team of the project, if any (null when they all are). */
 export async function teamNotOf(projectId: string, ids: string[] | undefined): Promise<string | null> {
   if (!ids?.length) return null;

@@ -60,7 +60,7 @@ const RULES = [
   rule('read', '^/jobs/[^/]+', 'jobs:read'),
 
   // The project itself and its settings.
-  rule('read', `${P}(/preview|/origins|/integrations)?`, 'project:read'),
+  rule('read', `${P}(/preview|/origins|/integrations|/permissions)?`, 'project:read'),
   rule(['PATCH'], P, 'project:update'),
   rule('delete', P, 'project:delete'),
   rule(['PATCH'], `${P}/(archive|unarchive)`, 'project:update', { userTokenOnly: true }),

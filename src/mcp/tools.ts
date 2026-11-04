@@ -519,6 +519,28 @@ export const TOOLS = [
     pick: (data) => ({ projectId: data?.projectId, message: data?.message }),
   }),
   tool({
+    name: 'move_document', title: 'Move a document', permissions: ['docs:write'], write: true,
+    description: "Moves a document or a folder (with what's in it): into another folder of the project, or to the top (parentId null), and/or to a place among what's there (position, from 0). Its content and versions stay as they are.",
+    input: {
+      projectId, documentId: id('document'),
+      parentId: z.string().nullable().optional().describe("The folder it goes in (a folder's id), or null for the top; where it is if not given"),
+      position: z.number().int().min(0).optional().describe('Its place in that folder, from 0; at the end if not given'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, documentId, parentId, position }) => ({
+      method: 'PATCH', path: `/projects/${enc(projectId)}/documents/${enc(documentId)}`,
+      body: { ...(parentId !== undefined ? { parentId } : {}), ...(position !== undefined ? { position } : {}) },
+    }),
+    pick: (data) => data?.document,
+  }),
+  tool({
+    name: 'delete_document', title: 'Delete a document', permissions: ['docs:delete'], write: true, destructive: true,
+    description: "Deletes a document, or a folder with everything in it, and its versions. An app connected with OAuth may only where the project lets its apps delete documents (its Permissions settings); elsewhere it's refused.",
+    input: { projectId, documentId: id('document') },
+    projectOf: byProject,
+    call: ({ projectId, documentId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}/documents/${enc(documentId)}` }),
+  }),
+  tool({
     name: 'delete_project', title: 'Delete a project', permissions: ['project:delete'], write: true, destructive: true,
     description: 'Deletes a project, with everything in it, for every member. It cannot be undone.',
     input: { projectId },

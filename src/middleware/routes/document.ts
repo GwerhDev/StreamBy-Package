@@ -6,6 +6,7 @@ import { activeMemberOf, canEditProject, isProjectMember } from '../../utils/aut
 import { emitToUser } from '../../services/wsHub';
 import { authorOf, documentStore, DocumentSummary, replaceSection, withDescendants } from '../../services/documents';
 import { tokenAllows } from '../../services/auth';
+import { appAddsFor } from '../../services/projectPermissions';
 import { checkSheetContent } from '../../services/creditsSheets';
 
 const MAX_TITLE = 200;
@@ -166,7 +167,9 @@ export function documentRouter(_config: StreamByConfig): Router {
       }
       if (body.exportable !== undefined) {
         // Whether its exports deliver it is publishing it: a token needs docs:publish.
-        if (auth.apiToken && !tokenAllows(auth.apiToken, 'docs:publish')) {
+        // (An app may where the project lets its apps publish.)
+        const appMay = (await appAddsFor(auth, projectId)).includes('docs:publish');
+        if (auth.apiToken && !tokenAllows(auth.apiToken, 'docs:publish') && !appMay) {
           return res.status(403).json({ error: "This API token doesn't have the 'docs:publish' permission" });
         }
         if (typeof body.exportable !== 'boolean') return res.status(400).json({ message: 'exportable is true or false' });
