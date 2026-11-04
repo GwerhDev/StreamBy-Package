@@ -17,6 +17,7 @@ import { broadcastRights, deleteRightsOf, rightsFromQuery, RightsValues, saveRig
 import { tokenAllows } from '../../services/auth';
 
 import { StorageCategory, VALID_CATEGORIES, validateContentType } from '../../utils/assetCategories';
+import { afterGateChange } from './deliverable';
 
 function getRawFilesCollection() {
   const model = getModel('storage_files', 'nosql') as any;
@@ -149,7 +150,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         };
         await collection.insertOne(fileDoc);
         await recordFirstVersion(fileDoc);
-        if (rights) await saveRights(project, fileId, rights, auth.userId);
+        if (rights) { await saveRights(project, fileId, rights, auth.userId); await afterGateChange(req, config, project); }
       }
 
       const expiresIn = signedUrlTtl(auth, config, 'upload');
@@ -255,6 +256,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       await deleteAsset(fileDoc, adapter);
       await collection.deleteOne({ fileId, projectId });
       broadcastRights(project, { action: 'deleted', assetIds: [fileId] });
+      // It leaves the credits sheets it was in.
+      await afterGateChange(req, config, project);
 
       res.json({ message: 'File deleted successfully' });
     } catch (err: any) {
@@ -400,7 +403,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
         };
         await collection.insertOne(fileDoc);
         await recordFirstVersion(fileDoc);
-        if (rights) await saveRights(project, fileId, rights, auth.userId);
+        if (rights) { await saveRights(project, fileId, rights, auth.userId); await afterGateChange(req, config, project); }
       }
 
       const expiresIn = signedUrlTtl(auth, config, 'upload');
@@ -564,6 +567,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       await deleteAsset(fileDoc, connAdapter);
       await collection.deleteOne(connFilter(projectId, connId, project, { fileId }));
       broadcastRights(project, { action: 'deleted', assetIds: [fileId] });
+      // It leaves the credits sheets it was in.
+      await afterGateChange(req, config, project);
 
       res.json({ message: 'File deleted successfully' });
     } catch (err: any) {

@@ -7,13 +7,28 @@ import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { nosqlDb } from '../../utils/nosqlDb';
 import { findVersion } from '../../services/assetVersions';
-import { createDeliverable, deleteDeliverable, Deliverable, listDeliverables } from '../../services/deliverables';
+import { createDeliverable, deleteDeliverable, Deliverable, deliverablesCollection, listDeliverables } from '../../services/deliverables';
+import { deliverableNodeStates, deliverableStates, gatesChanged, withState } from '../../services/deliverableGates';
 
 const MAX_NOTE = 1000;
 
-// A project's deliverables (see services/deliverables): marked, listed and removed. Removing
-// one never deletes its asset. Marking one starts the workers set to process its kind of asset
-// by themselves.
+/**
+ * Something a gate reads changed in this request: the project's members read the deliverables'
+ * states again, and those held and ready now get their automatic workers, as whoever made the
+ * change (not for an API token that can't run jobs).
+ */
+export async function afterGateChange(req: Request, config: StreamByConfig, project: any): Promise<void> {
+  const auth = (req as any).auth as Auth | undefined;
+  const release = auth?.userId && tokenAllows(auth.apiToken, 'jobs:run')
+    ? { run: (d: Deliverable) => enqueueAutomaticJobs(project, d.assetId, d.versionId, auth, config, callbackBaseOf(req, config)) }
+    : undefined;
+  await gatesChanged(project, release).catch(err => console.error('❌ StreamBy deliverables: gates changed:', err?.message ?? err));
+}
+
+// A project's deliverables (see services/deliverables): marked, listed and removed, each with its
+// state (ready, or blocked by the gates before it in the workflow: see services/deliverableGates).
+// Removing one never deletes its asset. Marking one starts the workers set to process its kind of
+// asset by themselves; marking one that's blocked holds them until it's ready.
 export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAdapter }): Router {
   const router = Router();
   const Project = getModel('projects');
@@ -34,11 +49,13 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
         versionIds.length ? db.collection('asset_versions').find({ versionId: { $in: versionIds } }).toArray() : [],
       ])
       : [[], [], []];
-    return deliverables.map(d => {
+    const states = await deliverableStates(project, deliverables);
+    return deliverables.map((d, i) => {
+      const { heldJobs: _held, ...shown } = d;
       const file: any = files.find((f: any) => f.fileId === d.assetId);
       const version: any = versions.find((v: any) => v.versionId === d.versionId);
       return {
-        ...d,
+        ...withState(shown, states[i]),
         asset: file ? { displayName: file.displayName, category: file.category, contentType: file.contentType ?? null } : null,
         version: version ? version.version : null,
         shotName: d.shotId ? (shots.find((s: any) => s.id === d.shotId) as any)?.name ?? null : null,
@@ -60,6 +77,20 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
       res.json({ deliverables: await describe(project, deliverables) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list deliverables', details: err.message });
+    }
+  });
+
+  // The state of each Deliverable node of the workflow (as the canvas shows it): what it applies
+  // to, and the gates before it that hold it.
+  router.get('/projects/:projectId/deliverables/gates', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      res.json({ nodes: await deliverableNodeStates(project) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to read the deliverables\' gates', details: err.message });
     }
   });
 
@@ -110,8 +141,13 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
       });
       const [described] = await describe(project, [deliverable]);
       // The project's workers set to process its kind of asset by themselves start on it: not
-      // for an API token that can't run jobs.
-      const jobs = tokenAllows(auth.apiToken, 'jobs:run')
+      // for an API token that can't run jobs, and not yet if it's blocked (they start once it's
+      // ready).
+      const runs = tokenAllows(auth.apiToken, 'jobs:run');
+      if (runs && described.status === 'blocked') {
+        await deliverablesCollection()?.updateOne({ projectId, id: deliverable.id }, { $set: { heldJobs: true } });
+      }
+      const jobs = runs && described.status === 'ready'
         ? await enqueueAutomaticJobs(project, assetId, versionId || null, auth, config, callbackBaseOf(req, config)).catch(() => [])
         : [];
       res.status(201).json({ deliverable: described, jobs: jobs.map(publicJob) });

@@ -96,7 +96,7 @@ const RULES = [
   rule(['POST', 'PATCH'], `${P}/(reviews(/[^/]+/decision)?|assets/[^/]+/versions/[^/]+/annotations(/[^/]+/resolve)?)`, 'assets:write'),
 
   // Deliverables: an asset (or a version) delivered for a shot or an export.
-  rule('read', `${P}/deliverables`, 'assets:read'),
+  rule('read', `${P}/deliverables(/gates)?`, 'assets:read'),
   rule(['POST'], `${P}/deliverables`, 'assets:write'),
   rule('delete', `${P}/deliverables/[^/]+`, 'assets:write'),
 

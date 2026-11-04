@@ -8,6 +8,7 @@ import { authorOf, documentStore, DocumentSummary, replaceSection, withDescendan
 import { tokenAllows } from '../../services/auth';
 import { appAddsFor } from '../../services/projectPermissions';
 import { checkSheetContent } from '../../services/creditsSheets';
+import { afterGateChange } from './deliverable';
 
 const MAX_TITLE = 200;
 const MAX_CONTENT = 1_000_000;
@@ -52,7 +53,7 @@ function checkParent(value: unknown, documents: DocumentSummary[], movingId?: st
 
 const failed = (value: unknown): value is { error: string } => typeof value === 'object' && value !== null && 'error' in value;
 
-export function documentRouter(_config: StreamByConfig): Router {
+export function documentRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
@@ -192,6 +193,8 @@ export function documentRouter(_config: StreamByConfig): Router {
       broadcast(project, text
         ? { action: 'saved', documentIds: [docId], version: document.version, title: document.title, author }
         : { action: 'changed', documentIds: [docId], author });
+      // A credits sheet's sources changed: a gate reading it may pass, or stop passing.
+      if (text && document.kind === 'credits') await afterGateChange(req, config, project);
       res.json({ document });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -299,6 +302,7 @@ export function documentRouter(_config: StreamByConfig): Router {
       const ids = withDescendants(documents, req.params.docId);
       await store.remove(projectId, ids);
       broadcast(project, { action: 'deleted', documentIds: ids, author: authorOf(auth) });
+      if (documents.some(d => ids.includes(d.id) && d.kind === 'credits')) await afterGateChange(req, config, project);
       res.json({ deleted: ids });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

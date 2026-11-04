@@ -348,7 +348,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'list_deliverables', title: 'List deliverables', permissions: ['assets:read'],
-    description: "A project's deliverables (assets delivered for a shot or an export), of one shot or export if given: each one's asset, version, note and what it's for.",
+    description: "A project's deliverables (assets delivered for a shot or an export), of one shot or export if given: each one's asset, version, note and what it's for, and its status: ready, or blocked by the gates before it in the workflow (a Review Gate whose review session isn't approved, a Credits sheet that isn't complete). A blocked one lists in blockedBy each gate that holds it and what it lacks; while blocked its automatic workers wait and its export can't be published.",
     input: {
       projectId,
       shotId: z.string().optional().describe("A shot's id: only its deliverables"),
@@ -363,7 +363,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'mark_deliverable', title: 'Mark a deliverable', permissions: ['assets:write'], write: true,
-    description: "Marks an asset (or one of its versions) as a deliverable of a production shot or of an export. It shows in the shot's card in the Production board, or in the export's Deliverables tab. Give shotId or exportId, one of them. Upload the file first (request_asset_upload).",
+    description: "Marks an asset (or one of its versions) as a deliverable of a production shot or of an export. It shows in the shot's card in the Production board, or in the export's Deliverables tab. Give shotId or exportId, one of them. Upload the file first (request_asset_upload). It answers its status: if a gate before it in the workflow holds it (blocked, with blockedBy saying which and what it lacks), the workers that process its kind of asset by themselves start once it's ready.",
     input: {
       projectId,
       assetId: id('asset'),

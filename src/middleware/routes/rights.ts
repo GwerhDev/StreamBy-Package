@@ -7,8 +7,9 @@ import { nosqlDb } from '../../utils/nosqlDb';
 import { checkRights, getRights, saveRights } from '../../services/rights';
 import { documentStore } from '../../services/documents';
 import { readSheet } from '../../services/creditsSheets';
+import { afterGateChange } from './deliverable';
 
-export function rightsRouter(_config: StreamByConfig): Router {
+export function rightsRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
@@ -45,7 +46,10 @@ export function rightsRouter(_config: StreamByConfig): Router {
       }
       const checked = checkRights(req.body);
       if ('error' in checked) return res.status(400).json({ message: checked.error });
-      res.json({ rights: await saveRights(found.project, assetId, checked.values, found.auth.userId) });
+      const rights = await saveRights(found.project, assetId, checked.values, found.auth.userId);
+      // A credits sheet it's in may be complete now, or no longer.
+      await afterGateChange(req, config, found.project);
+      res.json({ rights });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

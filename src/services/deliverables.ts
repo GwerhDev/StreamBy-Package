@@ -17,6 +17,8 @@ export interface Deliverable {
   note: string | null;
   createdBy: string;
   createdAt: Date;
+  // Marked while it was blocked: its automatic workers start once it's ready (see deliverableGates).
+  heldJobs?: boolean;
 }
 
 export const deliverablesCollection = () => db()?.collection('deliverables') ?? null;

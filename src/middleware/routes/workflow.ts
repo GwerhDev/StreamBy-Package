@@ -10,6 +10,7 @@ import { DEFAULT_NODE_SCHEMA } from './export';
 import {
   createPipelineOf, listsOf, migrateSchema, oneNodePerResource, pendingOf, readWorkflow, referencedIn, removeResourceOf, ResourceKind, writeWorkflow,
 } from '../../services/workflowResources';
+import { afterGateChange } from './deliverable';
 
 const isSchema = (value: any): value is NodeSchema =>
   !!value && typeof value === 'object' && !Array.isArray(value) && Array.isArray(value.nodes) && Array.isArray(value.edges);
@@ -157,6 +158,8 @@ export function workflowRouter(config: StreamByConfig): Router {
       }
 
       const updated = await writeWorkflow(await Project.findOne({ _id: projectId }), changes);
+      // Its gates, or what its Deliverable nodes apply to, may have changed.
+      if (nodeSchema !== undefined) await afterGateChange(req, config, { ...(await Project.findOne({ _id: projectId })), workflow: updated });
       res.json({ data: updated, project: await listsOf(projectId), errors, message: 'Workflow updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update workflow', details: err.message });

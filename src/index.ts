@@ -8,6 +8,8 @@ export { LICENSE_TYPES } from './services/rights';
 export type { AssetRights, LicenseType } from './services/rights';
 export { CREDITS_SHEET_NODE } from './services/creditsSheets';
 export type { CreditsSheet, SheetRow, SheetSources, SheetStatus } from './services/creditsSheets';
+export { DELIVERABLE_NODE, REVIEW_GATE_NODE, APPLIES_TO } from './services/deliverableGates';
+export type { AppliesTo, Blocker, GateState, GateStatus } from './services/deliverableGates';
 export type { ResolvedApiToken } from './services/apiTokens';
 export {
   createOAuthTokenVerifier, looksLikeOAuthAccessToken, protectedResourceMetadata, defaultResourceMetadataUrl,

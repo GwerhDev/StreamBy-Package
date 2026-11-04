@@ -7,6 +7,7 @@ import { emitToUser } from '../../services/wsHub';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import crypto from 'crypto';
+import { afterGateChange } from './deliverable';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -21,7 +22,7 @@ function broadcastReviewUpdate(review: ReviewSessionRecord, project: any) {
   }
 }
 
-export function reviewRouter(_config: StreamByConfig): Router {
+export function reviewRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
@@ -158,6 +159,8 @@ export function reviewRouter(_config: StreamByConfig): Router {
 
       const updated: ReviewSessionRecord = { ...review, approvals, status, updatedAt };
       broadcastReviewUpdate(updated, project);
+      // A Review Gate linked to it may pass, or stop passing.
+      if (status !== review.status) await afterGateChange(req, config, project);
 
       res.json({ review: updated });
     } catch (err: any) {

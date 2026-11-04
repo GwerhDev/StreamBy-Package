@@ -9,6 +9,7 @@ import { getConnection, getConnectedIds } from '../../adapters/database/connecti
 import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
 import crypto from 'crypto';
 import { encrypt, isEncryptionKeySet } from '../../utils/encryption';
+import { blockersOfExport } from '../../services/deliverableGates';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -114,6 +115,12 @@ export function distributionRouter(_config: StreamByConfig): Router {
 
       const exportDoc = await Export.findOne({ id: exportId, projectId });
       if (!exportDoc) return res.status(404).json({ message: 'Deliverable not found' });
+
+      // Not while a deliverable of it is held by a gate before it in the workflow.
+      const blockedBy = await blockersOfExport(project, exportId);
+      if (blockedBy.length) {
+        return res.status(409).json({ message: `Blocked: ${blockedBy.map(b => `${b.label} (${b.reason})`).join('; ')}`, blockedBy });
+      }
 
       const connections: DistributionConnection[] = project.distributionConnections ?? [];
 

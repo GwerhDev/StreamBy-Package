@@ -341,6 +341,32 @@ A **deliverable** is an asset, or one of its versions, delivered for a
 production shot or for an export; a shot or an export can have several, and the shot's panel
 in the UI shows them.
 
+**Gates.** A deliverable can wait on gates before it's out. In the project's workflow, a
+Deliverable node (`deliverableNode`) stands for the deliverables it applies to, by its
+`data.appliesTo`: `'all'` (the default), `'shots'`, or `'exports'` (with `data.exportId`, one
+export's only). The gates it has before it (any node with edges leading, step by step, to it)
+hold them back until each one passes:
+
+| Gate | Passes when |
+|---|---|
+| Review Gate (`reviewGateNode`, `data.reviewId`) | the review session it's linked to is approved |
+| Credits sheet (`creditsSheetNode`, `data.documentId`) | its sheet is complete: each asset has its creator, link and license |
+
+Each deliverable is answered with its `status`, `'ready'` or `'blocked'`; `gated` (whether
+any gate is before it at all); and `blockedBy`, each gate that holds it (`nodeId`, `type`,
+`label`) and what it lacks (`reason`). One that no Deliverable node applies to, or whose nodes
+have no gates before them, is ready, as it always was. While it's blocked:
+
+- the workers with an `autoKind` don't run on it: they start once it's ready, in the request
+  that made it ready and as whoever made it (a session, or an API token with `jobs:run`);
+- its export can't be published (`POST /projects/:projectId/deliverables/:exportId/publish`
+  answers 409 with `blockedBy`).
+
+`GET /projects/:projectId/deliverables/gates` answers the state of each Deliverable node of the
+workflow (`nodes`, by node id). When something a gate reads changes (a review decided, an
+asset's credits, a credits sheet, a file deleted, the workflow saved), each member gets a
+`deliverableGatesEvent` (`{ projectId }`) to read the states again.
+
 For example, with Claude connected to StreamBy and to Blender's MCP server, asking *"export the
 scene as glTF and deliver it for shot SH010 of Portfolio"* goes:
 
@@ -594,7 +620,8 @@ compatible worker by following the contract below.
 
 A worker with an `autoKind` also runs by itself on an asset of its categories when it's marked
 as a deliverable (by a session, or by an API token that has `jobs:run`: one without it marks the
-deliverable and starts nothing).
+deliverable and starts nothing). On a deliverable blocked by a gate, it runs once the
+deliverable is ready (see Gates, above).
 
 Jobs are kept in the main database (a `jobs` table or collection): they survive restarts, and
 every instance sees them. `GET /projects/:projectId/jobs` lists them (`?assetId=` for one asset's);
