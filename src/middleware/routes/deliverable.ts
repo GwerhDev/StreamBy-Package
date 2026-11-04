@@ -9,6 +9,7 @@ import { nosqlDb } from '../../utils/nosqlDb';
 import { findVersion } from '../../services/assetVersions';
 import { createDeliverable, deleteDeliverable, Deliverable, deliverablesCollection, listDeliverables } from '../../services/deliverables';
 import { deliverableNodeStates, deliverableStates, gatesChanged, withState } from '../../services/deliverableGates';
+import { advanceRuns, deliverableMarked } from '../../services/pipelineRuns';
 
 const MAX_NOTE = 1000;
 
@@ -23,6 +24,8 @@ export async function afterGateChange(req: Request, config: StreamByConfig, proj
     ? { run: (d: Deliverable) => enqueueAutomaticJobs(project, d.assetId, d.versionId, auth, config, callbackBaseOf(req, config)) }
     : undefined;
   await gatesChanged(project, release).catch(err => console.error('❌ StreamBy deliverables: gates changed:', err?.message ?? err));
+  // A pipeline's steps read the same: a review's decision, an asset's credits, a sheet.
+  await advanceRuns(project).catch(err => console.error('❌ StreamBy pipelines: gates changed:', err?.message ?? err));
 }
 
 // A project's deliverables (see services/deliverables): marked, listed and removed, each with its
@@ -153,6 +156,9 @@ export function deliverableRouter(config: StreamByConfig & { adapter?: StorageAd
       const jobs = runs && described.status === 'ready'
         ? await enqueueAutomaticJobs(project, assetId, versionId || null, auth, config, callbackBaseOf(req, config)).catch(() => [])
         : [];
+      // Its shot's pipeline, if it's set to, starts its run.
+      await deliverableMarked(project, deliverable, auth, runs, callbackBaseOf(req, config))
+        .catch(err => console.error('❌ StreamBy pipelines: a deliverable marked:', err?.message ?? err));
       res.status(201).json({ deliverable: described, jobs: jobs.map(publicJob) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to mark the deliverable', details: err.message });

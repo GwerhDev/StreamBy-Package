@@ -8,6 +8,7 @@ import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import crypto from 'crypto';
 import { afterGateChange } from './deliverable';
+import { advanceRuns } from '../../services/pipelineRuns';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -83,6 +84,8 @@ export function reviewRouter(config: StreamByConfig): Router {
 
       await db.collection('review_sessions').insertOne({ ...review });
       broadcastReviewUpdate(review, project);
+      // A pipeline's Review Gate waits on its card's asset's session.
+      await advanceRuns(project).catch(err => console.error('❌ StreamBy pipelines: a review opened:', err?.message ?? err));
 
       res.status(201).json({ review });
     } catch (err: any) {

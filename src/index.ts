@@ -10,6 +10,10 @@ export { CREDITS_SHEET_NODE } from './services/creditsSheets';
 export type { CreditsSheet, SheetRow, SheetSources, SheetStatus } from './services/creditsSheets';
 export { DELIVERABLE_NODE, REVIEW_GATE_NODE, APPLIES_TO } from './services/deliverableGates';
 export type { AppliesTo, Blocker, GateState, GateStatus } from './services/deliverableGates';
+export { MEETING_NODE, TASKS_NODE, PIPELINE_TRIGGERS } from './services/pipelineRuns';
+export type { PipelineRun, PipelineTrigger, RunStatus, StepKind, StepState, StepStatus } from './services/pipelineRuns';
+export { DEFAULT_LABELS } from './services/productionLabels';
+export type { ProductionLabels } from './services/productionLabels';
 export type { ResolvedApiToken } from './services/apiTokens';
 export {
   createOAuthTokenVerifier, looksLikeOAuthAccessToken, protectedResourceMetadata, defaultResourceMetadataUrl,

@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { advanceRuns } from '../../services/pipelineRuns';
 import crypto from 'crypto';
 import { Auth, DocumentAuthor, DocumentKind, ProjectDocument, StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
@@ -284,6 +285,8 @@ export function documentRouter(config: StreamByConfig): Router {
 
       const document = await store.update(projectId, docId, { publishedVersion: version });
       broadcast(project, { action: 'changed', documentIds: [docId], author: authorOf(auth) });
+      // A pipeline's Meeting step waits on its document being published.
+      await advanceRuns(project).catch(err => console.error('❌ StreamBy pipelines: a document published:', err?.message ?? err));
       res.json({ document });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

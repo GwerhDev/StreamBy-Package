@@ -98,6 +98,10 @@ const GATES: Record<string, Evaluate> = {
 
 export const isGate = (type: string | undefined) => !!type && type in GATES;
 
+/** What a gate lacks to pass: null when it passes. */
+export const gateLacks = (project: any, node: Node): Promise<string | null> =>
+  GATES[node.type!](project, node).catch(err => `Couldn't be checked: ${err?.message ?? err}`);
+
 /** The gates a node has before it: every gate with edges leading, step by step, to it. */
 export function gatesBefore(schema: { nodes: Node[]; edges: Edge[] }, nodeId: string): Node[] {
   const byId = new Map(schema.nodes.map(n => [n.id, n]));
@@ -123,7 +127,7 @@ export async function deliverableNodeStates(project: any): Promise<Record<string
   const schema = schemaOf(project);
   const lacks = new Map<string, Promise<string | null>>();
   const evaluate = (gate: Node) => {
-    if (!lacks.has(gate.id)) lacks.set(gate.id, GATES[gate.type!](project, gate).catch(err => `Couldn't be checked: ${err?.message ?? err}`));
+    if (!lacks.has(gate.id)) lacks.set(gate.id, gateLacks(project, gate));
     return lacks.get(gate.id)!;
   };
   const states: Record<string, GateState & { appliesTo: AppliesTo; exportId: string | null }> = {};

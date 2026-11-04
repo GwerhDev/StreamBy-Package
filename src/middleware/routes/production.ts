@@ -13,6 +13,10 @@ import {
   addColumn, BoardResult, changeColumn, columnOfCard, deleteColumn, firstColumnOf, orderColumns, readColumns, withColumn,
 } from '../../services/productionBoard';
 import { cardKey, matchesSearch, nextNumber, numberCards, readKey, setKey } from '../../services/cardKeys';
+import { tokenAllows } from '../../services/auth';
+import { advanceRuns, cardChanged, deleteRunsOf, TASKS_NODE } from '../../services/pipelineRuns';
+import { readLabels, setLabels } from '../../services/productionLabels';
+import { callbackBaseOf } from './worker';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -20,8 +24,8 @@ function getDb() {
   return (getConnection(ids[0]).client as MongoClient).db();
 }
 
-const SHOT_FIELDS = ['name', 'description', 'status', 'column', 'assignees', 'teams', 'assetId', 'exportId', 'dueDate', 'order'] as const;
-const TASK_FIELDS = ['name', 'status', 'priority', 'assignees', 'teams', 'dueDate', 'notes'] as const;
+const SHOT_FIELDS = ['name', 'description', 'status', 'column', 'assignees', 'teams', 'assetId', 'exportId', 'pipelineId', 'dueDate', 'order'] as const;
+const TASK_FIELDS = ['name', 'status', 'priority', 'assignees', 'teams', 'dueDate', 'notes', 'stepId'] as const;
 
 const PRIORITY_RANK: Record<string, number> = { low: 1, medium: 2, high: 3 };
 
@@ -43,6 +47,17 @@ const summaryOf = (tasks: { status?: string; priority?: string; assignedTo?: unk
 const teamsError = async (projectId: string, values: Record<string, any>) => {
   const unknown = await teamNotOf(projectId, values.teamIds);
   return unknown ? 'teamIds must be a list of teams of the project' : null;
+};
+
+// The pipeline a card is given (one of the project's), and the step a task is (a Tasks step of
+// its card's pipeline).
+const pipelineError = async (projectId: string, values: Record<string, any>) =>
+  (values.pipelineId && !(await getDb()!.collection('pipelines').findOne({ id: values.pipelineId, projectId })) ? 'pipelineId must be a pipeline of the project' : null);
+const stepError = async (projectId: string, values: Record<string, any>, card: any) => {
+  if (!values.stepId) return null;
+  const pipeline: any = card?.pipelineId ? await getDb()!.collection('pipelines').findOne({ id: card.pipelineId, projectId }) : null;
+  const isStep = (pipeline?.nodeSchema?.nodes ?? []).some((n: any) => n.id === values.stepId && n.type === TASKS_NODE);
+  return isStep ? null : "stepId must be a Tasks step of its shot's pipeline";
 };
 
 // The column a card is put in, and so its status: the column given (the status given too must
@@ -68,9 +83,19 @@ const asCard = (columns: Awaited<ReturnType<typeof readColumns>>, projectKey: st
   return { ...answered, key: cardKey(projectKey, answered) };
 };
 
-export function productionRouter(_config: StreamByConfig): Router {
+export function productionRouter(config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
+
+  // A card changed in this request: its pipeline's runs go on (and its triggers start one, as
+  // whoever changed it, if they may run jobs).
+  const afterCardChange = (req: Request, project: any, before: any, after: any) => {
+    const auth = (req as any).auth as Auth;
+    return cardChanged(project, before, after, auth, tokenAllows(auth.apiToken, 'jobs:run'), callbackBaseOf(req, config))
+      .catch(err => console.error('❌ StreamBy pipelines: a card changed:', err?.message ?? err));
+  };
+  const afterTaskChange = (project: any, shotId: string) =>
+    advanceRuns(project, { shotId }).catch(err => console.error('❌ StreamBy pipelines: a task changed:', err?.message ?? err));
 
   // ── Board ──────────────────────────────────────────────────────────────────
 
@@ -90,7 +115,10 @@ export function productionRouter(_config: StreamByConfig): Router {
     try {
       const project = await projectFor(req, res, { edit: false });
       if (!project) return;
-      res.json({ columns: await readColumns(req.params.projectId), key: await readKey(req.params.projectId, project.name) });
+      res.json({
+        columns: await readColumns(req.params.projectId), key: await readKey(req.params.projectId, project.name),
+        labels: await readLabels(req.params.projectId),
+      });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -105,6 +133,21 @@ export function productionRouter(_config: StreamByConfig): Router {
       const result = await setKey(req.params.projectId, req.body?.key);
       if ('error' in result) return res.status(result.status ?? 400).json({ message: result.error });
       res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // What the project calls its sequences and shots ({ sequence, sequences, shot, shots }, any of
+  // them; an empty one is the default again): its admins only.
+  router.put('/projects/:projectId/production/board/labels', async (req: Request, res: Response) => {
+    try {
+      const project = await projectFor(req, res, { edit: true });
+      if (!project) return;
+      if (!isProjectAdmin(project, ((req as any).auth as Auth).userId)) return res.status(403).json({ message: 'Only a project admin can change what its sequences and shots are called' });
+      const result = await setLabels(req.params.projectId, req.body);
+      if ('error' in result) return res.status(result.status ?? 400).json({ message: result.error });
+      res.json({ labels: result });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -273,6 +316,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       await db.collection('production_shots').deleteMany({ sequenceId: seqId, projectId });
       if (shotIds.length) await db.collection('production_tasks').deleteMany({ projectId, shotId: { $in: shotIds } });
       await deleteDeliverablesOf(projectId, { shotIds });
+      for (const shotId of shotIds) await deleteRunsOf(projectId, { shotId });
 
       res.json({ message: 'Sequence deleted' });
     } catch (err: any) {
@@ -331,6 +375,8 @@ export function productionRouter(_config: StreamByConfig): Router {
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
+      const badPipeline = await pipelineError(projectId, values);
+      if (badPipeline) return res.status(400).json({ message: badPipeline });
       const placed = await placeCard(projectId, values);
       if (placed && 'error' in placed) return res.status(400).json({ message: placed.error });
       if (!(await db.collection('production_sequences').findOne({ id: seqId, projectId }))) {
@@ -352,6 +398,7 @@ export function productionRouter(_config: StreamByConfig): Router {
         teamIds: values.teamIds ?? [],
         assetId: values.assetId ?? null,
         exportId: values.exportId ?? null,
+        pipelineId: values.pipelineId ?? null,
         dueDate: values.dueDate ?? null,
         createdBy: auth.userId,
         createdAt: now,
@@ -359,6 +406,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       };
 
       await db.collection('production_shots').insertOne({ ...shot });
+      await afterCardChange(req, project, null, shot);
       res.status(201).json({ shot: { ...shot, key: cardKey(await readKey(projectId, project.name), shot) } });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -382,6 +430,8 @@ export function productionRouter(_config: StreamByConfig): Router {
       if (badTeams) return res.status(400).json({ message: badTeams });
       const current = await db.collection('production_shots').findOne({ id: shotId, projectId });
       if (!current) return res.status(404).json({ message: 'Shot not found' });
+      const badPipeline = await pipelineError(projectId, checked.values);
+      if (badPipeline) return res.status(400).json({ message: badPipeline });
       const placed = await placeCard(projectId, checked.values, current);
       if (placed && 'error' in placed) return res.status(400).json({ message: placed.error });
       const $set: Record<string, any> = { ...checked.values, ...(placed ?? {}), updatedAt: new Date() };
@@ -393,6 +443,11 @@ export function productionRouter(_config: StreamByConfig): Router {
       );
 
       if (!result) return res.status(404).json({ message: 'Shot not found' });
+      // Its tasks' steps were its old pipeline's.
+      if (checked.values.pipelineId !== undefined && checked.values.pipelineId !== current.pipelineId) {
+        await db.collection('production_tasks').updateMany({ projectId, shotId }, { $set: { stepId: null } });
+      }
+      await afterCardChange(req, project, current, result);
       res.json({ shot: asCard(await readColumns(projectId), await readKey(projectId, project.name), result) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -413,6 +468,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       await db.collection('production_shots').deleteOne({ id: shotId, projectId });
       await db.collection('production_tasks').deleteMany({ shotId, projectId });
       await deleteDeliverablesOf(projectId, { shotIds: [shotId] });
+      await deleteRunsOf(projectId, { shotId });
 
       res.json({ message: 'Shot deleted' });
     } catch (err: any) {
@@ -460,9 +516,10 @@ export function productionRouter(_config: StreamByConfig): Router {
 
       const db = getDb();
       if (!db) return res.status(500).json({ message: 'Database not available' });
-      if (!(await db.collection('production_shots').findOne({ id: shotId, projectId }))) {
-        return res.status(404).json({ message: 'Shot not found' });
-      }
+      const card = await db.collection('production_shots').findOne({ id: shotId, projectId });
+      if (!card) return res.status(404).json({ message: 'Shot not found' });
+      const badStep = await stepError(projectId, values, card);
+      if (badStep) return res.status(400).json({ message: badStep });
 
       const now = new Date();
       const task = {
@@ -476,12 +533,14 @@ export function productionRouter(_config: StreamByConfig): Router {
         teamIds: values.teamIds ?? [],
         dueDate: values.dueDate ?? null,
         notes: values.notes ?? null,
+        stepId: values.stepId ?? null,
         createdBy: auth.userId,
         createdAt: now,
         updatedAt: now,
       };
 
       await db.collection('production_tasks').insertOne({ ...task });
+      await afterTaskChange(project, shotId);
       res.status(201).json({ task });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -503,6 +562,8 @@ export function productionRouter(_config: StreamByConfig): Router {
       if ('error' in checked) return res.status(400).json({ message: checked.error });
       const badTeams = await teamsError(projectId, checked.values);
       if (badTeams) return res.status(400).json({ message: badTeams });
+      const badStep = await stepError(projectId, checked.values, await db.collection('production_shots').findOne({ id: shotId, projectId }));
+      if (badStep) return res.status(400).json({ message: badStep });
       const $set: Record<string, any> = { ...checked.values, updatedAt: new Date() };
 
       const result = await db.collection('production_tasks').findOneAndUpdate(
@@ -512,6 +573,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       );
 
       if (!result) return res.status(404).json({ message: 'Task not found' });
+      await afterTaskChange(project, shotId);
       res.json({ task: withAssignees(result) });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -530,6 +592,7 @@ export function productionRouter(_config: StreamByConfig): Router {
       if (!db) return res.status(500).json({ message: 'Database not available' });
 
       await db.collection('production_tasks').deleteOne({ id: taskId, shotId, projectId });
+      await afterTaskChange(project, shotId);
       res.json({ message: 'Task deleted' });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

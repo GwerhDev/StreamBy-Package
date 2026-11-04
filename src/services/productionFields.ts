@@ -10,7 +10,7 @@ export const TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
 const MAX_NAME = 200;
 const MAX_TEXT = 5000;
 
-type Field = 'name' | 'description' | 'notes' | 'status' | 'priority' | 'assignees' | 'teams' | 'column' | 'dueDate' | 'order' | 'assetId' | 'exportId';
+type Field = 'name' | 'description' | 'notes' | 'status' | 'priority' | 'assignees' | 'teams' | 'column' | 'dueDate' | 'order' | 'assetId' | 'exportId' | 'pipelineId' | 'stepId';
 
 export type FieldsResult = { values: Record<string, any> } | { error: string };
 
@@ -69,7 +69,7 @@ export function checkProductionFields(body: any, allowed: readonly Field[], proj
     if (typeof body.order !== 'number' || !Number.isFinite(body.order)) return { error: 'order must be a number' };
     values.order = body.order;
   }
-  for (const field of ['assetId', 'exportId'] as const) {
+  for (const field of ['assetId', 'exportId', 'pipelineId', 'stepId'] as const) {
     if (!has(field) || !given(field)) continue;
     if (body[field] !== null && typeof body[field] !== 'string') return { error: `${field} must be an id, or null` };
     values[field] = body[field] || null;

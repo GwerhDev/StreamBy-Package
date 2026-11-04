@@ -49,6 +49,7 @@ const shotFields = {
   teamIds: z.array(z.string()).optional().describe("The teams it's assigned to: ids of teams of the project (list_teams)"),
   assetId: z.string().optional(),
   exportId: z.string().optional(),
+  pipelineId: z.string().nullable().optional().describe("The pipeline it goes through (list_pipelines), its own run; null takes it out of one"),
   dueDate: z.string().optional().describe('An ISO 8601 date'),
   order: z.number().optional(),
 };
@@ -59,6 +60,7 @@ const taskFields = {
   teamIds: z.array(z.string()).optional().describe("The teams it's assigned to: ids of teams of the project (list_teams)"),
   dueDate: z.string().optional().describe('An ISO 8601 date'),
   notes: z.string().optional(),
+  stepId: z.string().nullable().optional().describe("The Tasks step of its shot's pipeline it's part of (a node id of the pipeline); the step is done for the shot when its tasks are"),
 };
 // An asset's license metadata: what crediting it takes. Each is optional; an empty one clears it.
 const rightsFields = {
@@ -157,6 +159,22 @@ export const TOOLS = [
     call: ({ projectId, pipelineId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/pipelines/${enc(pipelineId)}` }),
   }),
   tool({
+    name: 'list_pipeline_runs', title: "List a pipeline's runs", permissions: ['workflow:read'],
+    description: "A pipeline's runs, newest first (of one shot if given): each shot linked to the pipeline goes through its steps in a run of its own. Each run has its shot (its id, name and key, e.g. WOG-12), its status (running, completed, failed, cancelled), the steps it's on now (current) and every step: its status (waiting, active, running, done, failed), what it waits on (reason), and who completes it (people and teams, or a worker). It shows in the pipeline's Runs, under Pipelines.",
+    input: { projectId, pipelineId: id('pipeline'), shotId: z.string().optional().describe("A shot's id: only its runs") },
+    projectOf: byProject,
+    call: ({ projectId, pipelineId, shotId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/pipelines/${enc(pipelineId)}/runs${shotId ? `?${new URLSearchParams({ shotId })}` : ''}` }),
+    pick: (data) => data?.runs ?? [],
+  }),
+  tool({
+    name: 'get_shot_pipeline_runs', title: "Where a shot is in its pipelines", permissions: ['production:read'],
+    description: "A shot's runs of the pipelines it went through, newest first, found by its key (e.g. WOG-12) or id: for each, the step it's on now (current), what that step waits on, and who completes it. It shows in the shot's card in the Production board.",
+    input: { projectId, shot: z.string().min(1).describe("The shot's key (e.g. WOG-12) or id") },
+    projectOf: byProject,
+    call: ({ projectId, shot }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/shots/${enc(shot)}/pipeline-runs` }),
+    pick: (data) => data?.runs ?? [],
+  }),
+  tool({
     name: 'list_exports', title: 'List exports', permissions: ['project:read', 'exports:read'],
     description: "A project's exports (its published endpoints).",
     input: { projectId },
@@ -232,14 +250,14 @@ export const TOOLS = [
   tool({
     name: 'create_pipeline', title: 'Create a pipeline', permissions: ['workflow:write'], write: true,
     description: "Creates a pipeline in a project. It shows under Pipelines, and the workflow canvas draws its node.",
-    input: { projectId, name: z.string().min(1), description: z.string().optional(), order: z.number().optional() },
+    input: { projectId, name: z.string().min(1), description: z.string().optional(), order: z.number().optional(), triggers: z.array(z.enum(['card_linked', 'card_done', 'deliverable_marked'])).optional().describe("What starts a shot's run of it by itself: a shot linked to it, a shot done, an asset marked as a shot's deliverable. A run can always be started by hand (start_pipeline_run)") },
     projectOf: byProject,
     call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/pipelines`, body: defined(fields) }),
   }),
   tool({
     name: 'update_pipeline', title: 'Update a pipeline', permissions: ['workflow:write'], write: true,
-    description: "Changes a pipeline's name, description or order.",
-    input: { projectId, pipelineId: id('pipeline'), name: z.string().min(1).optional(), description: z.string().optional(), order: z.number().optional() },
+    description: "Changes a pipeline's name, description, order or triggers.",
+    input: { projectId, pipelineId: id('pipeline'), name: z.string().min(1).optional(), description: z.string().optional(), order: z.number().optional(), triggers: z.array(z.enum(['card_linked', 'card_done', 'deliverable_marked'])).optional().describe("What starts a shot's run of it by itself: a shot linked to it, a shot done, an asset marked as a shot's deliverable. A run can always be started by hand (start_pipeline_run)") },
     projectOf: byProject,
     call: ({ projectId, pipelineId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/pipelines/${enc(pipelineId)}`, body: defined(fields) }),
   }),
@@ -382,6 +400,14 @@ export const TOOLS = [
     input: { projectId, deliverableId: id('deliverable') },
     projectOf: byProject,
     call: ({ projectId, deliverableId }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/deliverables/${enc(deliverableId)}/start-workers` }),
+  }),
+  tool({
+    name: 'start_pipeline_run', title: "Start a shot's pipeline run", permissions: ['jobs:run'], write: true,
+    description: "Starts a shot's run of the pipeline it's linked to (its pipelineId), by hand: it goes through the pipeline's steps, each one when the ones before it are done, and its workers run as you. A shot that has a run of it going is refused, with that run.",
+    input: { projectId, pipelineId: id('pipeline'), shotId: id('shot') },
+    projectOf: byProject,
+    call: ({ projectId, pipelineId, shotId }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/pipelines/${enc(pipelineId)}/runs`, body: { shotId } }),
+    pick: (data) => data?.run,
   }),
   tool({
     name: 'remove_deliverable', title: 'Remove a deliverable', permissions: ['assets:write'], write: true,

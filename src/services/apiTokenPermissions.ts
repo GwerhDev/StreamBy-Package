@@ -117,7 +117,7 @@ const RULES = [
   rule('delete', `${P}/production/.+`, 'production:delete'),
 
   // Workflow and pipelines.
-  rule('read', `${P}/(workflow|pipelines(/[^/]+)?)`, 'workflow:read'),
+  rule('read', `${P}/(workflow|pipelines(/[^/]+(/runs)?)?)`, 'workflow:read'),
   rule(['PATCH'], `${P}/workflow`, 'workflow:write'),
   rule(['POST'], `${P}/pipelines`, 'workflow:write'),
   rule(['PATCH', 'DELETE'], `${P}/pipelines/[^/]+`, 'workflow:write'),
@@ -127,9 +127,10 @@ const RULES = [
   rule(['POST'], `${P}/exports`, 'exports:write'),
   rule(['PATCH', 'DELETE'], `${P}/exports/[^/]+`, 'exports:write'),
 
-  // Jobs: transcoding, rendering, AI, publishing a deliverable, starting its held workers.
+  // Jobs: transcoding, rendering, AI, publishing a deliverable, starting its held workers, starting
+  // a card's pipeline run (its workers run as whoever starts it).
   rule('read', `${P}/jobs`, 'jobs:read'),
-  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/(publish|start-workers))`, 'jobs:run'),
+  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/(publish|start-workers)|pipelines/[^/]+/runs)`, 'jobs:run'),
 
   // Documents: writing them is saving a version or moving them; publishing one (choosing what
   // the exports deliver, or whether they deliver it at all) is apart. A PATCH that changes

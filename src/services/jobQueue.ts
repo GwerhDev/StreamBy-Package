@@ -40,7 +40,16 @@ export async function listJobs(projectId: string, assetId?: string): Promise<Job
   return jobStore().list({ projectId, assetId });
 }
 
+const listeners = new Set<(job: JobRecord) => void>();
+
+/** Listens to every change to a job (a pipeline's run moves on when its job ends). */
+export function onJobChange(listener: (job: JobRecord) => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
 export function notify(job: JobRecord): void {
+  for (const listener of listeners) listener(job);
   emitToUser(job.userId, {
     type: 'jobEvent',
     data: {

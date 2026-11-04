@@ -286,15 +286,15 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `update_asset_metadata` | `assets:write` |
 | `delete_asset` | `assets:delete` |
 | `get_asset_rights`, `get_credits_sheet` / `set_asset_rights` | `rights:read` / `rights:write` |
-| `get_workflow`, `list_pipelines`, `get_pipeline` | `workflow:read` |
+| `get_workflow`, `list_pipelines`, `get_pipeline`, `list_pipeline_runs` | `workflow:read` |
 | `create_pipeline`, `update_pipeline` | `workflow:write` |
 | `list_exports` | `project:read` and `exports:read` |
 | `get_export` | `exports:read` |
 | `get_job`, `list_jobs` | `jobs:read` |
 | `list_workers` | `project:read` |
-| `process_asset`, `retry_job` | `jobs:run` |
+| `process_asset`, `retry_job`, `start_pipeline_run` | `jobs:run` |
 | `list_teams` | `members:read` |
-| `list_board_columns`, `list_sequences`, `list_shots`, `search_shots`, `list_tasks` | `production:read` |
+| `list_board_columns`, `list_sequences`, `list_shots`, `search_shots`, `list_tasks`, `get_shot_pipeline_runs` | `production:read` |
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
 | `create_sequence`, `create_shot`, `create_task` | `production:write` |
 | `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
@@ -673,6 +673,48 @@ callback without it, with another, or after the job ended answers 401.
 
 A job its worker doesn't complete before its deadline is sent again, up to
 `workerOptions.maxAttempts` times; then it fails, with its error, and can be retried.
+
+---
+
+## 🛤️ Pipelines: steps done by people and by workers
+
+A pipeline's steps are the nodes of its schema, and each card (a production shot) linked to it
+(its `pipelineId`) goes through them in a run of its own. A step starts when the steps with
+edges into it are done, and it's done when its source says so:
+
+| Node | Done by | Done when |
+|---|---|---|
+| Meeting (`meetingNode`, `data.documentId`) | its people and teams | its document (the meeting's notes) is published |
+| Tasks (`tasksNode`) | its people and teams | the card's tasks linked to it (their `stepId`) are done; with none, the card is |
+| Review Gate (`reviewGateNode`) | who reviews | the review session of the run's asset is approved (or the one in `data.reviewId`) |
+| Credits sheet (`creditsSheetNode`) | its rule | its sheet is complete |
+| Any process node with `data.worker` (`{ source, id }`) and `data.kind` | the worker | its job completes; the run then carries its result (`data.resultMode`, derived by default) |
+| Deliverable (`deliverableNode`) | StreamBy | the run's asset (the approved version) is marked as the card's deliverable, or its export's (`data.exportId`) |
+| Anything else | nobody | right away |
+
+Who completes a step done by people is in its node's `data.assignedTo` (user ids) and
+`data.teamIds`. Statuses are a card's or a task's own (`todo`, `in_progress`, `review`, `done`),
+never its column's name.
+
+**Starting a run.** By hand (`POST /projects/:projectId/pipelines/:pipelineId/runs` `{ shotId }`,
+`jobs:run`; a 409 with the run when the card has one going), or by the pipeline's `triggers`:
+`card_linked` (a card linked to it), `card_done` (a card done), `deliverable_marked` (an asset
+marked as a card's deliverable). A pipeline with none, as every one before them, starts nothing by
+itself. A trigger starts a run only for a request that may run jobs (`jobs:run`, for its token and
+its role), and the run's workers run as whoever started it, while their role lets them.
+
+**Reading them.** `GET /projects/:projectId/pipelines/:pipelineId/runs` (`?shotId=`) and
+`GET /projects/:projectId/production/shots/:shot/pipeline-runs` (the card by its id or its key,
+e.g. `WOG-12`) answer each run: its `status` (`running`, `completed`, `failed`, `cancelled`), its
+card (`id`, `name`, `key`), the steps it's on now (`current`) and every step (`status`: `waiting`,
+`active`, `running`, `done` or `failed`; `reason`, what it waits on; `completedBy`). Each change is
+sent to the project's members as a `pipelineRunEvent` (`{ projectId, pipelineId, shotId, runId }`).
+A card taken out of the pipeline cancels its run; a pipeline or a card deleted takes its runs.
+
+**What a project calls its sequences and shots.** `PUT /projects/:projectId/production/board/labels`
+(its admins) `{ sequence, sequences, shot, shots }` (any of them; an empty one is the default
+again): a game's may be sets and assets. Only names: `GET .../production/board` answers them
+(`labels`) beside its columns and key.
 
 ---
 

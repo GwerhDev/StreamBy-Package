@@ -385,6 +385,8 @@ export interface Pipeline {
   description?: string | null;
   order: number;
   nodeSchema: NodeSchema | null;
+  // What starts a card's run of it by itself (see services/pipelineRuns): none, only by hand.
+  triggers?: string[];
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
