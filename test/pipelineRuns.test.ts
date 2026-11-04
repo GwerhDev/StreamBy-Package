@@ -69,7 +69,7 @@ const { createStreamByRouter } = await import('../src/middleware/createRouter');
 const { resolveApiToken, createApiToken, API_TOKEN_PREFIX } = await import('../src/services/apiTokens');
 const { documentStore } = await import('../src/services/documents');
 const { updateJob } = await import('../src/services/jobQueue');
-const { advanceRun } = await import('../src/services/pipelineRuns');
+const { advanceRun, startRun } = await import('../src/services/pipelineRuns');
 
 const authProvider = async (req: any) => {
   const bearer = req.headers.authorization?.replace(/^Bearer /, '');
@@ -274,6 +274,40 @@ describe("a card's run", () => {
     });
     await Promise.all([advanceRun(store.projects[0], 'r1'), advanceRun(store.projects[0], 'r1')]);
     expect(asked).toHaveLength(1);
+  });
+
+  it('is started once, of several starts at once for the same card: the others get the run going', async () => {
+    const pipeline = await newPipeline();
+    await setSchema(pipeline.id, { nodes: [{ id: 'lod', type: 'lodNode', data: { label: 'LODs', worker: LOD, kind: 'lod' } }, { id: 'deliver', type: 'deliverableNode', data: {} }], edges: edges([['lod', 'deliver']]) });
+    const rock = await card({ pipelineId: pipeline.id });
+    const auth = { userId: 'eli', username: 'eli', role: 'viewer' as const };
+    // A trigger, a deliverable marked and two starts by hand, in the same tick.
+    const starts = await Promise.all((['card_linked', 'deliverable_marked', 'manual', 'manual'] as const)
+      .map(trigger => startRun(store.projects[0], pipeline.id, rock.id, trigger, auth, '')));
+    const made = starts.filter(r => 'run' in r && !('error' in r));
+    expect(made).toHaveLength(1);
+    const refused = starts.filter(r => 'error' in r);
+    expect(refused.map(r => (r as any).status)).toEqual([409, 409, 409]);
+    expect(refused.every(r => (r as any).run.id === (made[0] as any).run.id)).toBe(true);
+    expect(mongo.db.docs('pipeline_runs')).toHaveLength(1);
+    expect(asked).toHaveLength(1);
+    // Its worker's job ends once: one deliverable.
+    await updateJob(asked[0].jobId, { status: 'completed', result: { assetId: 'a1-lod', versionId: 'v1', mode: 'derived' } } as any);
+    await vi.waitFor(async () => expect((await runsOf(pipeline.id))[0].status).toBe('completed'));
+    expect(mongo.db.docs('deliverables')).toHaveLength(1);
+  });
+
+  it("a failed run whose job ends after all stays failed when its card has another run going", async () => {
+    const pipeline = await newPipeline({ triggers: ['card_linked'] });
+    await setSchema(pipeline.id, { nodes: [{ id: 'lod', type: 'lodNode', data: { label: 'LODs', worker: LOD, kind: 'lod' } }], edges: [] });
+    const rock = await card({ pipelineId: pipeline.id });
+    await updateJob(asked[0].jobId, { status: 'failed', error: 'Blender crashed' });
+    await vi.waitFor(async () => expect((await runsOf(pipeline.id))[0].status).toBe('failed'));
+    expect((await eli.post(`${P}/pipelines/${pipeline.id}/runs`, { shotId: rock.id })).status).toBe(201);
+    // The first job, retried by hand, completes.
+    await updateJob(asked[0].jobId, { status: 'completed', result: { assetId: 'a1-lod', versionId: 'v1', mode: 'derived' } } as any);
+    await vi.waitFor(async () => expect(stepOf((await runsOf(pipeline.id))[1], 'lod').status).toBe('done'));
+    expect((await runsOf(pipeline.id)).map((r: any) => r.status)).toEqual(['running', 'failed']);
   });
 
   it("runs its workers as whoever started it, only while their role lets them run jobs", async () => {

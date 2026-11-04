@@ -1,6 +1,7 @@
 // A MongoDB database in memory, with what the routes use of it: equality (an array field matches
 // a value it holds), $in, $exists and $or filters; $set, $unset, $inc, $max and $pull updates (and
-// upserts), one document or many; find with sort, limit and projection.
+// upserts), one document or many; find with sort, limit and projection; and unique indexes
+// (partial ones too), a write that breaks one refused with a duplicate key error (code 11000).
 
 type Doc = Record<string, any>;
 
@@ -28,8 +29,36 @@ const applyUpdate = (doc: Doc, update: Doc) => {
   }
 };
 
+interface UniqueIndex { name: string; keys: string[]; partial?: Doc }
+
+export class DuplicateKeyError extends Error {
+  code = 11000;
+  constructor(index: string) { super(`E11000 duplicate key error index: ${index}`); }
+}
+
 export class FakeCollection {
   docs: Doc[] = [];
+  indexes: UniqueIndex[] = [];
+
+  async createIndex(keys: Doc, options: { name?: string; unique?: boolean; partialFilterExpression?: Doc } = {}) {
+    const name = options.name ?? Object.keys(keys).join('_');
+    if (options.unique && !this.indexes.some(i => i.name === name)) {
+      this.indexes.push({ name, keys: Object.keys(keys), partial: options.partialFilterExpression });
+    }
+    return name;
+  }
+
+  // The first unique index `doc` would break beside the others (`except`, itself as it was).
+  private broken(doc: Doc, except?: Doc): string | null {
+    for (const index of this.indexes) {
+      if (index.partial && !matches(doc, index.partial)) continue;
+      const clash = this.docs.some(other => other !== except && other !== doc
+        && (!index.partial || matches(other, index.partial))
+        && index.keys.every(k => other[k] === doc[k]));
+      if (clash) return index.name;
+    }
+    return null;
+  }
 
   find(filter: Doc = {}) {
     let result = this.docs.filter(d => matches(d, filter));
@@ -63,16 +92,30 @@ export class FakeCollection {
     return found ? { ...found } : null;
   }
 
-  async insertOne(doc: Doc) { this.docs.push({ ...doc }); return { insertedId: doc._id }; }
+  async insertOne(doc: Doc) {
+    const broken = this.broken(doc);
+    if (broken) throw new DuplicateKeyError(broken);
+    this.docs.push({ ...doc });
+    return { insertedId: doc._id };
+  }
 
   async updateOne(filter: Doc, update: Doc, options: { upsert?: boolean } = {}) {
     let doc = this.docs.find(d => matches(d, filter));
+    let upserted = false;
     if (!doc && options.upsert) {
       doc = Object.fromEntries(Object.entries(filter).filter(([k, v]) => !k.startsWith('$') && (typeof v !== 'object' || v === null)));
       this.docs.push(doc);
+      upserted = true;
     }
     if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+    const before = { ...doc };
     applyUpdate(doc, update);
+    const broken = this.broken(doc);
+    if (broken) {
+      if (upserted) this.docs.splice(this.docs.indexOf(doc), 1);
+      else { for (const key of Object.keys(doc)) delete doc[key]; Object.assign(doc, before); }
+      throw new DuplicateKeyError(broken);
+    }
     return { matchedCount: 1, modifiedCount: 1 };
   }
 

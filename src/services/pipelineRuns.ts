@@ -195,6 +195,29 @@ const emitRun = (project: any, run: PipelineRun) => {
 };
 
 // Saves a change to a run over the revision it was read at: whether it was the one saved.
+// One running run per card and pipeline, kept by the database itself (a unique index over the
+// running ones), not by a read before the write: of two starts at once, only one inserts.
+const RUNNING_INDEX = 'one_running_run_per_card';
+const indexed = new WeakMap<object, Promise<unknown>>();
+async function ensureRunningIndex(): Promise<void> {
+  const database = db();
+  const col = runsCollection();
+  if (!database || !col) return;
+  let made = indexed.get(database);
+  if (!made) {
+    made = col.createIndex(
+      { projectId: 1, pipelineId: 1, shotId: 1 },
+      { name: RUNNING_INDEX, unique: true, partialFilterExpression: { status: 'running' } },
+    );
+    indexed.set(database, made);
+    made.catch(() => indexed.delete(database));
+  }
+  await made;
+}
+
+/** Whether a write was refused for a second running run of a card in a pipeline. */
+const isDuplicate = (err: any) => err?.code === 11000;
+
 async function save(run: PipelineRun, change: Partial<PipelineRun>): Promise<boolean> {
   const taken = await runsCollection()!.updateOne(
     { id: run.id, revision: run.revision },
@@ -292,9 +315,20 @@ async function patchStep(project: any, runId: string, nodeId: string, state: Ste
     if (!found) return null;
     const run = strip(found);
     const steps = { ...run.steps, [nodeId]: state };
-    const status: RunStatus = state.status === 'failed' ? 'failed' : run.status === 'failed' && state.status === 'done' ? 'running' : run.status;
+    // A failed run whose job ends after all (retried by hand) goes on, unless its card has
+    // another run of the pipeline going by then: it stays failed.
+    const resumes = run.status === 'failed' && state.status === 'done';
+    let status: RunStatus = state.status === 'failed' ? 'failed' : resumes ? 'running' : run.status;
     const jobIds = state.jobId && !run.jobIds.includes(state.jobId) ? [...run.jobIds, state.jobId] : run.jobIds;
-    if (await save(run, { steps, status, jobIds, ...extra })) {
+    let wasSaved = false;
+    try {
+      wasSaved = await save(run, { steps, status, jobIds, ...extra });
+    } catch (err) {
+      if (!resumes || !isDuplicate(err)) throw err;
+      status = 'failed';
+      wasSaved = await save(run, { steps, status, jobIds, ...extra });
+    }
+    if (wasSaved) {
       const saved = { ...run, steps, status, jobIds, ...extra, revision: run.revision + 1 };
       emitRun(project, saved);
       return saved;
@@ -378,8 +412,13 @@ export async function startRun(project: any, pipelineId: string, shotId: string,
   const card = await db()!.collection('production_shots').findOne({ id: shotId, projectId });
   if (!card) return { error: 'Shot not found', status: 404 };
   if (card.pipelineId !== pipelineId) return { error: "The shot isn't in this pipeline: link it first (its pipelineId)", status: 400 };
-  const running = await col.findOne({ projectId, pipelineId, shotId, status: 'running' });
-  if (running) return { error: 'The shot already has a run of this pipeline going', status: 409, run: strip(running) };
+  const going = async (): Promise<StartResult | null> => {
+    const running = await col.findOne({ projectId, pipelineId, shotId, status: 'running' });
+    return running ? { error: 'The shot already has a run of this pipeline going', status: 409, run: strip(running) } : null;
+  };
+  const before = await going();
+  if (before) return before;
+  await ensureRunningIndex();
 
   const now = new Date();
   const run: PipelineRun = {
@@ -388,7 +427,13 @@ export async function startRun(project: any, pipelineId: string, shotId: string,
     requester: { userId: auth.userId, username: auth.username, role: auth.role }, callbackBase,
     createdAt: now, updatedAt: now,
   };
-  await col.insertOne({ ...run });
+  try {
+    await col.insertOne({ ...run });
+  } catch (err) {
+    // Another start took it first: its run is the one going.
+    if (isDuplicate(err)) return (await going()) ?? { error: 'The shot already has a run of this pipeline going', status: 409 };
+    throw err;
+  }
   return { run: (await advanceRun(project, run.id)) ?? run };
 }
 
