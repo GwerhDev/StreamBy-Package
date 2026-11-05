@@ -117,7 +117,7 @@ describe('the MCP server', () => {
     await startHost();
     const client = await connect(await tokenFor('eli', ['projects:create', 'project:delete', 'assets:delete', 'production:delete'], ['p1']));
     const tools = (await client.listTools()).tools;
-    expect(tools.map(t => t.name).sort()).toEqual(['create_project', 'delete_asset', 'delete_project', 'delete_sequence', 'delete_shot', 'delete_task', 'list_projects']);
+    expect(tools.map(t => t.name).sort()).toEqual(['create_project', 'delete_asset', 'delete_project', 'delete_sequence', 'delete_shot', 'delete_task', 'delete_task_template', 'list_projects']);
     expect(tools.find(t => t.name === 'delete_project')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     expect(tools.find(t => t.name === 'create_project')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
   });

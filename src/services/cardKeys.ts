@@ -63,8 +63,14 @@ export async function numberCards(projectId: string): Promise<void> {
 
 /** The number a new card is given (the cards before it numbered first). */
 export async function nextNumber(projectId: string): Promise<number> {
+  return (await nextNumbers(projectId, 1))[0];
+}
+
+/** The numbers `count` new cards are given, in order, taken at once (the cards before them numbered first). */
+export async function nextNumbers(projectId: string, count: number): Promise<number[]> {
   await numberCards(projectId);
-  return takeNumbers(projectId, 1);
+  const first = await takeNumbers(projectId, count);
+  return Array.from({ length: count }, (_, i) => first + i);
 }
 
 /** A card's key, as it's answered. */

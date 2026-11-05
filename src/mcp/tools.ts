@@ -62,6 +62,11 @@ const taskFields = {
   notes: z.string().optional(),
   stepId: z.string().nullable().optional().describe("The Tasks step of its shot's pipeline it's part of (a node id of the pipeline); the step is done for the shot when its tasks are"),
 };
+// A task of a template: a name, or a name with its priority and notes.
+const templateTask = z.union([
+  z.string().min(1),
+  z.object({ name: z.string().min(1), priority: z.enum(['low', 'medium', 'high']).optional(), notes: z.string().optional() }),
+]);
 // An asset's license metadata: what crediting it takes. Each is optional; an empty one clears it.
 const rightsFields = {
   sourceUrl: z.string().optional().describe('Where the asset was taken from (an http(s) URL)'),
@@ -278,9 +283,53 @@ export const TOOLS = [
   tool({
     name: 'create_shot', title: 'Create a shot', permissions: ['production:write'], write: true,
     description: "Creates a shot in a production sequence, shown as a card in its Production board (a section of its dashboard).",
-    input: { projectId, sequenceId: id('sequence'), name: z.string().min(1), ...shotFields },
+    input: { projectId, sequenceId: id('sequence'), name: z.string().min(1), ...shotFields, templateId: z.string().optional().describe('A task template (list_task_templates): its tasks are given to the shot') },
     projectOf: byProject,
     call: ({ projectId, sequenceId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/production/sequences/${enc(sequenceId)}/shots`, body: defined(fields) }),
+  }),
+  tool({
+    name: 'create_shots', title: 'Create several shots', permissions: ['production:write'], write: true,
+    description: "Creates several shots (up to 200) in a production sequence in one call, each a card of its Production board with its key (e.g. WOG-12), in the order given. Every row is checked first: if one is wrong, none is made, and the error says which row. With templateId, each shot gets that task template's tasks.",
+    input: {
+      projectId, sequenceId: id('sequence'),
+      shots: z.array(z.object({ name: z.string().min(1), ...shotFields })).min(1).max(200),
+      templateId: z.string().optional().describe('A task template (list_task_templates): its tasks are given to each shot'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, sequenceId, shots, templateId }) => ({
+      method: 'POST', path: `/projects/${enc(projectId)}/production/sequences/${enc(sequenceId)}/shots/batch`, body: defined({ shots: shots.map((s: Record<string, unknown>) => defined(s)), templateId }),
+    }),
+  }),
+  tool({
+    name: 'list_task_templates', title: 'List task templates', permissions: ['production:read'],
+    description: "A project's task templates, by name: each a list of tasks (name, priority, notes) a shot can be given at once.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/production/task-templates` }),
+    pick: (data) => data?.templates ?? [],
+  }),
+  tool({
+    name: 'create_task_template', title: 'Create a task template', permissions: ['production:write'], write: true,
+    description: "Creates a task template in a project: a name and its tasks (1 to 50), given at once to the shots it's applied to (apply_task_template, or templateId when creating shots).",
+    input: { projectId, name: z.string().min(1), tasks: z.array(templateTask).min(1).max(50) },
+    projectOf: byProject,
+    call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/production/task-templates`, body: fields }),
+    pick: (data) => data?.template,
+  }),
+  tool({
+    name: 'update_task_template', title: 'Update a task template', permissions: ['production:write'], write: true,
+    description: "Changes a task template's name or tasks (the tasks given replace its own). The tasks it already gave shots stay as they are.",
+    input: { projectId, templateId: id('task template'), name: z.string().min(1).optional(), tasks: z.array(templateTask).min(1).max(50).optional() },
+    projectOf: byProject,
+    call: ({ projectId, templateId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/production/task-templates/${enc(templateId)}`, body: defined(fields) }),
+    pick: (data) => data?.template,
+  }),
+  tool({
+    name: 'apply_task_template', title: 'Apply a task template', permissions: ['production:write'], write: true,
+    description: "Gives a task template's tasks to shots of the project (up to 200), each its own tasks. It answers how many tasks were made.",
+    input: { projectId, templateId: id('task template'), shotIds: z.array(z.string().min(1)).min(1).max(200) },
+    projectOf: byProject,
+    call: ({ projectId, templateId, shotIds }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/production/task-templates/${enc(templateId)}/apply`, body: { shotIds } }),
   }),
   tool({
     name: 'update_shot', title: 'Update a shot', permissions: ['production:write'], write: true,
@@ -612,6 +661,13 @@ export const TOOLS = [
     input: { projectId, shotId: id('shot') },
     projectOf: byProject,
     call: ({ projectId, shotId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}/production/shots/${enc(shotId)}` }),
+  }),
+  tool({
+    name: 'delete_task_template', title: 'Delete a task template', permissions: ['production:delete'], write: true, destructive: true,
+    description: 'Deletes a task template. The tasks it gave shots stay. It cannot be undone.',
+    input: { projectId, templateId: id('task template') },
+    projectOf: byProject,
+    call: ({ projectId, templateId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}/production/task-templates/${enc(templateId)}` }),
   }),
   tool({
     name: 'delete_task', title: 'Delete a shot task', permissions: ['production:delete'], write: true, destructive: true,

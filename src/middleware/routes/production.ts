@@ -12,7 +12,8 @@ import { teamNotOf } from '../../services/teams';
 import {
   addColumn, BoardResult, changeColumn, columnOfCard, deleteColumn, firstColumnOf, orderColumns, readColumns, withColumn,
 } from '../../services/productionBoard';
-import { cardKey, matchesSearch, nextNumber, numberCards, readKey, setKey } from '../../services/cardKeys';
+import { cardKey, matchesSearch, nextNumbers, numberCards, readKey, setKey } from '../../services/cardKeys';
+import { checkTemplate, createTemplate, deleteTemplate, findTemplate, listTemplates, tasksOf, updateTemplate } from '../../services/taskTemplates';
 import { tokenAllows } from '../../services/auth';
 import { advanceRuns, cardChanged, deleteRunsOf, TASKS_NODE } from '../../services/pipelineRuns';
 import { readLabels, setLabels } from '../../services/productionLabels';
@@ -359,55 +360,165 @@ export function productionRouter(config: StreamByConfig): Router {
     }
   });
 
+  // Cards made in a sequence: each row checked first (none is made if one is wrong, and the answer
+  // says which), their numbers taken at once, and a template's tasks given to each, if one is.
+  const MAX_CARDS = 200;
+  const makeCards = async (req: Request, res: Response, rows: unknown[], { batch }: { batch: boolean }) => {
+    const auth = (req as any).auth as Auth;
+    const { projectId, seqId } = req.params;
+    const project = await Project.findOne({ _id: projectId });
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+    if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+    const db = getDb();
+    if (!db) return res.status(500).json({ message: 'Database not available' });
+
+    const rowError = (i: number, message: string) => res.status(400).json({ message: batch ? `Row ${i + 1}: ${message}` : message, ...(batch ? { row: i } : {}) });
+    const checkedRows: { values: Record<string, any>; placed: { columnId: string; status: string } }[] = [];
+    for (const [i, row] of rows.entries()) {
+      const checked = checkProductionFields(row, SHOT_FIELDS, project, { creating: true });
+      if ('error' in checked) return rowError(i, checked.error);
+      const badTeams = await teamsError(projectId, checked.values);
+      if (badTeams) return rowError(i, badTeams);
+      const badPipeline = await pipelineError(projectId, checked.values);
+      if (badPipeline) return rowError(i, badPipeline);
+      const placed = await placeCard(projectId, checked.values);
+      if (placed && 'error' in placed) return rowError(i, placed.error);
+      checkedRows.push({ values: checked.values, placed: placed! });
+    }
+    const templateId = (req.body ?? {}).templateId;
+    const template = templateId === undefined || templateId === null || templateId === '' ? null : await findTemplate(projectId, templateId);
+    if (templateId && !template) return res.status(400).json({ message: 'templateId must be a task template of the project' });
+    if (!(await db.collection('production_sequences').findOne({ id: seqId, projectId }))) {
+      return res.status(404).json({ message: 'Sequence not found' });
+    }
+
+    const numbers = await nextNumbers(projectId, checkedRows.length);
+    const now = new Date();
+    const shots = checkedRows.map(({ values, placed }, i) => ({
+      id: crypto.randomUUID(),
+      sequenceId: seqId,
+      projectId,
+      name: values.name,
+      description: values.description ?? null,
+      order: values.order ?? 0,
+      number: numbers[i],
+      status: placed.status,
+      columnId: placed.columnId,
+      assignedTo: values.assignedTo ?? [],
+      teamIds: values.teamIds ?? [],
+      assetId: values.assetId ?? null,
+      exportId: values.exportId ?? null,
+      pipelineId: values.pipelineId ?? null,
+      dueDate: values.dueDate ?? null,
+      createdBy: auth.userId,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    for (const shot of shots) {
+      await db.collection('production_shots').insertOne({ ...shot });
+      const tasks = template ? tasksOf(template, shot, auth.userId) : [];
+      for (const task of tasks) await db.collection('production_tasks').insertOne({ ...task });
+      await afterCardChange(req, project, null, shot);
+    }
+    const key = await readKey(projectId, project.name);
+    const withKey = (shot: typeof shots[number]) => ({ ...shot, key: cardKey(key, shot) });
+    const taskCount = template ? template.tasks.length * shots.length : 0;
+    if (batch) return res.status(201).json({ shots: shots.map(withKey), tasks: taskCount });
+    return res.status(201).json({ shot: withKey(shots[0]), ...(template ? { tasks: taskCount } : {}) });
+  };
+
   router.post('/projects/:projectId/production/sequences/:seqId/shots', async (req: Request, res: Response) => {
     try {
-      const auth = (req as any).auth as Auth;
-      const { projectId, seqId } = req.params;
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+      await makeCards(req, res, [req.body], { batch: false });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
 
-      const checked = checkProductionFields(req.body, SHOT_FIELDS, project, { creating: true });
-      if ('error' in checked) return res.status(400).json({ message: checked.error });
-      const { values } = checked;
-      const badTeams = await teamsError(projectId, values);
-      if (badTeams) return res.status(400).json({ message: badTeams });
-
-      const db = getDb();
-      if (!db) return res.status(500).json({ message: 'Database not available' });
-      const badPipeline = await pipelineError(projectId, values);
-      if (badPipeline) return res.status(400).json({ message: badPipeline });
-      const placed = await placeCard(projectId, values);
-      if (placed && 'error' in placed) return res.status(400).json({ message: placed.error });
-      if (!(await db.collection('production_sequences').findOne({ id: seqId, projectId }))) {
-        return res.status(404).json({ message: 'Sequence not found' });
+  // Several cards at once ({ shots: [{ name, description, assignedTo, teamIds, ... }], templateId }).
+  router.post('/projects/:projectId/production/sequences/:seqId/shots/batch', async (req: Request, res: Response) => {
+    try {
+      const rows = req.body?.shots;
+      if (!Array.isArray(rows) || !rows.length || rows.length > MAX_CARDS) {
+        return res.status(400).json({ message: `shots must be a list of 1 to ${MAX_CARDS} cards` });
       }
+      await makeCards(req, res, rows, { batch: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
 
-      const now = new Date();
-      const shot = {
-        id: crypto.randomUUID(),
-        sequenceId: seqId,
-        projectId,
-        name: values.name,
-        description: values.description ?? null,
-        order: values.order ?? 0,
-        number: await nextNumber(projectId),
-        status: placed!.status,
-        columnId: placed!.columnId,
-        assignedTo: values.assignedTo ?? [],
-        teamIds: values.teamIds ?? [],
-        assetId: values.assetId ?? null,
-        exportId: values.exportId ?? null,
-        pipelineId: values.pipelineId ?? null,
-        dueDate: values.dueDate ?? null,
-        createdBy: auth.userId,
-        createdAt: now,
-        updatedAt: now,
-      };
+  // ── Task templates ───────────────────────────────────────────────────────────
 
-      await db.collection('production_shots').insertOne({ ...shot });
-      await afterCardChange(req, project, null, shot);
-      res.status(201).json({ shot: { ...shot, key: cardKey(await readKey(projectId, project.name), shot) } });
+  router.get('/projects/:projectId/production/task-templates', async (req: Request, res: Response) => {
+    try {
+      if (!(await projectFor(req, res, { edit: false }))) return;
+      res.json({ templates: await listTemplates(req.params.projectId) });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  router.post('/projects/:projectId/production/task-templates', async (req: Request, res: Response) => {
+    try {
+      if (!(await projectFor(req, res, { edit: true }))) return;
+      const checked = checkTemplate(req.body, { creating: true });
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const template = await createTemplate(req.params.projectId, checked.values as any, ((req as any).auth as Auth).userId);
+      res.status(201).json({ template });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  router.patch('/projects/:projectId/production/task-templates/:templateId', async (req: Request, res: Response) => {
+    try {
+      if (!(await projectFor(req, res, { edit: true }))) return;
+      const checked = checkTemplate(req.body);
+      if ('error' in checked) return res.status(400).json({ message: checked.error });
+      const template = await updateTemplate(req.params.projectId, req.params.templateId, checked.values);
+      if (!template) return res.status(404).json({ message: 'Template not found' });
+      res.json({ template });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  router.delete('/projects/:projectId/production/task-templates/:templateId', async (req: Request, res: Response) => {
+    try {
+      if (!(await projectFor(req, res, { edit: true }))) return;
+      if (!(await deleteTemplate(req.params.projectId, req.params.templateId))) return res.status(404).json({ message: 'Template not found' });
+      res.json({ message: 'Template deleted' });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // A template's tasks given to cards of the project ({ shotIds }): each its own.
+  router.post('/projects/:projectId/production/task-templates/:templateId/apply', async (req: Request, res: Response) => {
+    try {
+      const project = await projectFor(req, res, { edit: true });
+      if (!project) return;
+      const { projectId, templateId } = req.params;
+      const shotIds = req.body?.shotIds;
+      if (!Array.isArray(shotIds) || !shotIds.length || shotIds.length > MAX_CARDS || !shotIds.every(id => typeof id === 'string' && id)) {
+        return res.status(400).json({ message: `shotIds must be a list of 1 to ${MAX_CARDS} card ids` });
+      }
+      const template = await findTemplate(projectId, templateId);
+      if (!template) return res.status(404).json({ message: 'Template not found' });
+      const ids = [...new Set(shotIds as string[])];
+      const db = getDb()!;
+      const cards = await db.collection('production_shots').find({ projectId, id: { $in: ids } }).toArray();
+      if (cards.length !== ids.length) return res.status(404).json({ message: 'Every card must be a card of the project' });
+      const userId = ((req as any).auth as Auth).userId;
+      let count = 0;
+      for (const card of cards) {
+        const tasks = tasksOf(template, { id: card.id, projectId }, userId);
+        for (const task of tasks) await db.collection('production_tasks').insertOne({ ...task });
+        count += tasks.length;
+        await afterTaskChange(project, card.id);
+      }
+      res.status(201).json({ tasks: count, shotIds: ids });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

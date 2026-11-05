@@ -294,10 +294,10 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `list_workers` | `project:read` |
 | `process_asset`, `retry_job`, `start_pipeline_run` | `jobs:run` |
 | `list_teams` | `members:read` |
-| `list_board_columns`, `list_sequences`, `list_shots`, `search_shots`, `list_tasks`, `get_shot_pipeline_runs` | `production:read` |
+| `list_board_columns`, `list_sequences`, `list_shots`, `search_shots`, `list_tasks`, `get_shot_pipeline_runs`, `list_task_templates` | `production:read` |
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
-| `create_sequence`, `create_shot`, `create_task` | `production:write` |
-| `delete_sequence`, `delete_shot`, `delete_task` | `production:delete` |
+| `create_sequence`, `create_shot`, `create_shots`, `create_task`, `create_task_template`, `update_task_template`, `apply_task_template` | `production:write` |
+| `delete_sequence`, `delete_shot`, `delete_task`, `delete_task_template` | `production:delete` |
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
 | `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable` | `assets:write` |
 | `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
@@ -673,6 +673,22 @@ callback without it, with another, or after the job ended answers 401.
 
 A job its worker doesn't complete before its deadline is sent again, up to
 `workerOptions.maxAttempts` times; then it fails, with its error, and can be retried.
+
+---
+
+## 🎬 Production cards in bulk, and task templates
+
+`POST /projects/:projectId/production/sequences/:seqId/shots/batch` `{ shots: [...], templateId? }`
+makes up to 200 cards in a sequence at once, in the order given, each with its key: every row
+(the fields one card takes) is checked first, and if one is wrong none is made (a 400 saying which
+`row`). Their numbers are taken at once, so the cards of a batch are numbered one after the other.
+
+A project's task templates (`/projects/:projectId/production/task-templates`: list, `POST`
+`{ name, tasks }`, `PATCH`, `DELETE`) are a name and its tasks (1 to 50; each a name, or
+`{ name, priority, notes }`). A template is applied to cards with
+`POST .../task-templates/:templateId/apply` `{ shotIds }`, or to the cards being made with
+`templateId` (one card, or a batch): each card gets its own tasks, as if made one by one. Changing
+or deleting a template leaves the tasks it made.
 
 ---
 
