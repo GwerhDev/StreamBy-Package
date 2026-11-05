@@ -113,6 +113,23 @@ describe('cards made in bulk', () => {
     expect((await eli.post(`${P}/sequences/${seq.id}/shots`, { name: 'Villain' })).body.shot.key).toBe('WOG-19');
   });
 
+  it('go after the cards the sequence has, in the order they were sent', async () => {
+    const seq = await sequence();
+    const other = await sequence('Props');
+    // Cards it has: made from the board's Create (with an order), and with none given.
+    await eli.post(`${P}/sequences/${seq.id}/shots`, { name: 'First', order: 0 });
+    await eli.post(`${P}/sequences/${seq.id}/shots`, { name: 'Second' });
+    await eli.post(`${P}/sequences/${other.id}/shots`, { name: 'Elsewhere', order: 7 });
+    const sent = ['Wolf', 'Bear', 'Fox', 'Owl', 'Deer'];
+    const made = await eli.post(`${P}/sequences/${seq.id}/shots/batch`, { shots: sent.map(name => ({ name })) });
+    expect(made.body.shots.map((s: any) => s.order)).toEqual([2, 3, 4, 5, 6]);
+    const listed = (await vic.get(`${P}/sequences/${seq.id}/shots`)).body.shots.map((s: any) => s.name);
+    expect(listed).toEqual(['First', 'Second', ...sent]);
+    // An order given is kept.
+    const placed = await eli.post(`${P}/sequences/${seq.id}/shots/batch`, { shots: [{ name: 'Lead', order: -1 }, { name: 'Last' }] });
+    expect(placed.body.shots.map((s: any) => s.order)).toEqual([-1, 7]);
+  });
+
   it('are none of them made when a row is wrong, the answer saying which, and spend no number', async () => {
     const seq = await sequence();
     for (const [rows, row, message] of [

@@ -393,6 +393,11 @@ export function productionRouter(config: StreamByConfig): Router {
     }
 
     const numbers = await nextNumbers(projectId, checkedRows.length);
+    // A card given no order goes after the sequence's cards, those of its batch in the order given:
+    // they're listed by order (then by when they were made, the same for a whole batch).
+    const existing = await db.collection('production_shots').find({ projectId, sequenceId: seqId }).project({ order: 1 }).toArray();
+    let nextOrder = existing.length ? Math.max(...existing.map((c: any) => (typeof c.order === 'number' ? c.order : 0))) + 1 : 0;
+    const orders = checkedRows.map(({ values }) => (values.order !== undefined ? values.order : nextOrder++));
     const now = new Date();
     const shots = checkedRows.map(({ values, placed }, i) => ({
       id: crypto.randomUUID(),
@@ -400,7 +405,7 @@ export function productionRouter(config: StreamByConfig): Router {
       projectId,
       name: values.name,
       description: values.description ?? null,
-      order: values.order ?? 0,
+      order: orders[i],
       number: numbers[i],
       status: placed.status,
       columnId: placed.columnId,
