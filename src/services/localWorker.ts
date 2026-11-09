@@ -3,8 +3,7 @@ import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
-import { NodeIO, Document as GltfDocument } from '@gltf-transform/core';
-import { simplify, weld } from '@gltf-transform/functions';
+import type { NodeIO, Document as GltfDocument } from '@gltf-transform/core';
 import { StorageAdapter, StorageCategoryName, StreamByConfig, WorkerConfig } from '../types';
 import { STORAGE_CATEGORIES, WorkerError } from './workers';
 import { authorizeCallback, completeJobWithDocument, completeJob, failWorkerJob, reportProgress, resultUploadUrl } from './workerJobs';
@@ -144,20 +143,27 @@ async function transcode(input: Input, profile: any, ctx: Context): Promise<Outp
 
 // ── glTF ──
 
-// meshoptimizer ships as an ES module only. Built as CommonJS, an import() is a require(), which
-// Node takes for an ES module since 22.12; an older Node is asked for a real import().
-async function loadMeshoptimizer(): Promise<any> {
+// glTF-Transform and meshoptimizer are loaded when a glTF job needs them, not when StreamBy
+// starts: they're ES modules (or need some), and built as CommonJS an import() is a require(),
+// which Node takes for an ES module only since 22.12. An older Node is asked for a real import(),
+// so StreamBy starts, and processes glTF, on either.
+const realImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+async function esm<T>(load: () => Promise<T>, specifier: string): Promise<T> {
   try {
-    return await import('meshoptimizer');
+    return await load();
   } catch (err: any) {
     if (err?.code !== 'ERR_REQUIRE_ESM') throw err;
-    return (new Function('specifier', 'return import(specifier)') as (s: string) => Promise<any>)('meshoptimizer');
+    return realImport(specifier);
   }
 }
+const loadCore = () => esm(() => import('@gltf-transform/core'), '@gltf-transform/core');
+const loadFunctions = () => esm(() => import('@gltf-transform/functions'), '@gltf-transform/functions');
+const loadMeshoptimizer = () => esm(() => import('meshoptimizer'), 'meshoptimizer');
 
 async function readGltf(input: Input): Promise<{ io: NodeIO; document: GltfDocument }> {
   requireCategory(input, ['3d-models'], 'It');
-  const io = new NodeIO();
+  const { NodeIO: IO } = await loadCore();
+  const io = new IO();
   const ext = extOf(input.fileName);
   if (ext === 'glb') return { io, document: await io.readBinary(new Uint8Array(input.bytes)) };
   if (ext === 'gltf') {
@@ -187,6 +193,7 @@ async function lod(input: Input, profile: any): Promise<Output> {
   const { io, document } = await readGltf(input);
   const before = triangles(document);
   const { MeshoptSimplifier } = await loadMeshoptimizer();
+  const { simplify, weld } = await loadFunctions();
   await MeshoptSimplifier.ready;
   await document.transform(weld(), simplify({ simplifier: MeshoptSimplifier, ratio, error }));
   return writeGlb(io, document, `${baseName(input.fileName)}-lod${Math.round(ratio * 100)}`, { ratio, error, triangles: { before, after: triangles(document) } });
