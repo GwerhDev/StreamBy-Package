@@ -270,17 +270,18 @@ describe('a blocked deliverable', () => {
   it("holds its export: it can't be published until each deliverable of it is ready", async () => {
     const { session } = await releasing({ appliesTo: 'exports', exportId: 'e1' });
     await mark({ exportId: 'e1' });
+    project().distributionConnections = [{ id: 'cdn', name: 'CDN', target: 'cdnPush', projectId: 'p1' }];
     const publish = (exportId: string) => eli.post(`${P}/deliverables/${exportId}/publish`, { targets: [{ connectionId: 'cdn' }] });
     const refused = await publish('e1');
     expect(refused.status).toBe(409);
     expect(refused.body.message).toBe('Blocked: Art review (Waiting for approvals: 0 of 1); Model credits (1 of 1 assets lack credits)');
     expect(refused.body.blockedBy).toHaveLength(2);
     // Another export, with nothing gating it, is published.
-    expect((await publish('e2')).status).toBe(202);
+    expect((await publish('e2')).status).toBe(200);
 
     await eli.put(`${P}/assets/a1/rights`, complete);
     await decide(session.id, 'approve');
-    expect((await publish('e1')).status).toBe(202);
+    expect((await publish('e1')).status).toBe(200);
   });
 });
 

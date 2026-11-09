@@ -2,23 +2,33 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-Middleware framework for building storage-agnostic media APIs.  
-Part of the [StreamBy](https://streamby.nhexa.cl) ecosystem by TerminalCore Labs.
+The backend of [StreamBy](https://streamby.nhexa.cl), installed inside your own API: a
+production platform for creative teams, from a project's files to what it delivers. Part of the
+StreamBy ecosystem by TerminalCore Labs.
 
 ---
 
 ## 🚀 What is it?
 
-`streamby-core` is a plug-and-play middleware for Express (or compatible frameworks) that enables file uploads, listings and **multi-project access** over services like:
+`streamby-core` is an Express middleware (`createStreamByRouter`) that gives your API, under one
+path, everything a StreamBy project needs. It's a library: **no separate backend to run**. Your
+app authenticates (`authProvider`), StreamBy does the rest, in your databases (PostgreSQL and
+MongoDB) and your storage:
 
-- ✅ AWS S3
-- ✅ Google Cloud Storage (soon)
-- ✅ Cloudflare R2 (soon)
-- ✅ Local/Personal servers (soon)
-
-It's designed to be installed inside your existing API as a library — **no need to run a separate backend**.
-
----
+- **Projects and their members**: roles, teams and per-project permissions; invitations and
+  requests to join; archiving; exploring public projects.
+- **Assets**: uploads by signed URL to S3 (the host's storage, or a project's own), folders,
+  versions, metadata, license metadata and credits sheets, reviews with approvals.
+- **Processing**: workers that process assets (StreamBy's own, the host's or a project's), their
+  jobs kept and retried; results kept as new assets or versions.
+- **The workflow**: a canvas that defines the project (its databases, APIs, storages, services,
+  exports and pipelines), gates that hold deliverables back, and pipelines whose steps are done
+  by people and by workers.
+- **Production**: a board of sequences and shots (cards with keys like `WOG-12`), tasks, columns,
+  templates and cards made in bulk; deliverables for shots and exports.
+- **Documents**: a project's documents with their versions, published to its exports.
+- **Exports**: public or private endpoints that serve a project's data and documents.
+- **Agents**: API tokens, OAuth for apps the user signs in to (Claude), and an MCP server.
 
 ## 📦 Installation
 
@@ -76,7 +86,7 @@ server.listen(3000);
 ## 🔑 Encryption and key rotation
 
 Credentials stored by StreamBy (connection secrets, export credentials, user integrations,
-distribution and render farm credentials) are encrypted with the key you pass as `encrypt`:
+distribution connections and project workers' credentials) are encrypted with the key you pass as `encrypt`:
 32 bytes, written as 64 hexadecimal characters. Each stored value records the id of the key
 that encrypted it (a fingerprint, never the key itself), so you can rotate the key:
 
@@ -126,7 +136,7 @@ hash is stored, with a short prefix to tell it apart.
 
 | Resource | Permissions | Covers |
 |---|---|---|
-| Project | `project:read`, `project:update`, `project:delete` | The project, its settings and its connections (API, database, storage, distribution, render farm), integrations and allowed origins. |
+| Project | `project:read`, `project:update`, `project:delete` | The project, its settings and its connections (API, database, storage, distribution, workers), integrations and allowed origins. |
 | Members | `members:read`, `members:manage` | Listing members and teams; inviting, changing and removing members, searching users, and making, changing and deleting teams. |
 | Assets | `assets:read`, `assets:write`, `assets:delete` | Files and folders, upload URLs, metadata, versions, reviews and annotations, QC reports. |
 | Production | `production:read`, `production:write`, `production:delete` | Sequences, shots and tasks. |
@@ -362,6 +372,10 @@ have no gates before them, is ready, as it always was. While it's blocked:
 - its export can't be published (`POST /projects/:projectId/deliverables/:exportId/publish`
   answers 409 with `blockedBy`).
 
+Publishing an export (`{ targets: [{ connectionId, channel? }] }`, each one of the project's
+distribution connections) records when, by whom and where to: `publishedAt`, `publishedBy` and
+`deliverableTargets`. It's only a record: StreamBy uploads nothing to a platform.
+
 If the change that made it ready came from someone who can't run jobs (an API token without
 `jobs:run`), its workers stay held: the deliverable is answered with `workersWaiting: true`, and
 `POST /projects/:projectId/deliverables/:deliverableId/start-workers` (`jobs:run`, and being able
@@ -572,14 +586,67 @@ Each row: `{ assetId, name, category, sourceUrl, creatorName, creatorUrl, licens
 
 ## ⚙️ Processing workers
 
-StreamBy doesn't process assets itself (optimizing a glTF, making LODs, transcoding...): it
-sends the work to a **worker**, an external service, and keeps what it makes. Anyone can write a
-compatible worker by following the contract below.
+StreamBy processes assets through **workers**: services it sends a job to, which download the
+asset, do their work and upload what they made, kept as a new asset or as the asset's new
+version. There's one way to ask for any of them (`POST .../jobs/process`), and one contract
+(below): StreamBy's own worker follows it too, in the same process.
+
+**What StreamBy processes, and what it doesn't**
+
+| Processing | Done by | With |
+|---|---|---|
+| Thumbnail: an image's smaller copy, or a video's frame (`thumbnail`) | StreamBy's own worker | FFmpeg, the host's |
+| Transcoding a video or an audio: format, codec, size, bitrate, sound only (`transcode`) | StreamBy's own worker | FFmpeg, the host's |
+| A glTF model's LOD: fewer triangles (`lod`) | StreamBy's own worker | glTF-Transform and meshoptimizer |
+| A glTF model as `.glb`, or as `.gltf` with its buffers inside it (`gltf-convert`) | StreamBy's own worker | glTF-Transform |
+| A video's or an audio's transcript, as a project document (`transcribe`) | StreamBy's own worker | the requester's speech provider: OpenAI, Deepgram, AssemblyAI, or any OpenAI-compatible service |
+| Anything else (optimizing a glTF, rendering, upscaling...) | a worker of the host or of the project | its own tools |
+| Ingest: an uploaded file's metadata (its codec, from its content type) and its first version (`POST .../jobs/ingest`) | StreamBy | nothing external |
+| QC reports (`.../assets/:assetId/qc-report`) | whoever posts one | a record of the checks given |
+| Publishing an export | nobody | a record of when, by whom and where to (see Deliverables) |
+
+**StreamBy's own worker** is listed with the host's workers as `StreamBy` (`source: 'builtin'`,
+`id: 'streamby'`), unless the host turns it off with `processing: false`. It runs on the server
+it's mounted in:
+
+```ts
+createStreamByRouter({
+  // ...
+  processing: { ffmpegPath: '/usr/bin/ffmpeg' }, // default: `ffmpeg`, from the PATH; `false` turns it off
+});
+```
+
+Where there's no FFmpeg, its thumbnails, transcodes and transcripts fail saying so. Its
+`profile`s:
+
+| Kind | Takes | `profile` |
+|---|---|---|
+| `thumbnail` | images, videos | `width` (default 640), `format` (`jpg`, `png`, `webp`), `timecode` (a video's: default `00:00:01`) |
+| `transcode` | videos, audios | `format` (`mp4`, `webm`, `mov`; `mp3`, `ogg`, `wav`, `m4a`, `flac`: its sound only), `width`, `height`, `videoBitrate`, `audioBitrate` (e.g. `2M`, `128k`) |
+| `lod` | `.glb`, `.gltf` | `ratio` (the share of triangles kept, default 0.5), `error` (default 0.01) |
+| `gltf-convert` | `.glb`, `.gltf` | `to` (`glb` or `gltf`; by default, the other one) |
+| `transcribe` | videos, audios | `integrationId` (required: a speech provider integration of the requester's own), `language`, `model` |
+
+A thumbnail of a video is an image, and a transcode to an audio format is an audio: results of
+another category than their asset's are new assets (`resultMode: 'version'` is refused for
+them). A transcript is a project document, `Transcript of <file name>`: the job's `result` is
+`{ mode: 'document', documentId }`.
+
+**Speech providers** are a user's account integrations (`POST /user/integrations`, `kind:
+'service'`), never a project's connection, and a transcription uses only the requester's own:
+
+| `provider` | `credential` |
+|---|---|
+| `openai` | the API key |
+| `deepgram` | the API key |
+| `assemblyai` | the API key |
+| `openai-compatible` | `{ baseUrl, apiKey?, model? }`: any service with OpenAI's transcription API (Groq, a whisper.cpp or LocalAI server...). Its `baseUrl` is reached from StreamBy's server: https, and never a local or private address (as a project's worker endpoint; `workerOptions.allowLocalEndpoints` lifts it, for development) |
 
 **Where workers come from**
 
+- **StreamBy's own** (above).
 - **The host's**, offered to every project, in the router config (each one gated, like the other
-  built-ins, by `canUseBuiltin` with kind `'worker'`):
+  built-ins, by `canUseBuiltin` with kind `'worker'`, StreamBy's own too):
 
   ```ts
   createStreamByRouter({
@@ -587,7 +654,7 @@ compatible worker by following the contract below.
     workers: [{
       id: 'gltf', name: 'glTF optimizer',
       endpoint: 'https://worker.example.com/jobs', credential: process.env.GLTF_WORKER_TOKEN,
-      kinds: ['gltf-optimize', 'lod'],   // what it does
+      kinds: ['gltf-optimize'],          // what it does
       categories: ['3d-models'],         // the assets it takes
       autoKind: 'gltf-optimize',         // optional: run on its own (see below)
       timeoutSeconds: 3600,              // optional: how long it may take a job
@@ -601,7 +668,7 @@ compatible worker by following the contract below.
   ```
 
 - **A project's own**, connected from the project (`GET`, `POST` and
-  `DELETE /projects/:projectId/workers`; a project's render farms are workers too). Its endpoint
+  `DELETE /projects/:projectId/workers`; render farms are connected as workers). Its endpoint
   must be https and never reach a local or private address: not as written, nor as its name
   resolves, which is checked when it's connected and again right before each job is sent (a
   name can point at the server's own network, or start pointing there later). A job for one
@@ -629,7 +696,8 @@ compatible worker by following the contract below.
 A worker with an `autoKind` also runs by itself on an asset of its categories when it's marked
 as a deliverable (by a session, or by an API token that has `jobs:run`: one without it marks the
 deliverable and starts nothing). On a deliverable blocked by a gate, it runs once the
-deliverable is ready (see Gates, above).
+deliverable is ready (see Gates, above). A pipeline's step set to a worker sends it a job too
+(see Pipelines).
 
 Jobs are kept in the main database (a `jobs` table or collection): they survive restarts, and
 every instance sees them. `GET /projects/:projectId/jobs` lists them (`?assetId=` for one asset's);
@@ -667,7 +735,7 @@ callback without it, with another, or after the job ended answers 401.
 | Action | Body | Answer |
 |---|---|---|
 | `/progress` | `{ "progress": 0-100, "stage": "optimizing" }` (either) | the job |
-| `/upload-url` | `{ "fileName": "hero.glb", "contentType": "model/gltf-binary" }` (of the asset's category) | `{ "url", "method": "PUT", "headers", "expiresAt" }`: upload the result there |
+| `/upload-url` | `{ "fileName": "hero.glb", "contentType": "model/gltf-binary", "category"? }` (of the asset's category; a derived result may give another, e.g. `images` for a video's thumbnail) | `{ "url", "method": "PUT", "headers", "expiresAt" }`: upload the result there |
 | `/complete` | `{ "report": { … } }` (optional; any JSON object, kept with the result) | the job, completed, with its `result`: `{ assetId, versionId, mode }` |
 | `/fail` | `{ "error": "…", "retryable": false }` | the job, failed with its error (sent again if `retryable` and attempts are left) |
 
@@ -834,9 +902,10 @@ nor one that starts a job.
 
 ## 🗄️ Database Schema Setup
 
-`streamby-core` requires a pre-configured database schema for its internal operations. It does not manage database connections directly; instead, it expects the host application to provide initialized connection instances. This ensures full control and flexibility for the host environment.
-
-The library will only interact with the specified schema and will not touch other schemas in your database. The `reset` option is opt-in and will only drop and recreate the specified `streamby` schema if explicitly set to `true`.
+`createStreamByRouter` connects to the `databases` it's given and, at startup, makes (or brings
+up to date) the tables and collections it uses, in their own `streamby` schema: it never touches
+another schema of yours. Several instances starting at once take turns (a PostgreSQL advisory
+lock), so they don't deadlock.
 
 **Queries by what a request needs.** No request reads every project or user: a user's projects
 are asked for by their memberships (`project_members("userId")` in PostgreSQL, indexed;
@@ -848,71 +917,21 @@ MongoDB), the first 20 (the users' table is the host's: an index for it, such as
 in. Only startup's passes (re-encrypting credentials, backfilling built-in
 connections) read them all, once.
 
-### PostgreSQL Example
+To make the schema yourself, outside the router (in a migration, say), there are the setup
+helpers; `reset: true` drops and makes the `streamby` schema again, and is refused in production
+unless `allowResetInProd`:
 
 ```ts
-import { Pool } from "pg";
-import { setupStreambyPg } from "streamby-core/pg/setup"; // Adjust path as per your package structure
+import { Pool } from 'pg';
+import { MongoClient } from 'mongodb';
+import { setupStreambyPg } from 'streamby-core/dist/pg/setup';
+import { setupStreambyMongo } from 'streamby-core/dist/mongo/setup';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+await setupStreambyPg({ pool: new Pool({ connectionString: process.env.POSTGRES_URI }), schema: 'streamby' });
 
-// Call setupStreambyPg to ensure the schema and tables are created
-// reset: false (default) ensures idempotency and no data loss
-await setupStreambyPg({ pool, schema: "streamby", reset: false });
-```
-
-### MongoDB Example
-
-```ts
-import { MongoClient } from "mongodb";
-import { setupStreambyMongo } from "streamby-core/mongo/setup"; // Adjust path as per your package structure
-
-const client = new MongoClient(process.env.MONGO_URL!);
-
-// Connect the MongoDB client
+const client = new MongoClient(process.env.MONGO_URI!);
 await client.connect();
-
-// Call setupStreambyMongo to ensure collections and indexes are created
-await setupStreambyMongo({ client, dbName: "streamby" });
-```
-
-```ts
-import express from 'express';
-import { createStreamByRouter } from 'streamby-core';
-
-const app = express();
-
-app.use('/streamby', createStreamByRouter({
-  storageProvider: {
-    type: 's3',
-    config: {
-      bucket: 'your-bucket-name',
-      region: 'your-region',
-      accessKeyId: 'YOUR_AWS_KEY',
-      secretAccessKey: 'YOUR_AWS_SECRET'
-    }
-  },
-  authProvider: async (req) => {
-    // extract token/cookie and validate
-    return {
-      userId: 'demo',
-      projects: ['demo-project'],
-      role: 'admin',
-    };
-  },
-  projectProvider: async (projectId) => {
-    // fetch project from your DB
-    return {
-      id: projectId,
-      name: 'Demo Project',
-      description: 'Demo for StreamBy integration',
-      rootFolders: [],
-      settings: { allowUpload: true }
-    };
-  }
-}));
-
-app.listen(3000);
+await setupStreambyMongo({ client, dbName: 'streamby' });
 ```
 
 ---
@@ -920,122 +939,51 @@ app.listen(3000);
 ## 🧪 Testing
 
 ```bash
-npm run test
+npm test
 ```
 
-Unit tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.com/package/supertest).
-
----
-
-## 📁 Features
-
-- 📂 Multi-project access control
-- 🔐 Project-aware file uploads & listings
-- 🧹 Modular adapters per storage provider
-- 🧰 Built-in testability with mock auth & storage
-- ✨ Simple to extend for custom business logic
+Tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.com/package/supertest),
+on Node 22 or later. Most run against in-memory databases; the `*.pg.test.ts` ones need a local
+PostgreSQL (`postgresql://postgres:postgres@localhost:5432/postgres`; they make, and drop,
+databases of their own), and the processing ones need FFmpeg on the PATH.
 
 ---
 
 ## 🗺️ API Endpoints
 
-Here's a summary of the key API endpoints provided by `streamby-core`:
+Every route is under the path the router is mounted at (e.g. `/streamby`). The sections above
+describe each area; this is the map.
 
-### `GET /streamby/projects`
+| Area | Routes |
+|---|---|
+| Session | `GET /auth`, `GET /user/subscription`, `GET /users/search?q=` |
+| Projects | `GET /projects` (`?archived=`), `GET /projects/explore`, `POST /projects/create`, `GET`, `PATCH`, `DELETE /projects/:id`, `GET /projects/:id/preview`, `PATCH /projects/:id/archive` and `/unarchive`, `POST /projects/:id/image`, `GET` and `PATCH /projects/:id/origins`, `GET` and `PUT /projects/:id/permissions`, `GET /projects/:id/dependents/:kind/:resourceId` |
+| Members and teams | `GET`, `POST /projects/:id/members`, `PATCH`, `DELETE /projects/:id/members/:userId` (and `/accept`, `/approve`, `/reject`), `POST /projects/:id/request-join`, `GET`, `POST /projects/:id/teams`, `PATCH`, `DELETE /projects/:id/teams/:teamId` |
+| Integrations | `GET`, `POST /user/integrations`, `PATCH`, `DELETE /user/integrations/:id` (and `/dependents`), `GET /user/integrations/oauth/:provider/start` and `/callback`; a project's: `GET`, `POST /projects/:id/integrations`, `DELETE /projects/:id/integrations/:integrationId` |
+| Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `/projects/:projectId/distribution-connections`, `GET /databases`, `GET /storages` |
+| Storage and assets | `GET /projects/:projectId/storage/:category` (and `/upload-url`), `GET /projects/:projectId/storage/lasts`, `PATCH`, `DELETE /projects/:projectId/storage/files/:fileId` (and `/replace-url`), `GET /projects/:projectId/assets/:fileId/download-url`, `/metadata`, `/versions`, `GET`, `PUT .../assets/:assetId/rights`, `GET`, `POST .../assets/:assetId/qc-report`, `GET /projects/:projectId/credits-sheets` (and `/:docId`) |
+| Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail` |
+| Reviews | `GET`, `POST /projects/:projectId/reviews`, `GET /projects/:projectId/reviews/:reviewId`, `POST .../decision` |
+| Deliverables | `GET`, `POST /projects/:projectId/deliverables`, `DELETE .../:deliverableId`, `POST .../:deliverableId/start-workers`, `GET .../gates`, `POST /projects/:projectId/deliverables/:exportId/publish` |
+| Workflow and pipelines | `GET`, `PATCH /projects/:id/workflow`, `GET`, `POST /projects/:projectId/pipelines`, `GET`, `PATCH`, `DELETE .../:pipelineId`, `GET`, `POST .../:pipelineId/runs`, `GET /projects/:projectId/production/shots/:shot/pipeline-runs` |
+| Production | `/projects/:projectId/production/board` (its columns, `key`, `labels`), `/sequences`, `/sequences/:seqId/shots` (and `/batch`), `/shots` (`?q=`), `/shots/:shotId`, `/shots/:shotId/tasks`, `/task-templates` (and `/:templateId/apply`) |
+| Documents | `GET`, `POST /projects/:projectId/documents`, `GET`, `PATCH`, `DELETE .../:docId`, `PATCH .../:docId/sections`, `POST .../:docId/publish`, `GET .../:docId/versions` (and `/:version`) |
+| Exports | `GET`, `POST /projects/:id/exports`, `GET`, `PATCH`, `DELETE /projects/:id/exports/:exportId`; served at `GET /:projectId/export/:exportName` |
+| Tokens and agents | `GET`, `POST`, `DELETE /user/api-tokens` and `/projects/:id/api-tokens`, `POST`, `GET`, `DELETE /mcp`, `GET /.well-known/oauth-protected-resource` |
+| Notifications | `GET /notifications` (and `/:id`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` |
 
-Lists all projects accessible by the authenticated user.
-
-**Query Parameters:**
-- `archived`: (Optional) Filter projects by their archived status.
-  - `true`: Returns only archived projects.
-  - `false`: Returns only unarchived projects.
-  - (Omitted): Returns all projects (both archived and unarchived).
-
-**Example Response:**
-```json
-{
-  "projects": [
-    {
-      "id": "project1_id",
-      "dbType": "nosql",
-      "name": "My NoSQL Project",
-      "image": "url_to_image",
-      "archived": false
-    },
-    {
-      "id": "project2_id",
-      "dbType": "sql",
-      "name": "My SQL Project",
-      "image": "url_to_image",
-      "archived": true
-    }
-  ]
-}
-```
-
-### `PATCH /streamby/projects/:id/archive`
-
-Archives a specific project. After archiving, it returns the complete list of projects for the user, including the updated project.
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "projects": [
-    {
-      "id": "project1_id",
-      "dbType": "nosql",
-      "name": "My NoSQL Project",
-      "image": "url_to_image",
-      "archived": true
-    },
-    {
-      "id": "project2_id",
-      "dbType": "sql",
-      "name": "My SQL Project",
-      "image": "url_to_image",
-      "archived": false
-    }
-  ]
-}
-```
-
-### `PATCH /streamby/projects/:id/unarchive`
-
-Unarchives a specific project. After unarchiving, it returns the complete list of projects for the user, including the updated project.
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "projects": [
-    {
-      "id": "project1_id",
-      "dbType": "nosql",
-      "name": "My NoSQL Project",
-      "image": "url_to_image",
-      "archived": false
-    },
-    {
-      "id": "project2_id",
-      "dbType": "sql",
-      "name": "My SQL Project",
-      "image": "url_to_image",
-      "archived": false
-    }
-  ]
-}
-```
+Real-time events (`jobEvent`, `reviewEvent`, `documentEvent`, `assetRightsEvent`,
+`deliverableGatesEvent`, `pipelineRunEvent`...) go to each user through the WebSocket server
+given as `websocket`.
 
 ---
 
 ## 🚣 Roadmap
 
-- [ ] Support for Google Cloud Storage
-- [ ] CLI tool for uploading files
-- [ ] Role-based access control middleware
-- [ ] Plugin system for extended routes
-- [ ] Streaming support (HLS, audio, etc.)
+- [ ] Google Cloud Storage, Cloudflare R2 and Azure Blob as storage providers (S3 only today)
+- [ ] Streaming (HLS) for videos and audios
+- [ ] Uploading to distribution platforms (publishing is a record today)
+- [ ] More of StreamBy's own processing: optimizing glTF textures (KTX2), image formats
 
 ---
 

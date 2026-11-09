@@ -31,7 +31,8 @@ export class InvalidCredentialUpdateError extends Error {
 }
 
 function encryptCredential(kind: IntegrationKind, value: unknown): string {
-  return kind === 'storage' ? encrypt(JSON.stringify(value)) : encrypt(String(value));
+  // A storage's, and an OpenAI-compatible service's (its base URL and key), are objects.
+  return kind === 'storage' || (value !== null && typeof value === 'object') ? encrypt(JSON.stringify(value)) : encrypt(String(value));
 }
 
 export interface OAuthTokenSet {

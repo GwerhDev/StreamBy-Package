@@ -1,3 +1,4 @@
+import { isSpeechProvider } from './speechProviders';
 import crypto from 'crypto';
 import { getModel } from '../models/manager';
 import { Auth, DbConnection, StorageConnection, IntegrationConnection, ExternalDbType, StorageProviderType, ServiceProviderType, StreamByConfig } from '../types';
@@ -53,6 +54,11 @@ export async function classifyIntegrationId(
   const integration = await UserIntegrationModel.findOne({ id, userId: auth.userId });
   if (!integration) {
     return { error: `Integration '${id}' is not valid or does not belong to you`, status: 403 };
+  }
+  // A speech provider is its owner's, for transcribing with StreamBy's own worker: not a
+  // project's connection.
+  if (isSpeechProvider(integration.provider)) {
+    return { error: `Integration '${id}' is a speech provider: it transcribes as your own, it isn't connected to a project`, status: 400 };
   }
 
   if (integration.kind === 'database') {

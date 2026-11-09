@@ -7,6 +7,11 @@ const PROVIDER_HOSTS: Record<ServiceProviderType, (host: string) => boolean> = {
   claude: (host) => host === 'api.anthropic.com',
   jira: (host) => host === 'api.atlassian.com' || host.endsWith('.atlassian.net'),
   google: (host) => host === 'googleapis.com' || host.endsWith('.googleapis.com'),
+  // Speech providers transcribe for StreamBy's own worker: a Service node never calls them.
+  openai: () => false,
+  deepgram: () => false,
+  assemblyai: () => false,
+  'openai-compatible': () => false,
 };
 
 export function isServiceEndpoint(provider: ServiceProviderType, endpoint: unknown): endpoint is string {

@@ -4,6 +4,13 @@ import { activeMemberOf } from '../utils/auth';
 import { assertBuiltinAccess } from '../utils/builtinAccess';
 import { decrypt, encrypt, isEncryptionKeySet } from '../utils/encryption';
 import { isPrivateHostName, resolvesToPrivateAddress } from '../utils/privateAddress';
+import { localWorkerConfig } from './localWorker';
+
+// The host's workers: its own (config.workers), and StreamBy's (unless the host turned it off).
+const builtinWorkers = (config: StreamByConfig): WorkerConfig[] => {
+  const local = localWorkerConfig(config);
+  return [...(local ? [local] : []), ...(config.workers ?? [])];
+};
 
 // Processing workers: external services StreamBy sends jobs to (see workerJobs). A project
 // can use the host's built-in ones (StreamByConfig.workers, gated by canUseBuiltin) and its
@@ -86,7 +93,7 @@ const projectSummary = (worker: WorkerConnection): WorkerSummary => ({
 /** The workers a project's member can send jobs to: the project's own, and the host's they may use. */
 export async function availableWorkers(project: any, auth: Auth, config: StreamByConfig): Promise<WorkerSummary[]> {
   const builtins: WorkerSummary[] = [];
-  for (const worker of config.workers ?? []) {
+  for (const worker of builtinWorkers(config)) {
     if (await assertBuiltinAccess(auth, worker.id, config, 'worker')) builtins.push(builtinSummary(worker));
   }
   return [...builtins, ...projectWorkers(project).map(projectSummary)];
@@ -95,7 +102,7 @@ export async function availableWorkers(project: any, auth: Auth, config: StreamB
 /** A worker of the project, or of the host, ready to be sent a job as `auth`. */
 export async function resolveWorker(project: any, ref: { source: string; id: string }, auth: Auth, config: StreamByConfig): Promise<ResolvedWorker> {
   if (ref.source === 'builtin') {
-    const worker = (config.workers ?? []).find(w => w.id === ref.id);
+    const worker = builtinWorkers(config).find(w => w.id === ref.id);
     if (!worker) throw new WorkerError('Worker not found', 404);
     if (!(await assertBuiltinAccess(auth, worker.id, config, 'worker'))) throw new WorkerError('This worker is not available to you', 403);
     return {

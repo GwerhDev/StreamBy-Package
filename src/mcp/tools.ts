@@ -477,7 +477,7 @@ export const TOOLS = [
   }),
   tool({
     name: 'process_asset', title: 'Process an asset', permissions: ['jobs:run'], write: true,
-    description: "Asks a worker to process an asset (or one of its versions), e.g. optimize a glTF. The result is kept as a new asset derived from it (resultMode 'derived', the default: the original is untouched) or as the asset's new version ('version': its URL then serves the result). It runs in the background: follow it with get_job or list_jobs; it shows in the file's Jobs tab, in Storage.",
+    description: "Asks a worker to process an asset (or one of its versions). StreamBy's own worker (worker { source: 'builtin', id: 'streamby' }) does thumbnail (profile: width, format jpg/png/webp, timecode), transcode (format mp4/webm/mov or mp3/ogg/wav/m4a/flac, width, height, videoBitrate, audioBitrate), lod (ratio of triangles kept, error), gltf-convert (to glb or gltf) and transcribe (integrationId: one of your speech provider integrations; language, model: its transcript becomes a project document); other workers (list_workers) do what their kinds say, e.g. optimize a glTF. The result is kept as a new asset derived from it (resultMode 'derived', the default: the original is untouched) or as the asset's new version ('version': its URL then serves the result; not for a result of another category, such as a video's thumbnail). It runs in the background: follow it with get_job or list_jobs; it shows in the file's Jobs tab, in Storage.",
     input: {
       projectId,
       assetId: id('asset'),

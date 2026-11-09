@@ -3,12 +3,7 @@ import { StreamByConfig, StorageAdapter } from '../../types';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { createJob, getJob } from '../../services/jobQueue';
-import {
-  runIngestJob,
-  runTranscodeJob,
-  runThumbnailJob,
-  runCaptionJob,
-} from '../../services/mediaProcessor';
+import { runIngestJob } from '../../services/mediaProcessor';
 import { createStorageProvider } from '../../providers/storage';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
@@ -70,79 +65,6 @@ export function mediaRouter(config: StreamByConfig & { adapter?: StorageAdapter 
 
       // Run async — response returns immediately with jobId
       setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
-
-      res.status(202).json({ jobId: job.jobId, status: job.status });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // POST /projects/:projectId/jobs/transcode
-  router.post('/projects/:projectId/jobs/transcode', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const { fileId, codec, resolution, outputFormat, bitrate, audioCodec } = req.body;
-
-      if (!fileId) return res.status(400).json({ message: 'fileId is required' });
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      const job = await createJob('transcode', auth.userId, projectId, {
-        fileId, codec, resolution, outputFormat, bitrate, audioCodec,
-      });
-
-      setImmediate(() =>
-        runTranscodeJob(job.jobId, fileId, projectId, { codec, resolution, outputFormat, bitrate, audioCodec }, adapter),
-      );
-
-      res.status(202).json({ jobId: job.jobId, status: job.status });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // POST /projects/:projectId/jobs/thumbnail
-  router.post('/projects/:projectId/jobs/thumbnail', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const { fileId, timecode, resolution, strategy } = req.body;
-
-      if (!fileId) return res.status(400).json({ message: 'fileId is required' });
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      const job = await createJob('thumbnail', auth.userId, projectId, { fileId, timecode, resolution, strategy });
-
-      setImmediate(() => runThumbnailJob(job.jobId, fileId, projectId, { timecode, resolution, strategy }));
-
-      res.status(202).json({ jobId: job.jobId, status: job.status });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // POST /projects/:projectId/jobs/caption
-  router.post('/projects/:projectId/jobs/caption', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const { fileId, sourceLanguage, outputFormat, provider } = req.body;
-
-      if (!fileId) return res.status(400).json({ message: 'fileId is required' });
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      const job = await createJob('caption', auth.userId, projectId, { fileId, sourceLanguage, outputFormat, provider });
-
-      setImmediate(() => runCaptionJob(job.jobId, fileId, projectId, { sourceLanguage, outputFormat, provider }));
 
       res.status(202).json({ jobId: job.jobId, status: job.status });
     } catch (err: any) {

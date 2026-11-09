@@ -158,7 +158,8 @@ describe("a project's workers", () => {
     expect(stored.createdBy).toBe('eli');
 
     const list = await call('GET', '/projects/p1/workers', { user: 'vic' });
-    expect(list.body.data.map((w: any) => [w.source, w.name])).toEqual([['builtin', 'glTF optimizer'], ['project', 'Own LOD']]);
+    // StreamBy's own, the host's, the project's.
+    expect(list.body.data.map((w: any) => [w.source, w.name])).toEqual([['builtin', 'StreamBy'], ['builtin', 'glTF optimizer'], ['project', 'Own LOD']]);
     expect((await call('GET', '/projects/p1/workers', { user: 'no-builtins' })).status).toBe(403);
   });
 

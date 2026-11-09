@@ -28,10 +28,8 @@ import { oauthResourceRouter } from './routes/oauthResource';
 import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
 import { mediaRouter } from './routes/media';
-import { renderFarmRouter } from './routes/renderFarm';
 import { reviewRouter } from './routes/review';
 import { distributionRouter } from './routes/distribution';
-import { aiRouter } from './routes/ai';
 import { productionRouter } from './routes/production';
 import { rightsRouter } from './routes/rights';
 import { workflowRouter } from './routes/workflow';
@@ -99,11 +97,9 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       registerModel('storage_files', nosqlDbIds, 'storage_files');
       registerModel('media_metadata', nosqlDbIds, 'media_metadata');
       registerModel('asset_versions', nosqlDbIds, 'asset_versions');
-      registerModel('asset_dependency_graphs', nosqlDbIds, 'asset_dependency_graphs');
       registerModel('review_sessions', nosqlDbIds, 'review_sessions');
       registerModel('annotations', nosqlDbIds, 'annotations');
       registerModel('qc_reports', nosqlDbIds, 'qc_reports');
-      registerModel('generative_jobs', nosqlDbIds, 'generative_jobs');
     }
 
     const mainDb = config.databases.find(db => db.main);
@@ -148,10 +144,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(notificationRouter(config));
   router.use(subscriptionRouter(config));
   router.use(mediaRouter(config));
-  router.use(renderFarmRouter(config));
   router.use(reviewRouter(config));
   router.use(distributionRouter(config));
-  router.use(aiRouter(config));
   router.use(productionRouter(config));
   router.use(rightsRouter(config));
   router.use(workflowRouter(config));

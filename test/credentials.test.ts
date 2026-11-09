@@ -126,7 +126,7 @@ describe('executeExport', () => {
 
     it('never starts a job', async () => {
       const schema = {
-        nodes: [{ id: 't', type: 'transcodeNode', data: { fileId: 'f1' } }],
+        nodes: [{ id: 't', type: 'ingestNode', data: { fileId: 'f1' } }],
         edges: [{ source: 'streamby', sourceHandle: 'out-top', target: 't', targetHandle: 'in-process' }],
       };
       await expect(run(schema, projectWith([member('ana')]))).rejects.toThrow(/can't run in a public export/);

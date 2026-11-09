@@ -1,3 +1,4 @@
+import { checkSpeechCredential, isSpeechProvider, SPEECH_PROVIDERS } from '../../services/speechProviders';
 import { Router, Request, Response } from 'express';
 import { addToWorkflow, removeFromWorkflow } from '../../services/workflowResources';
 import { Auth, ExternalDbType, IntegrationKind, ServiceProviderType, StorageProviderType, StreamByConfig } from '../../types';
@@ -16,7 +17,7 @@ import { getModel } from '../../models/manager';
 const VALID_KINDS: IntegrationKind[] = ['database', 'storage', 'service'];
 const VALID_DB_PROVIDERS: ExternalDbType[] = ['postgresql', 'mongodb'];
 const VALID_STORAGE_PROVIDERS: StorageProviderType[] = ['s3', 'gcs', 'r2', 'azure'];
-const VALID_SERVICE_PROVIDERS: ServiceProviderType[] = ['claude', 'jira', 'google'];
+const VALID_SERVICE_PROVIDERS: ServiceProviderType[] = ['claude', 'jira', 'google', ...SPEECH_PROVIDERS];
 
 interface PoolEntry {
   id: string;
@@ -84,9 +85,16 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
       if (credential === undefined || credential === null) {
         return res.status(400).json({ message: 'credential is required' });
       }
+      // A speech provider's key (an OpenAI-compatible service's base URL too), checked.
+      let credentialValue = credential;
+      if (isSpeechProvider(provider)) {
+        try { credentialValue = checkSpeechCredential(provider, credential, config); } catch (err: any) {
+          return res.status(400).json({ message: err.message });
+        }
+      }
 
       const integration = await createUserIntegration(auth.userId, {
-        kind, provider, name, description, credentialValue: credential,
+        kind, provider, name, description, credentialValue,
       });
       res.status(201).json({ data: sanitizeUserIntegration(integration) });
     } catch (err: any) {
@@ -102,9 +110,18 @@ export function userIntegrationRouter(config: StreamByConfig): Router {
     try {
       const auth = (req as any).auth as Auth;
       const { name, description, credential } = req.body;
+      let credentialValue = credential;
+      if (credential !== undefined) {
+        const existing = (await listUserIntegrations(auth.userId)).find(i => i.id === req.params.integrationId);
+        if (existing && isSpeechProvider(existing.provider)) {
+          try { credentialValue = checkSpeechCredential(existing.provider, credential, config); } catch (err: any) {
+            return res.status(400).json({ message: err.message });
+          }
+        }
+      }
 
       const updated = await updateUserIntegration(auth.userId, req.params.integrationId, {
-        name, description, credentialValue: credential,
+        name, description, credentialValue,
       });
       if (!updated) return res.status(404).json({ message: 'Integration not found' });
 

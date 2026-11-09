@@ -204,6 +204,10 @@ export interface StreamByConfig {
   // Processing workers offered to every project (gated, like the other built-ins, by
   // canUseBuiltin with kind 'worker').
   workers?: WorkerConfig[];
+  // StreamBy's own worker (see services/localWorker): thumbnails, transcoding, LODs, glTF
+  // conversion and transcription, done on this server. On by default; `false` turns it off.
+  // ffmpegPath: the FFmpeg it runs (default `ffmpeg`, from the PATH).
+  processing?: false | { ffmpegPath?: string };
   workerOptions?: {
     // The URL workers call back to: this router's public URL (e.g.
     // 'https://api.example.com/streamby'). Default: the URL a job was asked for at.
@@ -332,7 +336,9 @@ export interface IntegrationConnection {
 
 export type IntegrationKind = 'database' | 'storage' | 'service';
 
-export type ServiceProviderType = 'claude' | 'jira' | 'google';
+// Speech to text providers (openai, deepgram, assemblyai, openai-compatible) transcribe for
+// StreamBy's own worker (see services/speechProviders).
+export type ServiceProviderType = 'claude' | 'jira' | 'google' | 'openai' | 'deepgram' | 'assemblyai' | 'openai-compatible';
 
 // A user-registered (BYOC) database/storage credential, or a third-party service account
 // link (Claude/Jira/Google) — always the user's own, never a copy of a built-in. Lives in
@@ -436,16 +442,11 @@ export type DistributionTarget =
   | 'itchIo'
   | 'customWebhook';
 
-export type DeliveryStatus = 'pending' | 'publishing' | 'published' | 'failed';
-
+// Where an export was published to: one of its project's distribution connections, recorded.
 export interface DeliveryTarget {
   connectionId: string;
   target: DistributionTarget;
   channel?: string;
-  publishedAt?: Date;
-  publishedBy?: string;
-  receipt?: Record<string, string>;
-  status: DeliveryStatus;
 }
 
 export interface DistributionConnection {
@@ -475,56 +476,9 @@ export interface QcReportRecord {
   generatedAt: Date;
 }
 
-export type JobType =
-  | 'ingest' | 'transcode' | 'caption' | 'thumbnail'
-  | 'render' | 'format-convert' | 'lod'
-  | 'distribute' | 'qc'
-  | 'transcription' | 'upscale' | 'generate-asset'
-  | 'process';
-
-export type AiProvider = 'openai' | 'deepgram' | 'assemblyai' | 'stabilityai' | 'meshy' | 'elevenlabs' | 'custom';
-
-export interface PipelineSuggestion {
-  rationale: string;
-  nodesToAdd: { type: string; label: string; position: { x: number; y: number } }[];
-  edgesToAdd: { source: string; sourceHandle: string; target: string; targetHandle: string }[];
-}
-
-export type RenderFarmProvider = 'flamenco' | 'deadline' | 'rebusfarm' | 'sheepit' | 'custom';
-
-export interface RenderFarmConnection {
-  id: string;
-  name: string;
-  provider: RenderFarmProvider;
-  apiUrl: string;
-  encryptedCredential?: string;
-  projectId: string;
-  createdAt: Date;
-  description?: string;
-}
-
-export interface LodLevel {
-  level: number;
-  ratio: number;
-  storageFileId: string;
-  polyCount?: number;
-  fileSize?: number;
-}
-
-export interface LodManifestRecord {
-  assetId: string;
-  projectId: string;
-  levels: LodLevel[];
-  generatedAt: Date;
-}
-
-export interface AssetDependencyGraphRecord {
-  rootAssetId: string;
-  projectId: string;
-  nodes: { assetId: string; type: string; resolved: boolean }[];
-  edges: { from: string; to: string; relationship: string }[];
-  resolvedAt: Date;
-}
+// An ingest (its metadata and first version), or a worker's job (processing an asset). Jobs of
+// the kinds StreamBy once queued and never processed may still be kept, as they were left.
+export type JobType = 'ingest' | 'process' | 'transcode' | 'caption' | 'thumbnail' | 'render' | 'format-convert' | 'lod' | 'transcription' | 'upscale' | 'generate-asset';
 
 export type ReviewStatus = 'open' | 'approved' | 'rejected' | 'expired';
 export type ReviewDecision = 'approve' | 'reject';
@@ -600,10 +554,12 @@ export interface JobRecord {
   // sha256 of the token the worker calls back with (never the token itself).
   callbackHash?: string | null;
   // The result's upload, while the worker sends it: its key and what it is.
-  upload?: { storageKey: string; fileName: string; contentType: string } | null;
+  // Its category: the asset's, unless the worker gave its derived result another (a video's thumbnail).
+  upload?: { storageKey: string; fileName: string; contentType: string; category?: StorageCategoryName } | null;
   // What the worker reported, and what was made of its result.
   report?: Record<string, unknown> | null;
-  result?: { assetId: string; versionId: string; mode: WorkerResultMode } | null;
+  // A new version of the asset, a new asset derived from it, or a project document (a transcript).
+  result?: { assetId?: string; versionId?: string; mode: WorkerResultMode | 'document'; documentId?: string } | null;
 }
 
 export type WorkerResultMode = 'version' | 'derived';

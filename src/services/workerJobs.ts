@@ -9,7 +9,8 @@ import { resolveStorageAdapter } from './connectionResolver';
 import { archiveCurrentVersion, findVersion, recordFirstVersion, versionsCollection } from './assetVersions';
 import { createJob, getJob, notify } from './jobQueue';
 import { jobStore } from './jobStore';
-import { assertPublicEndpoint, availableWorkers, PrivateEndpointError, resolveWorker, ResolvedWorker, WorkerError } from './workers';
+import { assertPublicEndpoint, availableWorkers, PrivateEndpointError, resolveWorker, ResolvedWorker, STORAGE_CATEGORIES, WorkerError } from './workers';
+import { LOCAL_ENDPOINT } from './localWorker';
 
 // A worker's job, from start to end (the README has the contract a worker follows):
 //
@@ -214,6 +215,20 @@ export async function dispatchJob(jobId: string, config: RouterConfig): Promise<
     if (!adapter.getPresignedGetUrl) throw new WorkerError("This asset's storage can't give download URLs");
     const fileName = version?.fileName ?? fileDoc.displayName;
     const download = await adapter.getPresignedGetUrl(version?.storageKey ?? fileDoc.storageKey, DOWNLOAD_TTL_SECONDS, fileName);
+    // StreamBy's own worker: run here, through the same contract.
+    if (worker.endpoint === LOCAL_ENDPOINT) {
+      const accepted = await jobStore().claim(jobId, ['processing'], { stage: 'accepted', updatedAt: new Date() }, { callbackHash: hashOf(token) });
+      if (accepted) notify(accepted);
+      const { runLocalJob } = await import('./localWorker');
+      setImmediate(() => {
+        runLocalJob({
+          jobId: job.jobId, kind: job.kind!, profile: (job.profile ?? {}) as Record<string, unknown>,
+          asset: { id: job.assetId!, versionId: version?.versionId ?? null, fileName, contentType: version?.contentType ?? fileDoc.contentType ?? null, category: fileDoc.category },
+          download: { url: download }, callback: { token },
+        }, config).catch(err => console.error('❌ StreamBy processing:', err?.message ?? err));
+      });
+      return;
+    }
     const callbackBase = config.workerOptions?.callbackBaseUrl ?? job.payload?.callbackBase;
     // A project's worker: its name may resolve, now, to the server's own network.
     if (worker.ref.source === 'project') await assertPublicEndpoint(worker.endpoint, config);
@@ -316,18 +331,25 @@ export async function resultUploadUrl(job: JobRecord, body: any, config: RouterC
   const project = await findProject(job.projectId);
   const fileDoc = await filesCollection()?.findOne({ fileId: job.assetId, projectId: job.projectId });
   if (!project || !fileDoc) throw new WorkerError('Asset not found', 404);
-  if (!validateContentType(contentType, fileName, fileDoc.category as StorageCategory)) {
-    throw new WorkerError(`The result must be of the asset's category, ${fileDoc.category}`);
+  // A derived result may be of another category (a video's thumbnail is an image); a new version
+  // of the asset is of its own.
+  const category = body?.category === undefined ? fileDoc.category : body.category;
+  if (!STORAGE_CATEGORIES.includes(category)) throw new WorkerError(`category must be one of ${STORAGE_CATEGORIES.join(', ')}`);
+  if (category !== fileDoc.category && job.resultMode === 'version') {
+    throw new WorkerError(`A result that isn't of the asset's category (${fileDoc.category}) is a new asset: ask for a derived result`);
+  }
+  if (!validateContentType(contentType, fileName, category as StorageCategory)) {
+    throw new WorkerError(`The result must be of its category, ${category}`);
   }
   const adapter = await fileAdapter(project, fileDoc, authOf(job), config);
   if (!adapter.getPresignedUploadUrl) throw new WorkerError("This asset's storage can't give upload URLs");
 
   const storageKey = job.resultMode === 'version'
     ? `${String(fileDoc.storageKey).replace(/\.[^./]*$/, '')}.job-${job.jobId}${extensionOf(fileName)}`
-    : `${job.projectId}/${fileDoc.category}/${crypto.randomUUID()}${extensionOf(fileName)}`;
+    : `${job.projectId}/${category}/${crypto.randomUUID()}${extensionOf(fileName)}`;
   const url = await adapter.getPresignedUploadUrl(storageKey, contentType, UPLOAD_TTL_SECONDS);
   const updated = await jobStore().claim(job.jobId, ['processing'], {
-    upload: { storageKey, fileName, contentType }, stage: 'uploading', updatedAt: new Date(),
+    upload: { storageKey, fileName, contentType, category }, stage: 'uploading', updatedAt: new Date(),
   });
   if (!updated) throw new WorkerError('The job is no longer in progress', 409);
   notify(updated);
@@ -370,6 +392,7 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
   if (!project || !files || !fileDoc) throw new WorkerError('Asset not found', 404);
   const adapter = await fileAdapter(project, fileDoc, authOf(job), config);
   const { storageKey, fileName, contentType } = job.upload!;
+  const category = job.upload!.category ?? fileDoc.category;
   const meta = { report, jobId: job.jobId, kind: job.kind, worker: job.worker };
 
   let result: NonNullable<JobRecord['result']>;
@@ -388,7 +411,7 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
     const derived = {
       _id: new ObjectId(), fileId, projectId: job.projectId,
       ...(fileDoc.storageConnectionId ? { storageConnectionId: fileDoc.storageConnectionId } : {}),
-      category: fileDoc.category, storageKey, displayName: fileName, contentType,
+      category, storageKey, displayName: fileName, contentType,
       uploadedBy: job.userId, createdAt: new Date(), folderId: fileDoc.folderId ?? null,
       derivedFrom: { assetId: job.assetId, versionId: job.versionId ?? null, jobId: job.jobId, kind: job.kind },
     };
@@ -399,6 +422,17 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
     result = { assetId: fileId, versionId: first?.versionId ?? '', mode: 'derived' };
   }
   return result;
+}
+
+/** A job whose result is a project document (StreamBy's own transcription): completed with it. */
+export async function completeJobWithDocument(job: JobRecord, documentId: string, report: Record<string, unknown> | null): Promise<JobRecord> {
+  const claimed = await jobStore().claim(job.jobId, ['processing'], { stage: 'saving', leaseUntil: null, callbackHash: null, updatedAt: new Date() }, { callbackHash: job.callbackHash ?? '' });
+  if (!claimed) throw new WorkerError('The job is no longer in progress', 409);
+  const done = await jobStore().update(job.jobId, {
+    status: 'completed', stage: 'complete', progress: 100, error: null as unknown as undefined, report, result: { mode: 'document', documentId }, upload: null, updatedAt: new Date(),
+  });
+  if (done) notify(done);
+  return done!;
 }
 
 /** The worker couldn't do it: sent again if it says it may work later (and attempts are left), or failed. */

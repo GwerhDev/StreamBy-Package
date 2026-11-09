@@ -3,7 +3,6 @@ import { MongoClient } from 'mongodb';
 import { StreamByConfig, DistributionConnection, QcReportRecord, DeliveryTarget } from '../../types';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
-import { emitToUser } from '../../services/wsHub';
 import { Auth } from '../../types';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
 import { sanitizeConnection, sanitizeConnections } from '../../utils/sanitize';
@@ -15,10 +14,6 @@ function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
   if (!ids.length) return null;
   return (getConnection(ids[0]).client as MongoClient).db();
-}
-
-function broadcastDeliveryUpdate(userId: string, payload: object) {
-  emitToUser(userId, { type: 'jobEvent', data: payload });
 }
 
 export function distributionRouter(_config: StreamByConfig): Router {
@@ -101,13 +96,17 @@ export function distributionRouter(_config: StreamByConfig): Router {
 
   // ─── Publish Deliverable ──────────────────────────────────────────────────────
 
+  // An export marked as published: when, by whom, and where to (its distribution connections,
+  // each a channel if given). Only a record: StreamBy uploads nothing to a platform. Not while a
+  // deliverable of it is held by a gate before it in the workflow.
   router.post('/projects/:projectId/deliverables/:exportId/publish', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId, exportId } = req.params;
-      const { targets }: { targets: { connectionId: string; channel?: string }[] } = req.body;
-
-      if (!targets?.length) return res.status(400).json({ message: 'targets array is required' });
+      const targets = req.body?.targets ?? [];
+      if (!Array.isArray(targets) || !targets.every((t: any) => t && typeof t.connectionId === 'string' && (t.channel === undefined || typeof t.channel === 'string'))) {
+        return res.status(400).json({ message: 'targets must be a list of { connectionId, channel? }' });
+      }
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
@@ -116,52 +115,26 @@ export function distributionRouter(_config: StreamByConfig): Router {
       const exportDoc = await Export.findOne({ id: exportId, projectId });
       if (!exportDoc) return res.status(404).json({ message: 'Deliverable not found' });
 
-      // Not while a deliverable of it is held by a gate before it in the workflow.
       const blockedBy = await blockersOfExport(project, exportId);
       if (blockedBy.length) {
         return res.status(409).json({ message: `Blocked: ${blockedBy.map(b => `${b.label} (${b.reason})`).join('; ')}`, blockedBy });
       }
 
       const connections: DistributionConnection[] = project.distributionConnections ?? [];
-
-      const deliveryTargets: DeliveryTarget[] = targets.map(t => {
-        const conn = connections.find(c => c.id === t.connectionId);
-        return {
-          connectionId: t.connectionId,
-          target: conn?.target ?? 'customWebhook',
-          channel: t.channel,
-          status: 'pending',
-        };
-      });
-
+      const unknown = targets.find((t: any) => !connections.some(c => c.id === t.connectionId));
+      if (unknown) return res.status(400).json({ message: `${unknown.connectionId} isn't a distribution connection of the project` });
       const now = new Date();
+      const publishedTo: DeliveryTarget[] = targets.map((t: any) => ({
+        connectionId: t.connectionId,
+        target: connections.find(c => c.id === t.connectionId)!.target,
+        ...(t.channel ? { channel: t.channel } : {}),
+      }));
+
       await Export.update(
         { id: exportId, projectId },
-        {
-          $set: {
-            deliverableTargets: deliveryTargets,
-            publishedAt: now,
-            publishedBy: auth.userId,
-            updatedAt: now,
-          },
-        },
+        { $set: { deliverableTargets: publishedTo, publishedAt: now, publishedBy: auth.userId, updatedAt: now } },
       );
-
-      // Dispatch async — actual upload/API call happens in the host worker
-      setImmediate(() => {
-        for (const dt of deliveryTargets) {
-          broadcastDeliveryUpdate(auth.userId, {
-            jobId: crypto.randomUUID(),
-            jobType: 'distribute',
-            stage: 'queued',
-            progress: 5,
-            assetId: exportId,
-            message: `Queued publish to ${dt.target}`,
-          });
-        }
-      });
-
-      res.status(202).json({ deliverableTargets: deliveryTargets, publishedAt: now });
+      res.json({ deliverableTargets: publishedTo, publishedAt: now, publishedBy: auth.userId });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

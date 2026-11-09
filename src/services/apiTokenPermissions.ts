@@ -89,7 +89,7 @@ const RULES = [
   rule('read', `${P}/connections/storage/[^/]+/(files|folders)(/.+)?`, 'assets:read'),
   rule(['POST', 'PATCH'], `${P}/connections/storage/[^/]+/(files|folders)(/.+)?`, 'assets:write'),
   rule('delete', `${P}/connections/storage/[^/]+/(files|folders)/[^/]+`, 'assets:delete'),
-  rule('read', `${P}/assets/[^/]+/(metadata|versions|qc-report|dependency-graph|download-url)`, 'assets:read'),
+  rule('read', `${P}/assets/[^/]+/(metadata|versions|qc-report|download-url)`, 'assets:read'),
   rule(['PATCH'], `${P}/assets/[^/]+/metadata`, 'assets:write'),
   rule(['POST'], `${P}/assets/[^/]+/qc-report`, 'assets:write'),
   rule('read', `${P}/(reviews(/[^/]+)?|assets/[^/]+/versions/[^/]+/annotations)`, 'assets:read'),
@@ -127,10 +127,10 @@ const RULES = [
   rule(['POST'], `${P}/exports`, 'exports:write'),
   rule(['PATCH', 'DELETE'], `${P}/exports/[^/]+`, 'exports:write'),
 
-  // Jobs: transcoding, rendering, AI, publishing a deliverable, starting its held workers, starting
-  // a card's pipeline run (its workers run as whoever starts it).
+  // Jobs: a worker's (processing an asset), an ingest, retrying one, publishing a deliverable,
+  // starting its held workers, starting a card's pipeline run (its workers run as whoever starts it).
   rule('read', `${P}/jobs`, 'jobs:read'),
-  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|pipeline-suggest|deliverables/[^/]+/(publish|start-workers)|pipelines/[^/]+/runs)`, 'jobs:run'),
+  rule(['POST'], `${P}/(jobs/[^/]+(/retry)?|deliverables/[^/]+/(publish|start-workers)|pipelines/[^/]+/runs)`, 'jobs:run'),
 
   // Documents: writing them is saving a version or moving them; publishing one (choosing what
   // the exports deliver, or whether they deliver it at all) is apart. A PATCH that changes

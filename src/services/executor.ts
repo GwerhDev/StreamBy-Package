@@ -6,14 +6,7 @@ import { getDecryptedIntegrationCredentialById } from './userIntegration';
 import { buildServiceAuthHeaders } from './oauthClient';
 import { createJob } from './jobQueue';
 import { publishedDocuments } from './documents';
-import {
-  runIngestJob,
-  runTranscodeJob,
-  runThumbnailJob,
-  runCaptionJob,
-} from './mediaProcessor';
-import { runRenderJob, runFormatConvertJob, runLodJob } from './vfxProcessor';
-import { runTranscriptionJob, runUpscaleJob, runGenerateAssetJob, buildPipelineSuggestion } from './aiProcessor';
+import { runIngestJob } from './mediaProcessor';
 import { createStorageProvider } from '../providers/storage';
 import { isServiceEndpoint } from '../utils/serviceEndpoints';
 
@@ -107,10 +100,9 @@ const SYSTEM_AUTH: Auth = { userId: 'system', username: 'system', role: 'admin' 
 
 // Nodes that start a job (transcoding, rendering, generating...): work, and cost, on the
 // server or a provider, for whoever asks.
-const JOB_NODES = new Set([
-  'transcodeNode', 'captionNode', 'thumbnailNode', 'ingestNode', 'renderJobNode', 'formatConvertNode',
-  'lodNode', 'transcriptionNode', 'upscaleNode', 'proceduralAssetNode',
-]);
+// An export's process lane makes jobs only by an Ingest node: processing an asset is a worker's
+// (see services/workerJobs), never an export's.
+const JOB_NODES = new Set(['ingestNode']);
 
 export interface ExecuteExportOptions {
   // Read without a session (the public export route), the default: only nodes that read data
@@ -266,42 +258,7 @@ export async function executeExport(
     const fileId = nodeData.fileId as string | undefined;
     if (isPublic && JOB_NODES.has(processNode.type)) throw notPublic(processNode);
 
-    if (processNode.type === 'transcodeNode' && fileId) {
-      const job = await createJob('transcode', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runTranscodeJob(job.jobId, fileId, projectId, {
-          codec:        nodeData.codec,
-          resolution:   nodeData.resolution,
-          outputFormat: nodeData.outputFormat,
-          bitrate:      nodeData.bitrate,
-          audioCodec:   nodeData.audioCodec,
-        }, adapter),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'transcode' };
-
-    } else if (processNode.type === 'captionNode' && fileId) {
-      const job = await createJob('caption', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runCaptionJob(job.jobId, fileId, projectId, {
-          sourceLanguage: nodeData.sourceLanguage,
-          outputFormat:   nodeData.outputFormat,
-          provider:       nodeData.provider,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'caption' };
-
-    } else if (processNode.type === 'thumbnailNode' && fileId) {
-      const job = await createJob('thumbnail', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runThumbnailJob(job.jobId, fileId, projectId, {
-          timecode:   nodeData.timecode,
-          resolution: nodeData.resolution,
-          strategy:   nodeData.strategy,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'thumbnail' };
-
-    } else if (processNode.type === 'ingestNode' && fileId) {
+    if (processNode.type === 'ingestNode' && fileId) {
       // ingestNode always declares its own storage connection explicitly (persistence:
       // 'storage' in types/nodePersistence.ts) — a project has no notion of a "default"
       // connection, since a project can have many database/storage/API providers connected.
@@ -320,95 +277,6 @@ export async function executeExport(
       setImmediate(() => runIngestJob(job.jobId, fileId, projectId));
       payload = { ...payload, jobId: job.jobId, jobType: 'ingest' };
 
-    } else if (processNode.type === 'renderJobNode' && fileId) {
-      const job = await createJob('render', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runRenderJob(job.jobId, fileId, projectId, {
-          renderer:               nodeData.renderer,
-          renderFarmConnectionId: nodeData.renderFarmConnectionId,
-          frameRange:             nodeData.frameRange,
-          resolution:             nodeData.resolution,
-          samples:                nodeData.samples,
-          outputFormat:           nodeData.outputFormat,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'render' };
-
-    } else if (processNode.type === 'formatConvertNode' && fileId) {
-      const job = await createJob('format-convert', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runFormatConvertJob(job.jobId, fileId, projectId, {
-          inputFormat:    nodeData.inputFormat,
-          outputFormat:   nodeData.outputFormat,
-          applyTransforms: nodeData.applyTransforms,
-          embedTextures:  nodeData.embedTextures,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'format-convert' };
-
-    } else if (processNode.type === 'lodNode' && fileId) {
-      const job = await createJob('lod', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runLodJob(job.jobId, fileId, projectId, {
-          levels:          nodeData.levels,
-          reductionRatios: nodeData.reductionRatios,
-          algorithm:       nodeData.algorithm,
-          outputFormat:    nodeData.outputFormat,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'lod' };
-
-    } else if (processNode.type === 'qcCheckNode' && fileId) {
-      const checks = (nodeData.checks as string[] | undefined) ?? [];
-      const checkResults = checks.map((name: string) => ({
-        name, passed: true, value: 'ok', threshold: 'ok',
-      }));
-      payload = { ...payload, qcReport: { checks: checkResults, overallPassed: true } };
-
-    } else if (processNode.type === 'transcriptionNode' && fileId) {
-      const job = await createJob('transcription', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runTranscriptionJob(job.jobId, fileId, projectId, {
-          model:          nodeData.model,
-          sourceLanguage: nodeData.sourceLanguage,
-          outputFormats:  nodeData.outputFormats,
-          provider:       nodeData.provider,
-          credentialId:   nodeData.credentialId,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'transcription' };
-
-    } else if (processNode.type === 'upscaleNode' && fileId) {
-      const job = await createJob('upscale', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runUpscaleJob(job.jobId, fileId, projectId, {
-          scale:        nodeData.scale,
-          model:        nodeData.model,
-          mode:         nodeData.mode,
-          credentialId: nodeData.credentialId,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'upscale' };
-
-    } else if (processNode.type === 'proceduralAssetNode') {
-      const job = await createJob('generate-asset', systemUserId, projectId, nodeData);
-      setImmediate(() =>
-        runGenerateAssetJob(job.jobId, projectId, {
-          assetType:    nodeData.assetType,
-          provider:     nodeData.provider,
-          prompt:       nodeData.prompt ?? '',
-          seed:         nodeData.seed,
-          credentialId: nodeData.credentialId,
-        }),
-      );
-      payload = { ...payload, jobId: job.jobId, jobType: 'generate-asset' };
-
-    } else if (processNode.type === 'pipelineSuggestNode') {
-      const suggestion = await buildPipelineSuggestion(
-        { nodes, edges },
-        Object.keys(nodeSchema),
-      );
-      payload = { ...payload, pipelineSuggestion: suggestion };
     }
 
     processNode = getTarget(nodes, edges, processNode.id, 'out-process');
