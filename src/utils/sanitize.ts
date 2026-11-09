@@ -46,8 +46,10 @@ export function sanitizeProject(project: any): any {
     storageConnections: sanitizeConnections(project.storageConnections),
     dbConnections: sanitizeConnections(project.dbConnections),
     integrationConnections: sanitizeIntegrationConnections(project.integrationConnections),
-    distributionConnections: sanitizeConnections(project.distributionConnections),
     renderFarmConnections: sanitizeConnections(project.renderFarmConnections),
+    // Distribution connections are gone (StreamBy sends nothing to a platform); a project that
+    // still has some stored never shows them, nor their credentials.
+    distributionConnections: undefined,
     exports: project.exports?.map((e: any) =>
       e && 'encryptedCredential' in e ? sanitizeConnection(e) : e
     ),

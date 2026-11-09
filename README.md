@@ -137,7 +137,7 @@ hash is stored, with a short prefix to tell it apart.
 
 | Resource | Permissions | Covers |
 |---|---|---|
-| Project | `project:read`, `project:update`, `project:delete` | The project, its settings and its connections (API, database, storage, distribution, workers), integrations and allowed origins. |
+| Project | `project:read`, `project:update`, `project:delete` | The project, its settings and its connections (API, database, storage, workers), integrations and allowed origins. |
 | Members | `members:read`, `members:manage` | Listing members and teams; inviting, changing and removing members, searching users, and making, changing and deleting teams. |
 | Assets | `assets:read`, `assets:write`, `assets:delete` | Files and folders, upload URLs, metadata, versions, reviews and annotations, QC reports. |
 | Production | `production:read`, `production:write`, `production:delete` | Sequences, shots and tasks. |
@@ -380,9 +380,12 @@ have no gates before them, is ready, as it always was. While it's blocked:
 - its export can't be published (`POST /projects/:projectId/deliverables/:exportId/publish`
   answers 409 with `blockedBy`).
 
-Publishing an export (`{ targets: [{ connectionId, channel? }] }`, each one of the project's
-distribution connections) records when, by whom and where to: `publishedAt`, `publishedBy` and
-`deliverableTargets`. It's only a record: StreamBy uploads nothing to a platform.
+Publishing an export records when and by whom (`publishedAt`, `publishedBy`). It's only a
+record: StreamBy sends nothing to a platform (it takes no `targets`, and answers 400 if given
+some). A build or a site takes an export's deliverables from its catalog (below), served from a
+CDN in front of the storage with `contentBaseUrl`. There are no distribution connections or
+Distribution nodes any more: a project that still has some stored never shows them, and a
+Distribution node left in an export's schema adds nothing to what it serves.
 
 If the change that made it ready came from someone who can't run jobs (an API token without
 `jobs:run`), its workers stay held: the deliverable is answered with `workersWaiting: true`, and
@@ -1032,7 +1035,7 @@ describe each area; this is the map.
 | Projects | `GET /projects` (`?archived=`), `GET /projects/explore`, `POST /projects/create`, `GET`, `PATCH`, `DELETE /projects/:id`, `GET /projects/:id/preview`, `PATCH /projects/:id/archive` and `/unarchive`, `POST /projects/:id/image`, `GET` and `PATCH /projects/:id/origins`, `GET` and `PUT /projects/:id/permissions`, `GET /projects/:id/dependents/:kind/:resourceId` |
 | Members and teams | `GET`, `POST /projects/:id/members`, `PATCH`, `DELETE /projects/:id/members/:userId` (and `/accept`, `/approve`, `/reject`), `POST /projects/:id/request-join`, `GET`, `POST /projects/:id/teams`, `PATCH`, `DELETE /projects/:id/teams/:teamId` |
 | Integrations | `GET`, `POST /user/integrations`, `PATCH`, `DELETE /user/integrations/:id` (and `/dependents`), `GET /user/integrations/oauth/:provider/start` and `/callback`; a project's: `GET`, `POST /projects/:id/integrations`, `DELETE /projects/:id/integrations/:integrationId` |
-| Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `/projects/:projectId/distribution-connections`, `GET /databases`, `GET /storages` |
+| Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `GET /databases`, `GET /storages` |
 | Storage and assets | `GET /projects/:projectId/storage/:category` (and `/upload-url`), `GET /projects/:projectId/storage/lasts`, `PATCH`, `DELETE /projects/:projectId/storage/files/:fileId` (and `/replace-url`), `GET /projects/:projectId/assets/:fileId/download-url`, `/metadata`, `/versions`, `GET`, `PUT .../assets/:assetId/rights`, `GET`, `POST .../assets/:assetId/qc-report`, `GET /projects/:projectId/credits-sheets` (and `/:docId`) |
 | Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail`; runners: `GET`, `POST /user/runners`, `DELETE .../:runnerId`, `POST .../:runnerId/shares`, `DELETE .../shares/:shareId`, `PATCH /projects/:projectId/workers/runners/:runnerId` (a project's admins: its `autoKind`), and they ask at `POST /runner/jobs/next` |
 | Reviews | `GET`, `POST /projects/:projectId/reviews`, `GET /projects/:projectId/reviews/:reviewId`, `POST .../decision` |
@@ -1054,7 +1057,6 @@ given as `websocket`.
 
 - [ ] Google Cloud Storage, Cloudflare R2 and Azure Blob as storage providers (S3 only today)
 - [ ] Streaming (HLS) for videos and audios
-- [ ] Uploading to distribution platforms (publishing is a record today)
 
 ---
 

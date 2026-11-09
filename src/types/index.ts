@@ -436,37 +436,8 @@ export interface Export {
   // Phase 4 deliverable fields
   deliverableType?: 'api' | 'video-stream' | 'game-build' | 'asset-bundle' | 'app-binary';
   deliverableVersion?: string;
-  deliverableTargets?: DeliveryTarget[];
   publishedAt?: Date;
   publishedBy?: string;
-  cdnUrl?: string;
-}
-
-export type DistributionTarget =
-  | 'cdnPush'
-  | 'hlsStream'
-  | 'steam'
-  | 'appStoreConnect'
-  | 'googlePlay'
-  | 'itchIo'
-  | 'customWebhook';
-
-// Where an export was published to: one of its project's distribution connections, recorded.
-export interface DeliveryTarget {
-  connectionId: string;
-  target: DistributionTarget;
-  channel?: string;
-}
-
-export interface DistributionConnection {
-  id: string;
-  name: string;
-  target: DistributionTarget;
-  encryptedCredential?: string;
-  projectId: string;
-  config: Record<string, string>;
-  createdAt: Date;
-  description?: string;
 }
 
 export interface QcCheck {

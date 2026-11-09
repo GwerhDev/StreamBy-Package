@@ -105,11 +105,11 @@ const RULES = [
   rule(['PUT'], `${P}/assets/[^/]+/rights`, 'rights:write'),
   rule('read', `${P}/credits-sheets(/[^/]+)?`, 'rights:read'),
 
-  // Connections (API, database, storage, distribution, workers): the project's settings.
+  // Connections (API, database, storage, workers): the project's settings.
   rule('read', `${P}/dependents/[^/]+/[^/]+`, 'project:read'),
-  rule('read', `${P}/(connections|get-connection|distribution-connections|workers)(/.+)?`, 'project:read'),
-  rule('write', `${P}/(connections|distribution-connections|workers)(/.+)?`, 'project:update'),
-  rule('delete', `${P}/(connections|distribution-connections|workers)/.+`, 'project:update'),
+  rule('read', `${P}/(connections|get-connection|workers)(/.+)?`, 'project:read'),
+  rule('write', `${P}/(connections|workers)(/.+)?`, 'project:update'),
+  rule('delete', `${P}/(connections|workers)/.+`, 'project:update'),
 
   // Production.
   rule('read', `${P}/production/.+`, 'production:read'),

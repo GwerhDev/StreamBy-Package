@@ -270,8 +270,7 @@ describe('a blocked deliverable', () => {
   it("holds its export: it can't be published until each deliverable of it is ready", async () => {
     const { session } = await releasing({ appliesTo: 'exports', exportId: 'e1' });
     await mark({ exportId: 'e1' });
-    project().distributionConnections = [{ id: 'cdn', name: 'CDN', target: 'cdnPush', projectId: 'p1' }];
-    const publish = (exportId: string) => eli.post(`${P}/deliverables/${exportId}/publish`, { targets: [{ connectionId: 'cdn' }] });
+    const publish = (exportId: string) => eli.post(`${P}/deliverables/${exportId}/publish`);
     const refused = await publish('e1');
     expect(refused.status).toBe(409);
     expect(refused.body.message).toBe('Blocked: Art review (Waiting for approvals: 0 of 1); Model credits (1 of 1 assets lack credits)');
@@ -282,6 +281,44 @@ describe('a blocked deliverable', () => {
     await eli.put(`${P}/assets/a1/rights`, complete);
     await decide(session.id, 'approve');
     expect((await publish('e1')).status).toBe(200);
+  });
+});
+
+describe('publishing an export', () => {
+  it('records when and by whom, and sends nothing anywhere: it takes no targets', async () => {
+    const published = await eli.post(`${P}/deliverables/e1/publish`);
+    expect(published.status).toBe(200);
+    expect(published.body).toEqual({ publishedAt: expect.any(String), publishedBy: 'eli' });
+    const withTargets = await eli.post(`${P}/deliverables/e1/publish`, { targets: [{ connectionId: 'cdn' }] });
+    expect(withTargets.status).toBe(400);
+    expect(withTargets.body.message).toMatch(/catalog/);
+  });
+
+  it('has no distribution connections, and a project that still has some stored never shows them', async () => {
+    project().distributionConnections = [{ id: 'cdn', name: 'CDN', target: 'cdnPush', encryptedCredential: 'secret', projectId: 'p1' }];
+    expect((await eli.get(`${P}/distribution-connections`)).status).toBe(404);
+    expect((await eli.post(`${P}/distribution-connections`, { name: 'CDN', target: 'cdnPush' })).status).toBe(404);
+    const read = await vic.get(P);
+    expect(read.status).toBe(200);
+    expect(JSON.stringify(read.body)).not.toContain('distributionConnections');
+    expect(JSON.stringify(read.body)).not.toContain('secret');
+  });
+
+  it("doesn't say an export's distribution is queued: a Distribution node left in its schema adds nothing", async () => {
+    const { executeExport } = await import('../src/services/executor');
+    const out = await executeExport({
+      nodes: [
+        { id: 'streamby', type: 'streambyNode', position: { x: 0, y: 0 }, data: {} },
+        { id: 'deliver', type: 'deliverableNode', position: { x: 0, y: 0 }, data: { deliverableType: 'game-build' } },
+        { id: 'dist', type: 'distributionNode', position: { x: 0, y: 0 }, data: { distributionTarget: 'cdnPush' } },
+      ],
+      edges: [
+        { id: 'a', source: 'streamby', target: 'deliver', sourceHandle: 'out-right' },
+        { id: 'b', source: 'deliver', target: 'dist', sourceHandle: 'out-filter' },
+      ],
+    } as any, project(), { databases: [], storageProviders: [{ id: 's3', type: 's3', config: { region: 'us-east-1', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's' } }] } as any);
+    expect(out).toMatchObject({ deliverable: { type: 'game-build' } });
+    expect(out).not.toHaveProperty('distribution');
   });
 });
 

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { MongoClient } from 'mongodb';
-import { StreamByConfig, DistributionConnection, QcReportRecord, DeliveryTarget } from '../../types';
+import { StreamByConfig, QcReportRecord } from '../../types';
 import { getModel } from '../../models/manager';
 import { canEditProject, isProjectMember } from '../../utils/auth';
 import { Auth } from '../../types';
@@ -21,91 +21,17 @@ export function distributionRouter(_config: StreamByConfig): Router {
   const Project = getModel('projects');
   const Export = getModel('exports');
 
-  // ─── Distribution Connections ─────────────────────────────────────────────────
-
-  router.get('/projects/:projectId/distribution-connections', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-      res.json({ connections: sanitizeConnections(project.distributionConnections) });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  router.post('/projects/:projectId/distribution-connections', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId } = req.params;
-      const { name, target, credential: credentialValue, encryptedCredential: legacyCredential, config, description } = req.body;
-      // The credential, as given (`encryptedCredential` was its old name: it was always the
-      // value itself), stored encrypted.
-      const credential = credentialValue ?? legacyCredential;
-      if (credential && !isEncryptionKeySet()) return res.status(500).json({ message: 'Encryption key is not set' });
-      const encryptedCredential = credential ? encrypt(String(credential)) : undefined;
-
-      if (!name || !target) return res.status(400).json({ message: 'name and target are required' });
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      const connection: DistributionConnection = {
-        id: crypto.randomUUID(),
-        name,
-        target,
-        encryptedCredential,
-        config: config ?? {},
-        description,
-        projectId,
-        createdAt: new Date(),
-      };
-
-      await Project.update(
-        { _id: projectId },
-        { $push: { distributionConnections: connection } },
-      );
-
-      res.status(201).json({ connection: sanitizeConnection(connection) });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  router.delete('/projects/:projectId/distribution-connections/:connectionId', async (req: Request, res: Response) => {
-    try {
-      const auth = (req as any).auth as Auth;
-      const { projectId, connectionId } = req.params;
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) return res.status(404).json({ message: 'Project not found' });
-      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
-
-      await Project.update(
-        { _id: projectId },
-        { $pull: { distributionConnections: { id: connectionId } } },
-      );
-
-      res.json({ message: 'Connection deleted' });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
   // ─── Publish Deliverable ──────────────────────────────────────────────────────
 
-  // An export marked as published: when, by whom, and where to (its distribution connections,
-  // each a channel if given). Only a record: StreamBy uploads nothing to a platform. Not while a
-  // deliverable of it is held by a gate before it in the workflow.
+  // An export marked as published: when, and by whom. Only a record: StreamBy sends nothing to
+  // a platform (a build or a site takes its deliverables from its catalog, see
+  // deliverableCatalog). Not while a deliverable of it is held by a gate before it in the workflow.
   router.post('/projects/:projectId/deliverables/:exportId/publish', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
       const { projectId, exportId } = req.params;
-      const targets = req.body?.targets ?? [];
-      if (!Array.isArray(targets) || !targets.every((t: any) => t && typeof t.connectionId === 'string' && (t.channel === undefined || typeof t.channel === 'string'))) {
-        return res.status(400).json({ message: 'targets must be a list of { connectionId, channel? }' });
+      if (req.body?.targets !== undefined) {
+        return res.status(400).json({ message: "Publishing has no targets: StreamBy sends nothing to a platform; a site takes an export's deliverables from its catalog" });
       }
 
       const project = await Project.findOne({ _id: projectId });
@@ -120,21 +46,12 @@ export function distributionRouter(_config: StreamByConfig): Router {
         return res.status(409).json({ message: `Blocked: ${blockedBy.map(b => `${b.label} (${b.reason})`).join('; ')}`, blockedBy });
       }
 
-      const connections: DistributionConnection[] = project.distributionConnections ?? [];
-      const unknown = targets.find((t: any) => !connections.some(c => c.id === t.connectionId));
-      if (unknown) return res.status(400).json({ message: `${unknown.connectionId} isn't a distribution connection of the project` });
       const now = new Date();
-      const publishedTo: DeliveryTarget[] = targets.map((t: any) => ({
-        connectionId: t.connectionId,
-        target: connections.find(c => c.id === t.connectionId)!.target,
-        ...(t.channel ? { channel: t.channel } : {}),
-      }));
-
       await Export.update(
         { id: exportId, projectId },
-        { $set: { deliverableTargets: publishedTo, publishedAt: now, publishedBy: auth.userId, updatedAt: now } },
+        { $set: { publishedAt: now, publishedBy: auth.userId, updatedAt: now } },
       );
-      res.json({ deliverableTargets: publishedTo, publishedAt: now, publishedBy: auth.userId });
+      res.json({ publishedAt: now, publishedBy: auth.userId });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

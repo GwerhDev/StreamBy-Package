@@ -282,8 +282,8 @@ export async function executeExport(
     processNode = getTarget(nodes, edges, processNode.id, 'out-process');
   }
 
-  // 3. Filter + output lane — streamby out-right → filterNode|annotationNode|deliverableNode|distributionNode
-  const outputLaneTypes = new Set(['filterNode', 'annotationNode', 'deliverableNode', 'distributionNode']);
+  // 3. Filter + output lane — streamby out-right → filterNode|annotationNode|deliverableNode
+  const outputLaneTypes = new Set(['filterNode', 'annotationNode', 'deliverableNode']);
   let outputNode = getTarget(nodes, edges, 'streamby', 'out-right');
   while (outputNode) {
     if (outputNode.type === 'filterNode') {
@@ -299,17 +299,6 @@ export async function executeExport(
         },
       };
 
-    } else if (outputNode.type === 'distributionNode') {
-      // Distribution is async — the actual publish is handled by the host worker
-      payload = {
-        ...payload,
-        distribution: {
-          target:       outputNode.data?.distributionTarget,
-          connectionId: outputNode.data?.distributionConnectionId,
-          channel:      outputNode.data?.channel,
-          status:       'queued',
-        },
-      };
     }
     // annotationNode — pass-through; annotations are stored separately via the review API
 
