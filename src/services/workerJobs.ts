@@ -10,7 +10,6 @@ import { archiveCurrentVersion, findVersion, recordFirstVersion, versionsCollect
 import { createJob, getJob, notify } from './jobQueue';
 import { jobStore } from './jobStore';
 import { assertPublicEndpoint, availableWorkers, PrivateEndpointError, resolveWorker, ResolvedWorker, STORAGE_CATEGORIES, WorkerError } from './workers';
-import { LOCAL_ENDPOINT } from './localWorker';
 
 // A worker's job, from start to end (the README has the contract a worker follows):
 //
@@ -215,20 +214,6 @@ export async function dispatchJob(jobId: string, config: RouterConfig): Promise<
     if (!adapter.getPresignedGetUrl) throw new WorkerError("This asset's storage can't give download URLs");
     const fileName = version?.fileName ?? fileDoc.displayName;
     const download = await adapter.getPresignedGetUrl(version?.storageKey ?? fileDoc.storageKey, DOWNLOAD_TTL_SECONDS, fileName);
-    // StreamBy's own worker: run here, through the same contract.
-    if (worker.endpoint === LOCAL_ENDPOINT) {
-      const accepted = await jobStore().claim(jobId, ['processing'], { stage: 'accepted', updatedAt: new Date() }, { callbackHash: hashOf(token) });
-      if (accepted) notify(accepted);
-      const { runLocalJob } = await import('./localWorker');
-      setImmediate(() => {
-        runLocalJob({
-          jobId: job.jobId, kind: job.kind!, profile: (job.profile ?? {}) as Record<string, unknown>,
-          asset: { id: job.assetId!, versionId: version?.versionId ?? null, fileName, contentType: version?.contentType ?? fileDoc.contentType ?? null, category: fileDoc.category },
-          download: { url: download }, callback: { token },
-        }, config).catch(err => console.error('❌ StreamBy processing:', err?.message ?? err));
-      });
-      return;
-    }
     const callbackBase = config.workerOptions?.callbackBaseUrl ?? job.payload?.callbackBase;
     // A project's worker: its name may resolve, now, to the server's own network.
     if (worker.ref.source === 'project') await assertPublicEndpoint(worker.endpoint, config);
@@ -422,17 +407,6 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
     result = { assetId: fileId, versionId: first?.versionId ?? '', mode: 'derived' };
   }
   return result;
-}
-
-/** A job whose result is a project document (StreamBy's own transcription): completed with it. */
-export async function completeJobWithDocument(job: JobRecord, documentId: string, report: Record<string, unknown> | null): Promise<JobRecord> {
-  const claimed = await jobStore().claim(job.jobId, ['processing'], { stage: 'saving', leaseUntil: null, callbackHash: null, updatedAt: new Date() }, { callbackHash: job.callbackHash ?? '' });
-  if (!claimed) throw new WorkerError('The job is no longer in progress', 409);
-  const done = await jobStore().update(job.jobId, {
-    status: 'completed', stage: 'complete', progress: 100, error: null as unknown as undefined, report, result: { mode: 'document', documentId }, upload: null, updatedAt: new Date(),
-  });
-  if (done) notify(done);
-  return done!;
 }
 
 /** The worker couldn't do it: sent again if it says it may work later (and attempts are left), or failed. */

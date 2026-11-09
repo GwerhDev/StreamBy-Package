@@ -113,7 +113,7 @@ describe('writing to a project', () => {
     ['put', '/projects/p1/assets/a1/rights', { license: 'cc' }],
     ['patch', '/projects/p1/workflow', { nodes: [], edges: [] }],
     ['post', '/projects/p1/jobs/ingest', { fileId: 'f1' }],
-    ['post', '/projects/p1/jobs/process', { assetId: 'f1', worker: { source: 'builtin', id: 'streamby' }, kind: 'thumbnail' }],
+    ['post', '/projects/p1/jobs/process', { assetId: 'f1', worker: { source: 'builtin', id: 'gltf' }, kind: 'optimize' }],
     ['post', '/projects/p1/workers', { name: 'f', endpoint: 'https://x.example.com', kinds: ['render'], categories: ['3d-models'] }],
     ['post', '/projects/p1/pipelines', { name: 'p' }],
   ];

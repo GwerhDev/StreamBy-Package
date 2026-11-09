@@ -158,8 +158,7 @@ describe("a project's workers", () => {
     expect(stored.createdBy).toBe('eli');
 
     const list = await call('GET', '/projects/p1/workers', { user: 'vic' });
-    // StreamBy's own, the host's, the project's.
-    expect(list.body.data.map((w: any) => [w.source, w.name])).toEqual([['builtin', 'StreamBy'], ['builtin', 'glTF optimizer'], ['project', 'Own LOD']]);
+    expect(list.body.data.map((w: any) => [w.source, w.name])).toEqual([['builtin', 'glTF optimizer'], ['project', 'Own LOD']]);
     expect((await call('GET', '/projects/p1/workers', { user: 'no-builtins' })).status).toBe(403);
   });
 
@@ -267,6 +266,26 @@ describe('the worker calling back', () => {
     await process_();
     const { body: { jobId, callback: cb } } = await sentJob();
     expect((await callback(jobId, cb.token, 'upload-url', { fileName: 'notes.txt', contentType: 'text/plain' })).status).toBe(400);
+  });
+
+  it("keeps a derived result of another category, if it says so (a model's preview is an image); never as a version", async () => {
+    await process_();
+    const { body: { jobId, callback: cb } } = await sentJob();
+    const upload = await callback(jobId, cb.token, 'upload-url', { fileName: 'hero.png', contentType: 'image/png', category: 'images' });
+    expect(upload.status).toBe(200);
+    expect(keyOf(upload.body.url)).toMatch(/^p1\/images\//);
+    put(upload.body.url, 'preview png');
+    const done = await callback(jobId, cb.token, 'complete');
+    const preview = mongo.db.docs('storage_files').find((f: any) => f.fileId === done.body.job.result.assetId);
+    expect(preview).toMatchObject({ category: 'images', displayName: 'hero.png', contentType: 'image/png', derivedFrom: { assetId: 'model', jobId } });
+    expect(objects.get(preview.storageKey)).toBe('preview png');
+
+    received = [];
+    await process_({ resultMode: 'version' });
+    const second = await sentJob();
+    const refused = await callback(second.body.jobId, second.body.callback.token, 'upload-url', { fileName: 'hero.png', contentType: 'image/png', category: 'images' });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toMatch(/is a new asset: ask for a derived result/);
   });
 
   it('fails the job with its error, discarding what it uploaded; and it can be retried', async () => {

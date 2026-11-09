@@ -19,8 +19,9 @@ MongoDB) and your storage:
   requests to join; archiving; exploring public projects.
 - **Assets**: uploads by signed URL to S3 (the host's storage, or a project's own), folders,
   versions, metadata, license metadata and credits sheets, reviews with approvals.
-- **Processing**: workers that process assets (StreamBy's own, the host's or a project's), their
-  jobs kept and retried; results kept as new assets or versions.
+- **Processing**: external workers that process assets (the host's or a project's), their jobs
+  kept and retried; results kept as new assets or versions. StreamBy orchestrates, versions and
+  publishes: it never processes an asset on the server it's mounted in.
 - **The workflow**: a canvas that defines the project (its databases, APIs, storages, services,
   exports and pipelines), gates that hold deliverables back, and pipelines whose steps are done
   by people and by workers.
@@ -347,19 +348,12 @@ every client to send the same header): set it where the files are served, for ex
 `max-age` or `no-cache` on the CDN in front of the bucket, or invalidate the path when an asset
 is replaced.
 
-**What a list of files downloads.** A list's URLs (each file's `url`, and its `thumbnailUrl`)
-are signed as of the start of the hour, valid an hour longer than asked, and ask the storage to
-answer `Cache-Control: private, max-age=3600`: every list read in the same hour gets the same
-URLs, so a browser shows the files it already downloaded without downloading them again.
-
-An image or a video gets a **thumbnail** (a WebP up to 320 px wide, at `<key>.thumb.webp`
-beside it, never an asset of the project) the first time a list shows it, made in the background
-with StreamBy's own FFmpeg (see Processing; none with `processing: false`): the list answers at
-once with `thumbnailUrl: null`, and each member of the project gets an `assetThumbnailEvent`
-(`{ projectId, fileId, thumbnailUrl }`) when it's ready. A file replaced since gets a new one;
-one that couldn't be made (its file not uploaded yet, no FFmpeg) is tried again ten minutes
-later. Files uploaded before thumbnails existed get theirs the same way, as they're listed: the
-files themselves are never changed. A 3D model has none: its card loads the model.
+**What a list of files downloads.** A list's URLs are signed as of the start of the hour, valid
+an hour longer than asked, and ask the storage to answer `Cache-Control: private, max-age=3600`:
+every list read in the same hour gets the same URLs, so a browser shows the files it already
+downloaded without downloading them again. Each file also has a `thumbnailUrl`, `null` for now:
+StreamBy makes no thumbnails (a worker's, asked for with `POST .../jobs/process`, is an image
+asset of its own, derived from the file).
 
 A **deliverable** is an asset, or one of its versions, delivered for a
 production shot or for an export; a shot or an export can have several, and the shot's panel
@@ -600,67 +594,31 @@ Each row: `{ assetId, name, category, sourceUrl, creatorName, creatorUrl, licens
 
 ## ⚙️ Processing workers
 
-StreamBy processes assets through **workers**: services it sends a job to, which download the
-asset, do their work and upload what they made, kept as a new asset or as the asset's new
-version. There's one way to ask for any of them (`POST .../jobs/process`), and one contract
-(below): StreamBy's own worker follows it too, in the same process.
+StreamBy processes assets only through **external workers**: services it sends a job to, which
+download the asset, do their work and upload what they made, kept as a new asset or as the
+asset's new version. StreamBy orchestrates (sends, retries, times out), versions and publishes;
+it never processes an asset on the server it's mounted in, so the host's API needs no FFmpeg,
+no 3D toolkit, and no more memory than its requests. There's one way to ask for any job
+(`POST .../jobs/process`), and one contract (below).
 
 **What StreamBy processes, and what it doesn't**
 
 | Processing | Done by | With |
 |---|---|---|
-| Thumbnail: an image's smaller copy, or a video's frame (`thumbnail`) | StreamBy's own worker | FFmpeg, the host's |
-| Transcoding a video or an audio: format, codec, size, bitrate, sound only (`transcode`) | StreamBy's own worker | FFmpeg, the host's |
-| A glTF model's LOD: fewer triangles (`lod`) | StreamBy's own worker | glTF-Transform and meshoptimizer |
-| A glTF model as `.glb`, or as `.gltf` with its buffers inside it (`gltf-convert`) | StreamBy's own worker | glTF-Transform |
-| A video's or an audio's transcript, as a project document (`transcribe`) | StreamBy's own worker | the requester's speech provider: OpenAI, Deepgram, AssemblyAI, or any OpenAI-compatible service |
-| Anything else (optimizing a glTF, rendering, upscaling...) | a worker of the host or of the project | its own tools |
+| Anything done to an asset's content (thumbnails, transcoding, LODs, glTF optimization or conversion, transcripts, rendering, upscaling...) | a worker of the host or of the project | its own tools |
 | Ingest: an uploaded file's metadata (its codec, from its content type) and its first version (`POST .../jobs/ingest`) | StreamBy | nothing external |
 | QC reports (`.../assets/:assetId/qc-report`) | whoever posts one | a record of the checks given |
 | Publishing an export | nobody | a record of when, by whom and where to (see Deliverables) |
 
-**StreamBy's own worker** is listed with the host's workers as `StreamBy` (`source: 'builtin'`,
-`id: 'streamby'`), unless the host turns it off with `processing: false`. It runs on the server
-it's mounted in:
-
-```ts
-createStreamByRouter({
-  // ...
-  processing: { ffmpegPath: '/usr/bin/ffmpeg' }, // default: `ffmpeg`, from the PATH; `false` turns it off
-});
-```
-
-Where there's no FFmpeg, its thumbnails, transcodes and transcripts fail saying so. Its
-`profile`s:
-
-| Kind | Takes | `profile` |
-|---|---|---|
-| `thumbnail` | images, videos | `width` (default 640), `format` (`jpg`, `png`, `webp`), `timecode` (a video's: default `00:00:01`) |
-| `transcode` | videos, audios | `format` (`mp4`, `webm`, `mov`; `mp3`, `ogg`, `wav`, `m4a`, `flac`: its sound only), `width`, `height`, `videoBitrate`, `audioBitrate` (e.g. `2M`, `128k`) |
-| `lod` | `.glb`, `.gltf` | `ratio` (the share of triangles kept, default 0.5), `error` (default 0.01) |
-| `gltf-convert` | `.glb`, `.gltf` | `to` (`glb` or `gltf`; by default, the other one) |
-| `transcribe` | videos, audios | `integrationId` (required: a speech provider integration of the requester's own), `language`, `model` |
-
-A thumbnail of a video is an image, and a transcode to an audio format is an audio: results of
-another category than their asset's are new assets (`resultMode: 'version'` is refused for
-them). A transcript is a project document, `Transcript of <file name>`: the job's `result` is
-`{ mode: 'document', documentId }`.
-
-**Speech providers** are a user's account integrations (`POST /user/integrations`, `kind:
-'service'`), never a project's connection, and a transcription uses only the requester's own:
-
-| `provider` | `credential` |
-|---|---|
-| `openai` | the API key |
-| `deepgram` | the API key |
-| `assemblyai` | the API key |
-| `openai-compatible` | `{ baseUrl, apiKey?, model? }`: any service with OpenAI's transcription API (Groq, a whisper.cpp or LocalAI server...). Its `baseUrl` is reached from StreamBy's server: https, and never a local or private address (as a project's worker endpoint; `workerOptions.allowLocalEndpoints` lifts it, for development) |
+A worker's result may be of another category than its asset (a video's thumbnail is an image, a
+transcode to an audio format an audio): it gives that category when asking where to upload it
+(`/upload-url`), and it's kept as a new asset derived from it (`resultMode: 'version'` is
+refused for it).
 
 **Where workers come from**
 
-- **StreamBy's own** (above).
 - **The host's**, offered to every project, in the router config (each one gated, like the other
-  built-ins, by `canUseBuiltin` with kind `'worker'`, StreamBy's own too):
+  built-ins, by `canUseBuiltin` with kind `'worker'`):
 
   ```ts
   createStreamByRouter({
@@ -959,7 +917,7 @@ npm test
 Tests use [Vitest](https://vitest.dev) and [Supertest](https://www.npmjs.com/package/supertest),
 on Node 22 or later. Most run against in-memory databases; the `*.pg.test.ts` ones need a local
 PostgreSQL (`postgresql://postgres:postgres@localhost:5432/postgres`; they make, and drop,
-databases of their own), and the processing ones need FFmpeg on the PATH.
+databases of their own).
 
 ---
 
@@ -997,7 +955,6 @@ given as `websocket`.
 - [ ] Google Cloud Storage, Cloudflare R2 and Azure Blob as storage providers (S3 only today)
 - [ ] Streaming (HLS) for videos and audios
 - [ ] Uploading to distribution platforms (publishing is a record today)
-- [ ] More of StreamBy's own processing: optimizing glTF textures (KTX2), image formats
 
 ---
 

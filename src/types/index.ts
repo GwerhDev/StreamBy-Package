@@ -205,10 +205,6 @@ export interface StreamByConfig {
   // Processing workers offered to every project (gated, like the other built-ins, by
   // canUseBuiltin with kind 'worker').
   workers?: WorkerConfig[];
-  // StreamBy's own worker (see services/localWorker): thumbnails, transcoding, LODs, glTF
-  // conversion and transcription, done on this server. On by default; `false` turns it off.
-  // ffmpegPath: the FFmpeg it runs (default `ffmpeg`, from the PATH).
-  processing?: false | { ffmpegPath?: string };
   workerOptions?: {
     // The URL workers call back to: this router's public URL (e.g.
     // 'https://api.example.com/streamby'). Default: the URL a job was asked for at.
@@ -337,9 +333,7 @@ export interface IntegrationConnection {
 
 export type IntegrationKind = 'database' | 'storage' | 'service';
 
-// Speech to text providers (openai, deepgram, assemblyai, openai-compatible) transcribe for
-// StreamBy's own worker (see services/speechProviders).
-export type ServiceProviderType = 'claude' | 'jira' | 'google' | 'openai' | 'deepgram' | 'assemblyai' | 'openai-compatible';
+export type ServiceProviderType = 'claude' | 'jira' | 'google';
 
 // A user-registered (BYOC) database/storage credential, or a third-party service account
 // link (Claude/Jira/Google) — always the user's own, never a copy of a built-in. Lives in
@@ -559,8 +553,7 @@ export interface JobRecord {
   upload?: { storageKey: string; fileName: string; contentType: string; category?: StorageCategoryName } | null;
   // What the worker reported, and what was made of its result.
   report?: Record<string, unknown> | null;
-  // A new version of the asset, a new asset derived from it, or a project document (a transcript).
-  result?: { assetId?: string; versionId?: string; mode: WorkerResultMode | 'document'; documentId?: string } | null;
+  result?: { assetId: string; versionId: string; mode: WorkerResultMode } | null;
 }
 
 export type WorkerResultMode = 'version' | 'derived';
