@@ -10,7 +10,7 @@ import { classifyIntegrationId, connectIntegration } from '../../services/projec
 import { rememberDisconnectedBuiltin } from './projectResources';
 import { scopeReachesProject } from '../../services/auth';
 import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/apiTokens';
-import { deleteProjectAgentShares } from '../../services/workerAgents';
+import { deleteProjectRunnerShares } from '../../services/workerRunners';
 import { deleteProductionData } from '../../services/production';
 import { deleteTeamsOf } from '../../services/teams';
 import { deletePermissionsOf, readProjectPermissions, setProjectPermissions, ROLE_ACTIONS, APP_PERMISSIONS } from '../../services/projectPermissions';
@@ -279,10 +279,10 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       await Project.useDbType(project.dbType).delete({ _id: projectId });
-      // Its tokens and shared agents have nothing left to reach, and its production data, teams and jobs nothing
+      // Its tokens and shared runners have nothing left to reach, and its production data, teams and jobs nothing
       // to belong to.
       await deleteProjectApiTokens(String(projectId));
-      await deleteProjectAgentShares(String(projectId));
+      await deleteProjectRunnerShares(String(projectId));
       await deleteProductionData(String(projectId));
       await deleteTeamsOf(String(projectId));
       await deletePermissionsOf(String(projectId));

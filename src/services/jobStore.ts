@@ -20,12 +20,14 @@ export interface JobStore {
    */
   claim(jobId: string, statuses: JobRecord['status'][], patch: Partial<JobRecord>, only?: ClaimConditions): Promise<JobRecord | null>;
   /**
-   * Worker jobs to look at now: queued and due (an agent's only once it waited too long: its
-   * agent asks for it), or dispatched with their lease ended.
+   * Worker jobs to look at now: queued and due (a runner's only once it waited too long: its
+   * runner asks for it), or dispatched with their lease ended.
    */
   due(now: Date, limit: number): Promise<JobRecord[]>;
-  /** An agent's jobs in one of `statuses`, oldest first. */
-  ofAgent(agentId: string, statuses: JobRecord['status'][], limit: number): Promise<JobRecord[]>;
+  /** A runner's jobs in one of `statuses`, oldest first. */
+  ofRunner(runnerId: string, statuses: JobRecord['status'][], limit: number): Promise<JobRecord[]>;
+  /** A runner's queued jobs it may take now, of one of `kinds`, oldest first. */
+  queuedForRunner(runnerId: string, kinds: string[], now: Date, limit: number): Promise<JobRecord[]>;
   /** A deleted project's jobs. */
   deleteProject(projectId: string): Promise<void>;
 }
@@ -98,18 +100,28 @@ const sqlStore = (pool: Pool): JobStore => {
       const { rows } = await pool.query(
         `SELECT * FROM ${table}
           WHERE worker IS NOT NULL AND (
-            (status = 'pending' AND worker->>'source' IS DISTINCT FROM 'agent' AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= $1))
-            OR (status = 'pending' AND worker->>'source' = 'agent' AND "waitUntil" <= $1)
+            (status = 'pending' AND worker->>'source' IS DISTINCT FROM 'runner' AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= $1))
+            OR (status = 'pending' AND worker->>'source' = 'runner' AND "waitUntil" <= $1)
             OR (status = 'processing' AND "leaseUntil" <= $1))
           ORDER BY "createdAt" LIMIT $2`,
         [now, limit],
       );
       return rows.map(row => fromRow(row)!);
     },
-    async ofAgent(agentId, statuses, limit) {
+    async ofRunner(runnerId, statuses, limit) {
       const { rows } = await pool.query(
-        `SELECT * FROM ${table} WHERE worker->>'source' = 'agent' AND worker->>'id' = $1 AND status = ANY($2) ORDER BY "createdAt" LIMIT $3`,
-        [agentId, statuses, limit],
+        `SELECT * FROM ${table} WHERE worker->>'source' = 'runner' AND worker->>'id' = $1 AND status = ANY($2) ORDER BY "createdAt" LIMIT $3`,
+        [runnerId, statuses, limit],
+      );
+      return rows.map(row => fromRow(row)!);
+    },
+    async queuedForRunner(runnerId, kinds, now, limit) {
+      const { rows } = await pool.query(
+        `SELECT * FROM ${table}
+          WHERE worker->>'source' = 'runner' AND worker->>'id' = $1 AND status = 'pending'
+            AND kind = ANY($2) AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= $3)
+          ORDER BY "createdAt" LIMIT $4`,
+        [runnerId, kinds, now, limit],
       );
       return rows.map(row => fromRow(row)!);
     },
@@ -155,15 +167,22 @@ const mongoStore = (client: MongoClient): JobStore => {
       const docs = await col().find({
         worker: { $ne: null },
         $or: [
-          { status: 'pending', 'worker.source': { $ne: 'agent' }, $or: [{ nextAttemptAt: null }, { nextAttemptAt: { $lte: now } }] },
-          { status: 'pending', 'worker.source': 'agent', waitUntil: { $lte: now } },
+          { status: 'pending', 'worker.source': { $ne: 'runner' }, $or: [{ nextAttemptAt: null }, { nextAttemptAt: { $lte: now } }] },
+          { status: 'pending', 'worker.source': 'runner', waitUntil: { $lte: now } },
           { status: 'processing', leaseUntil: { $lte: now } },
         ],
       }).sort({ createdAt: 1 }).limit(limit).toArray();
       return docs.map(doc => fromDoc(doc)!);
     },
-    async ofAgent(agentId, statuses, limit) {
-      const docs = await col().find({ 'worker.source': 'agent', 'worker.id': agentId, status: { $in: statuses } }).sort({ createdAt: 1 }).limit(limit).toArray();
+    async ofRunner(runnerId, statuses, limit) {
+      const docs = await col().find({ 'worker.source': 'runner', 'worker.id': runnerId, status: { $in: statuses } }).sort({ createdAt: 1 }).limit(limit).toArray();
+      return docs.map(doc => fromDoc(doc)!);
+    },
+    async queuedForRunner(runnerId, kinds, now, limit) {
+      const docs = await col().find({
+        'worker.source': 'runner', 'worker.id': runnerId, status: 'pending', kind: { $in: kinds },
+        $or: [{ nextAttemptAt: null }, { nextAttemptAt: { $lte: now } }],
+      }).sort({ createdAt: 1 }).limit(limit).toArray();
       return docs.map(doc => fromDoc(doc)!);
     },
     async deleteProject(projectId) {
@@ -199,15 +218,23 @@ const memoryStore = (): JobStore => {
     async due(now, limit) {
       return [...jobs.values()]
         .filter(job => job.worker && (
-          (job.status === 'pending' && job.worker.source !== 'agent' && (!job.nextAttemptAt || new Date(job.nextAttemptAt) <= now))
-          || (job.status === 'pending' && job.worker.source === 'agent' && job.waitUntil && new Date(job.waitUntil) <= now)
+          (job.status === 'pending' && job.worker.source !== 'runner' && (!job.nextAttemptAt || new Date(job.nextAttemptAt) <= now))
+          || (job.status === 'pending' && job.worker.source === 'runner' && job.waitUntil && new Date(job.waitUntil) <= now)
           || (job.status === 'processing' && job.leaseUntil && new Date(job.leaseUntil) <= now)))
         .slice(0, limit)
         .map(job => ({ ...job }));
     },
-    async ofAgent(agentId, statuses, limit) {
+    async ofRunner(runnerId, statuses, limit) {
       return [...jobs.values()]
-        .filter(job => job.worker?.source === 'agent' && job.worker.id === agentId && statuses.includes(job.status))
+        .filter(job => job.worker?.source === 'runner' && job.worker.id === runnerId && statuses.includes(job.status))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .slice(0, limit)
+        .map(job => ({ ...job }));
+    },
+    async queuedForRunner(runnerId, kinds, now, limit) {
+      return [...jobs.values()]
+        .filter(job => job.worker?.source === 'runner' && job.worker.id === runnerId && job.status === 'pending'
+          && kinds.includes(job.kind ?? '') && (!job.nextAttemptAt || new Date(job.nextAttemptAt) <= now))
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
         .slice(0, limit)
         .map(job => ({ ...job }));

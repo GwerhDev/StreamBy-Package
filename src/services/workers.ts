@@ -4,12 +4,12 @@ import { activeMemberOf } from '../utils/auth';
 import { assertBuiltinAccess } from '../utils/builtinAccess';
 import { decrypt, encrypt, isEncryptionKeySet } from '../utils/encryption';
 import { isPrivateHostName, resolvesToPrivateAddress } from '../utils/privateAddress';
-import { agentTimeoutSeconds, isOnline, projectAgents, resolveAgent, WorkerAgentRecord } from './workerAgents';
+import { runnerTimeoutSeconds, isOnline, projectRunners, resolveRunner, WorkerRunnerRecord } from './workerRunners';
 
-// Processing workers: external services StreamBy sends jobs to (see workerJobs), or agents
-// that ask StreamBy for them (see workerAgents). A project can use the host's built-in ones
+// Processing workers: external services StreamBy sends jobs to (see workerJobs), or runners
+// that ask StreamBy for them (see workerRunners). A project can use the host's built-in ones
 // (StreamByConfig.workers, gated by canUseBuiltin), its own, connected from the project, and
-// the agents shared with it. A project's workers are kept in its
+// the runners shared with it. A project's workers are kept in its
 // `renderFarmConnections` list (render farms are workers too); each one's credential is
 // encrypted, and it's used only while whoever connected it is still in the project.
 
@@ -47,12 +47,12 @@ export interface WorkerSummary {
   description: string | null;
   hasCredential: boolean;
   createdBy: string | null;
-  // An agent's: whether it's online (it asked for jobs in the last minute), and when it last did.
+  // A runner's: whether it's online (it asked for jobs in the last minute), and when it last did.
   online?: boolean;
   lastSeenAt?: Date | null;
 }
 
-/** A worker ready to be sent a job (an agent's: to wait for it). */
+/** A worker ready to be sent a job (a runner's: to wait for it). */
 export interface ResolvedWorker {
   ref: WorkerRef;
   endpoint: string;
@@ -81,11 +81,11 @@ const builtinSummary = (worker: WorkerConfig): WorkerSummary => ({
   description: null, hasCredential: !!worker.credential, createdBy: null,
 });
 
-// What an agent declared last: what it's offered for while it's offline too.
-const agentSummary = (agent: WorkerAgentRecord): WorkerSummary => ({
-  source: 'agent', id: agent.id, name: agent.name, provider: 'agent',
-  kinds: agent.kinds, categories: agent.categories, autoKind: null, description: null,
-  hasCredential: false, createdBy: agent.userId, online: isOnline(agent), lastSeenAt: agent.lastSeenAt,
+// What a runner declared last: what it's offered for while it's offline too.
+const runnerSummary = (runner: WorkerRunnerRecord): WorkerSummary => ({
+  source: 'runner', id: runner.id, name: runner.name, provider: 'runner',
+  kinds: runner.kinds, categories: runner.categories, autoKind: null, description: null,
+  hasCredential: false, createdBy: runner.userId, online: isOnline(runner), lastSeenAt: runner.lastSeenAt,
 });
 
 const projectSummary = (worker: WorkerConnection): WorkerSummary => ({
@@ -101,8 +101,8 @@ export async function availableWorkers(project: any, auth: Auth, config: StreamB
   for (const worker of config.workers ?? []) {
     if (await assertBuiltinAccess(auth, worker.id, config, 'worker')) builtins.push(builtinSummary(worker));
   }
-  const agents = (await projectAgents(project, auth)).map(agentSummary);
-  return [...builtins, ...projectWorkers(project).map(projectSummary), ...agents];
+  const runners = (await projectRunners(project, auth)).map(runnerSummary);
+  return [...builtins, ...projectWorkers(project).map(projectSummary), ...runners];
 }
 
 /** A worker of the project, or of the host, ready to be sent a job as `auth`. */
@@ -132,15 +132,15 @@ export async function resolveWorker(project: any, ref: { source: string; id: str
       autoKind: worker.autoKind ?? null, timeoutSeconds: worker.timeoutSeconds ?? DEFAULT_WORKER_TIMEOUT_SECONDS,
     };
   }
-  if (ref.source === 'agent') {
-    const agent = await resolveAgent(project, ref.id, auth);
+  if (ref.source === 'runner') {
+    const runner = await resolveRunner(project, ref.id, auth);
     return {
-      ref: { source: 'agent', id: agent.id, name: agent.name },
-      endpoint: '', credential: null, kinds: agent.kinds, categories: agent.categories,
-      autoKind: null, timeoutSeconds: agentTimeoutSeconds(agent),
+      ref: { source: 'runner', id: runner.id, name: runner.name },
+      endpoint: '', credential: null, kinds: runner.kinds, categories: runner.categories,
+      autoKind: null, timeoutSeconds: runnerTimeoutSeconds(runner),
     };
   }
-  throw new WorkerError("A worker's source is 'builtin', 'project' or 'agent'");
+  throw new WorkerError("A worker's source is 'builtin', 'project' or 'runner'");
 }
 
 // A project's worker is reached from StreamBy's server: only over https, and never at a local

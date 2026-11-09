@@ -4,8 +4,8 @@ import http from 'http';
 import type { AddressInfo } from 'net';
 import { FakeDb } from './fakeMongo';
 
-// Worker agents: a machine with no public URL that asks StreamBy for jobs (a long poll with its
-// own token), shared by its owner with a project or a team. Projects, agents and their shares
+// Worker runners: a machine with no public URL that asks StreamBy for jobs (a long poll with its
+// own token), shared by its owner with a project or a team. Projects, runners and their shares
 // live in the models (here in memory); files and teams in the NoSQL database; jobs in the job
 // store's memory.
 const mongo = vi.hoisted(() => ({ db: null as any }));
@@ -57,7 +57,7 @@ const keyOf = (url: string) => new URL(url).pathname.replace(/^\/(put|get)\//, '
 
 const config: any = {
   storageProviders: [], adapter, databases: [{ id: 'pg', type: 'sql', main: true }],
-  workerOptions: { sweepIntervalMs: 0, agentPollWaitMs: 300 },
+  workerOptions: { sweepIntervalMs: 0, runnerPollWaitMs: 300 },
   authProvider: async (req: any) => ({
     userId: req.headers['x-test-user'], username: req.headers['x-test-user'], role: 'viewer',
     ...(req.headers['x-test-token'] ? { apiToken: { tokenId: 't1', kind: 'user', permissions: ['jobs:run', 'assets:read'], projectIds: '*' } } : {}),
@@ -87,7 +87,7 @@ const call = async (method: string, path: string, { user = 'ada', body, token, a
 
 // Ada's machine: registered, and what it says it can do when it asks.
 const CAN = { kinds: ['gltf-optimize'], categories: ['3d-models'] };
-const register = async (name = 'Ada workstation') => (await call('POST', '/user/worker-agents', { body: { name } })).body;
+const register = async (name = 'Ada workstation') => (await call('POST', '/user/runners', { body: { name } })).body;
 // Registered, connected once (it said what it does) and shared with the project.
 const ready = async () => {
   const registered = await register();
@@ -95,10 +95,10 @@ const ready = async () => {
   await share(registered.data.id);
   return registered;
 };
-const poll = (token: string, declared: object = CAN) => call('POST', '/worker-agent/jobs/next', { token, body: declared });
-const share = (agentId: string, body: object = { projectId: 'p1' }, user = 'ada') => call('POST', `/user/worker-agents/${agentId}/shares`, { user, body });
-const process_ = (agentId: string, user = 'eli', body: object = {}) =>
-  call('POST', '/projects/p1/jobs/process', { user, body: { assetId: 'model', worker: { source: 'agent', id: agentId }, kind: 'gltf-optimize', ...body } });
+const poll = (token: string, declared: object = CAN) => call('POST', '/runner/jobs/next', { token, body: declared });
+const share = (runnerId: string, body: object = { projectId: 'p1' }, user = 'ada') => call('POST', `/user/runners/${runnerId}/shares`, { user, body });
+const process_ = (runnerId: string, user = 'eli', body: object = {}) =>
+  call('POST', '/projects/p1/jobs/process', { user, body: { assetId: 'model', worker: { source: 'runner', id: runnerId }, kind: 'gltf-optimize', ...body } });
 const workersOf = async (user = 'eli') => (await call('GET', '/projects/p1/workers', { user })).body.data;
 const job = (jobId: string) => jobStore().get(jobId);
 
@@ -122,61 +122,61 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-describe('registering an agent', () => {
+describe('registering a runner', () => {
   it('gives its token once; its owner lists it, never with its token, offline until it asks', async () => {
     const { token, data } = await register();
-    expect(token).toMatch(/^sba_[A-Za-z0-9_-]{43}$/);
+    expect(token).toMatch(/^sbr_[A-Za-z0-9_-]{43}$/);
     expect(data).toMatchObject({ name: 'Ada workstation', online: false, kinds: [], shares: [] });
-    const listed = (await call('GET', '/user/worker-agents')).body.data;
+    const listed = (await call('GET', '/user/runners')).body.data;
     expect(listed).toHaveLength(1);
     expect(JSON.stringify(listed)).not.toContain(token);
     expect(JSON.stringify(listed)).not.toMatch(/hash/);
-    expect((await call('GET', '/user/worker-agents', { user: 'eli' })).body.data).toEqual([]);
+    expect((await call('GET', '/user/runners', { user: 'eli' })).body.data).toEqual([]);
   });
 
   it('is done with a session only: not with an API token', async () => {
-    expect((await call('POST', '/user/worker-agents', { body: { name: 'x' }, apiToken: true })).status).toBe(403);
-    expect((await call('GET', '/user/worker-agents', { apiToken: true })).status).toBe(403);
+    expect((await call('POST', '/user/runners', { body: { name: 'x' }, apiToken: true })).status).toBe(403);
+    expect((await call('GET', '/user/runners', { apiToken: true })).status).toBe(403);
   });
 
   it("its token only asks for jobs: it's no session", async () => {
     const { token } = await register();
-    expect((await call('GET', '/user/worker-agents', { token })).status).toBe(401);
+    expect((await call('GET', '/user/runners', { token })).status).toBe(401);
     expect((await call('GET', '/projects/p1/workers', { token })).status).toBe(401);
   });
 });
 
-describe('an agent asking for jobs', () => {
+describe('a runner asking for jobs', () => {
   it('is online once it asks, with what it declared; with no job, it is told so', async () => {
     const { token } = await register();
     expect((await poll(token)).status).toBe(204);
-    expect((await call('GET', '/user/worker-agents')).body.data[0]).toMatchObject({ online: true, kinds: ['gltf-optimize'], categories: ['3d-models'] });
-    expect((await poll('sba_not-a-token')).status).toBe(401);
+    expect((await call('GET', '/user/runners')).body.data[0]).toMatchObject({ online: true, kinds: ['gltf-optimize'], categories: ['3d-models'] });
+    expect((await poll('sbr_not-a-token')).status).toBe(401);
     expect((await poll(token, { kinds: 'all' })).status).toBe(400);
   });
 
   it("is in no project's workers until its owner shares it, and then for its editors, with its state", async () => {
-    const { token, data: agent } = await register();
+    const { token, data: runner } = await register();
     // Not connected yet: it can't be asked anything.
-    await share(agent.id);
-    expect((await process_(agent.id)).body.message).toBe("Ada workstation hasn't said yet what it does: start it, so it connects");
-    await call('DELETE', `/user/worker-agents/${agent.id}/shares/${store.worker_agent_shares[0].id}`);
+    await share(runner.id);
+    expect((await process_(runner.id)).body.message).toBe("Ada workstation hasn't said yet what it does: start it, so it connects");
+    await call('DELETE', `/user/runners/${runner.id}/shares/${store.worker_runner_shares[0].id}`);
     await poll(token);
     expect(await workersOf()).toEqual([]);
-    expect((await process_(agent.id)).status).toBe(404);
-    expect((await share(agent.id)).status).toBe(201);
-    expect(await workersOf()).toEqual([expect.objectContaining({ source: 'agent', id: agent.id, name: 'Ada workstation', online: true, kinds: ['gltf-optimize'] })]);
+    expect((await process_(runner.id)).status).toBe(404);
+    expect((await share(runner.id)).status).toBe(201);
+    expect(await workersOf()).toEqual([expect.objectContaining({ source: 'runner', id: runner.id, name: 'Ada workstation', online: true, kinds: ['gltf-optimize'] })]);
     // Only where its owner is a member; only its owner shares it.
-    expect((await share(agent.id, { projectId: 'p2' })).status).toBe(403);
-    expect((await share(agent.id, { projectId: 'p1' }, 'eli')).status).toBe(404);
+    expect((await share(runner.id, { projectId: 'p2' })).status).toBe(403);
+    expect((await share(runner.id, { projectId: 'p1' }, 'eli')).status).toBe(404);
   });
 
   it("takes a job of a project it's shared with, and does it through the worker's contract", async () => {
-    const { token, data: agent } = await ready();
-    const asked = await process_(agent.id, 'eli', { profile: { textureFormat: 'ktx2' } });
+    const { token, data: runner } = await ready();
+    const asked = await process_(runner.id, 'eli', { profile: { textureFormat: 'ktx2' } });
     expect(asked.status).toBe(202);
-    // Not sent anywhere: it waits for its agent.
-    expect((await job(asked.body.job.jobId))).toMatchObject({ status: 'pending', worker: { source: 'agent', id: agent.id } });
+    // Not sent anywhere: it waits for its runner.
+    expect((await job(asked.body.job.jobId))).toMatchObject({ status: 'pending', worker: { source: 'runner', id: runner.id } });
 
     const taken = await poll(token);
     expect(taken.status).toBe(200);
@@ -201,80 +201,93 @@ describe('an agent asking for jobs', () => {
   });
 
   it('waiting, gets a job as soon as one is asked for', async () => {
-    config.workerOptions.agentPollWaitMs = 5_000;
+    config.workerOptions.runnerPollWaitMs = 5_000;
     try {
-      const { token, data: agent } = await register();
-      await share(agent.id);
+      const { token, data: runner } = await register();
+      await share(runner.id);
       const started = Date.now();
       const waiting = poll(token);
       await new Promise(resolve => setTimeout(resolve, 100));
-      await process_(agent.id);
+      await process_(runner.id);
       expect((await waiting).status).toBe(200);
       expect(Date.now() - started).toBeLessThan(2_000);
     } finally {
-      config.workerOptions.agentPollWaitMs = 300;
+      config.workerOptions.runnerPollWaitMs = 300;
     }
   });
 
   it("isn't handed a job of a kind, or an asset of a category, it doesn't declare now", async () => {
-    const { token, data: agent } = await ready();
-    const asked = await process_(agent.id);
+    const { token, data: runner } = await ready();
+    const asked = await process_(runner.id);
     expect((await poll(token, { kinds: ['render'], categories: ['3d-models'] })).status).toBe(204);
     expect((await poll(token, { kinds: ['gltf-optimize'], categories: ['images'] })).status).toBe(204);
     expect(await job(asked.body.job.jobId)).toMatchObject({ status: 'pending' });
     // It's offered for what it declared last; a job of a kind it never declared isn't asked.
-    expect((await process_(agent.id, 'eli', { kind: 'lod' })).status).toBe(400);
+    expect((await process_(runner.id, 'eli', { kind: 'lod' })).status).toBe(400);
     expect((await poll(token)).status).toBe(200);
   });
 });
 
-describe('who an agent works for', () => {
-  it("only a team's members (and its owner), when it's shared with a team", async () => {
-    const { token, data: agent } = await register();
-    await poll(token);
-    expect((await share(agent.id, { projectId: 'p1', teamId: 'lighting' })).status).toBe(201);
-    expect((await workersOf('eli')).map((w: any) => w.id)).toEqual([agent.id]);
-    expect(await workersOf('leo')).toEqual([]);
-    expect((await process_(agent.id, 'leo')).status).toBe(403);
-    expect((await process_(agent.id, 'ada')).status).toBe(202);
-    expect((await share(agent.id, { projectId: 'p1', teamId: 'not-a-team' })).status).toBe(400);
-    // Shared again with the whole project: one share, changed.
-    await share(agent.id);
-    expect((await call('GET', '/user/worker-agents')).body.data[0].shares).toEqual([expect.objectContaining({ projectId: 'p1', projectName: 'World of Gwerh', teamId: null })]);
-    expect((await process_(agent.id, 'leo')).status).toBe(202);
-  });
-
-  it("nobody in a project its owner left: its jobs there fail, saying why, and none is asked", async () => {
-    const { token, data: agent } = await ready();
-    const asked = await process_(agent.id);
-    store.projects[0].members[0].status = 'left';
-    expect(await workersOf()).toEqual([]);
-    expect((await process_(agent.id)).status).toBe(403);
-    expect((await poll(token)).status).toBe(204);
-    expect(await job(asked.body.job.jobId)).toMatchObject({ status: 'failed', error: "This agent's owner is no longer in the project" });
-  });
-
-  it('nobody once its owner stops sharing it, or revokes it: then its token stops working and its jobs fail', async () => {
-    const { token, data: agent } = await register();
-    await poll(token);
-    const shared = (await share(agent.id)).body.data;
-    expect((await call('DELETE', `/user/worker-agents/${agent.id}/shares/${shared.id}`)).status).toBe(200);
-    expect(await workersOf()).toEqual([]);
-
-    await share(agent.id);
-    const asked = await process_(agent.id);
-    expect((await call('DELETE', `/user/worker-agents/${agent.id}`, { user: 'eli' })).status).toBe(404);
-    expect((await call('DELETE', `/user/worker-agents/${agent.id}`)).status).toBe(200);
-    expect((await poll(token)).status).toBe(401);
-    expect(await job(asked.body.job.jobId)).toMatchObject({ status: 'failed', error: 'Its agent was revoked' });
-    expect(store.worker_agent_shares).toEqual([]);
+describe('the jobs a runner is handed', () => {
+  it("are the oldest it can do: many older ones it can't do don't hide them", async () => {
+    const { token, data: runner } = await register();
+    await poll(token, { kinds: ['gltf-optimize', 'lod'], categories: ['3d-models'] });
+    await share(runner.id);
+    for (let i = 0; i < 60; i++) await process_(runner.id, 'eli', { kind: 'lod' });
+    const wanted = (await process_(runner.id)).body.job.jobId;
+    const taken = await poll(token);
+    expect(taken.status).toBe(200);
+    expect(taken.body.job).toMatchObject({ jobId: wanted, kind: 'gltf-optimize' });
   });
 });
 
-describe('an agent that goes away', () => {
+describe('who a runner works for', () => {
+  it("only a team's members (and its owner), when it's shared with a team", async () => {
+    const { token, data: runner } = await register();
+    await poll(token);
+    expect((await share(runner.id, { projectId: 'p1', teamId: 'lighting' })).status).toBe(201);
+    expect((await workersOf('eli')).map((w: any) => w.id)).toEqual([runner.id]);
+    expect(await workersOf('leo')).toEqual([]);
+    expect((await process_(runner.id, 'leo')).status).toBe(403);
+    expect((await process_(runner.id, 'ada')).status).toBe(202);
+    expect((await share(runner.id, { projectId: 'p1', teamId: 'not-a-team' })).status).toBe(400);
+    // Shared again with the whole project: one share, changed.
+    await share(runner.id);
+    expect((await call('GET', '/user/runners')).body.data[0].shares).toEqual([expect.objectContaining({ projectId: 'p1', projectName: 'World of Gwerh', teamId: null })]);
+    expect((await process_(runner.id, 'leo')).status).toBe(202);
+  });
+
+  it("nobody in a project its owner left: its jobs there fail, saying why, and none is asked", async () => {
+    const { token, data: runner } = await ready();
+    const asked = await process_(runner.id);
+    store.projects[0].members[0].status = 'left';
+    expect(await workersOf()).toEqual([]);
+    expect((await process_(runner.id)).status).toBe(403);
+    expect((await poll(token)).status).toBe(204);
+    expect(await job(asked.body.job.jobId)).toMatchObject({ status: 'failed', error: "This runner's owner is no longer in the project" });
+  });
+
+  it('nobody once its owner stops sharing it, or revokes it: then its token stops working and its jobs fail', async () => {
+    const { token, data: runner } = await register();
+    await poll(token);
+    const shared = (await share(runner.id)).body.data;
+    expect((await call('DELETE', `/user/runners/${runner.id}/shares/${shared.id}`)).status).toBe(200);
+    expect(await workersOf()).toEqual([]);
+
+    await share(runner.id);
+    const asked = await process_(runner.id);
+    expect((await call('DELETE', `/user/runners/${runner.id}`, { user: 'eli' })).status).toBe(404);
+    expect((await call('DELETE', `/user/runners/${runner.id}`)).status).toBe(200);
+    expect((await poll(token)).status).toBe(401);
+    expect(await job(asked.body.job.jobId)).toMatchObject({ status: 'failed', error: 'Its runner was revoked' });
+    expect(store.worker_runner_shares).toEqual([]);
+  });
+});
+
+describe('a runner that goes away', () => {
   it("leaves its job, at the end of its lease, back in line: it takes it again when it's back", async () => {
-    const { token, data: agent } = await ready();
-    const asked = await process_(agent.id);
+    const { token, data: runner } = await ready();
+    const asked = await process_(runner.id);
     const first = (await poll(token)).body.job;
     expect(first.attempt).toBe(1);
     // It never called back, and its time is up.
@@ -286,9 +299,9 @@ describe('an agent that goes away', () => {
     expect(again.callback.token).not.toBe(first.callback.token);
   });
 
-  it('a job no agent takes in 24 hours fails, saying so, and can be retried', async () => {
-    const { token, data: agent } = await ready();
-    const { jobId } = (await process_(agent.id)).body.job;
+  it('a job no runner takes in 24 hours fails, saying so, and can be retried', async () => {
+    const { token, data: runner } = await ready();
+    const { jobId } = (await process_(runner.id)).body.job;
     const waiting = await job(jobId);
     expect(new Date(waiting!.waitUntil!).getTime() - Date.now()).toBeGreaterThan(23.9 * 3600_000);
     // The sweeper doesn't try to send it meanwhile.
@@ -298,7 +311,7 @@ describe('an agent that goes away', () => {
     expect((await jobStore().due(new Date(), 20)).map(j => j.jobId)).toContain(jobId);
     await dispatchJob(jobId, config);
     expect(await job(jobId)).toMatchObject({
-      status: 'failed', error: "Its agent, Ada workstation, didn't take it within 24 hours: check it's running and connected, then retry",
+      status: 'failed', error: "Its runner, Ada workstation, didn't take it within 24 hours: check it's running and connected, then retry",
     });
     expect((await call('POST', `/projects/p1/jobs/${jobId}/retry`, { user: 'eli' })).status).toBe(202);
     expect((await poll(token)).body.job.jobId).toBe(jobId);

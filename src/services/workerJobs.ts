@@ -10,7 +10,7 @@ import { archiveCurrentVersion, findVersion, recordFirstVersion, versionsCollect
 import { createJob, getJob, notify } from './jobQueue';
 import { jobStore } from './jobStore';
 import { assertPublicEndpoint, availableWorkers, PrivateEndpointError, resolveWorker, ResolvedWorker, STORAGE_CATEGORIES, WorkerError } from './workers';
-import { AGENT_WAIT_MS, agentSeen, agentTimeoutSeconds, Declaration, WorkerAgentRecord, wakeAgent } from './workerAgents';
+import { RUNNER_WAIT_MS, runnerSeen, runnerTimeoutSeconds, Declaration, WorkerRunnerRecord, wakeRunner } from './workerRunners';
 
 // A worker's job, from start to end (the README has the contract a worker follows):
 //
@@ -25,8 +25,8 @@ import { AGENT_WAIT_MS, agentSeen, agentTimeoutSeconds, Declaration, WorkerAgent
 // A job that can't be sent, or that its worker doesn't finish in time, is sent again (up to
 // workerOptions.maxAttempts); then it fails, with its error, and can be retried by hand.
 //
-// An agent's job isn't sent: it waits, queued, for its agent to ask for it (see takeAgentJob),
-// and is handed to it as step 2 would send it; the rest is the same. One its agent doesn't take
+// A runner's job isn't sent: it waits, queued, for its runner to ask for it (see takeRunnerJob),
+// and is handed to it as step 2 would send it; the rest is the same. One its runner doesn't take
 // within 24 hours fails.
 
 export const WORKER_CALLBACK_PATH = '/worker-jobs';
@@ -85,10 +85,10 @@ export async function enqueueWorkerJob(
   if (typeof request.assetId !== 'string' || !request.assetId) throw new WorkerError('assetId is required');
   const ref = request.worker as { source?: unknown; id?: unknown } | undefined;
   if (!ref || typeof ref.id !== 'string' || typeof ref.source !== 'string') {
-    throw new WorkerError("worker is required: { source: 'builtin' | 'project' | 'agent', id }");
+    throw new WorkerError("worker is required: { source: 'builtin' | 'project' | 'runner', id }");
   }
   const worker = await resolveWorker(project, { source: ref.source, id: ref.id }, auth, config);
-  if (worker.ref.source === 'agent' && !worker.kinds.length) {
+  if (worker.ref.source === 'runner' && !worker.kinds.length) {
     throw new WorkerError(`${worker.ref.name} hasn't said yet what it does: start it, so it connects`, 409);
   }
   if (typeof request.kind !== 'string' || !worker.kinds.includes(request.kind)) {
@@ -158,13 +158,13 @@ export async function retryWorkerJob(jobId: string, config: RouterConfig): Promi
 
 // ── Sending a job to its worker ──
 
-// Until when a job queued now waits for its agent to take it (only an agent's job waits).
-const waitUntil = () => new Date(Date.now() + AGENT_WAIT_MS);
-const isAgentJob = (job: Pick<JobRecord, 'worker'>) => job.worker?.source === 'agent';
+// Until when a job queued now waits for its runner to take it (only a runner's job waits).
+const waitUntil = () => new Date(Date.now() + RUNNER_WAIT_MS);
+const isRunnerJob = (job: Pick<JobRecord, 'worker'>) => job.worker?.source === 'runner';
 
 const kick = (jobId: string, config: RouterConfig, job?: JobRecord) => {
-  // An agent's: its agent's polls waiting here are woken; it's not sent.
-  if (job && isAgentJob(job)) return wakeAgent(job.worker!.id);
+  // A runner's: its runner's polls waiting here are woken; it's not sent.
+  if (job && isRunnerJob(job)) return wakeRunner(job.worker!.id);
   setImmediate(() => { dispatchJob(jobId, config).catch(err => console.error('❌ StreamBy workers: dispatch failed:', err?.message ?? err)); });
 };
 
@@ -174,13 +174,13 @@ const retryDelay = (attempts: number) => RETRY_BASE_MS * 2 ** Math.max(0, attemp
 async function attemptFailed(job: JobRecord, error: string): Promise<void> {
   const attempts = job.attempts ?? 1;
   const left = attempts < (job.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
-  // An agent's is back in line at once, for its agent to take again when it asks.
-  const next = isAgentJob(job) ? new Date() : new Date(Date.now() + retryDelay(attempts));
+  // A runner's is back in line at once, for its runner to take again when it asks.
+  const next = isRunnerJob(job) ? new Date() : new Date(Date.now() + retryDelay(attempts));
   const updated = await jobStore().update(job.jobId, left
     ? { status: 'pending', stage: 'retrying', error, nextAttemptAt: next, waitUntil: waitUntil(), leaseUntil: null, callbackHash: null, upload: null, updatedAt: new Date() }
     : { status: 'failed', stage: 'failed', error, leaseUntil: null, callbackHash: null, upload: null, updatedAt: new Date() });
   if (updated) notify(updated);
-  if (updated && left && isAgentJob(updated)) wakeAgent(updated.worker!.id);
+  if (updated && left && isRunnerJob(updated)) wakeRunner(updated.worker!.id);
 }
 
 /**
@@ -199,12 +199,12 @@ export async function dispatchJob(jobId: string, config: RouterConfig): Promise<
     if (timedOut) await attemptFailed(timedOut, "The worker didn't finish in time");
     return;
   }
-  // An agent's isn't sent: it fails only when it waited for its agent too long.
-  if (isAgentJob(current)) {
+  // A runner's isn't sent: it fails only when it waited for its runner too long.
+  if (isRunnerJob(current)) {
     if (current.status !== 'pending' || !current.waitUntil || new Date(current.waitUntil) > now) return;
     const expired = await jobStore().claim(jobId, ['pending'], {
       status: 'failed', stage: 'failed', updatedAt: now,
-      error: `Its agent, ${current.worker!.name}, didn't take it within 24 hours: check it's running and connected, then retry`,
+      error: `Its runner, ${current.worker!.name}, didn't take it within 24 hours: check it's running and connected, then retry`,
     });
     if (expired) notify(expired);
     return;
@@ -294,25 +294,25 @@ async function assignment(job: JobRecord, project: any, fileDoc: any, token: str
   };
 }
 
-// ── An agent asking for a job ──
+// ── A runner asking for a job ──
 
 /**
- * The oldest of an agent's queued jobs it can do now (it declares the job's kind, and its
+ * The oldest of a runner's queued jobs it can do now (it declares the job's kind, and its
  * asset's category), handed to it: its assignment, as a worker is sent one. None, if there's
  * none. A job it may no longer be sent (its owner left the project, it's not shared there
  * anymore) fails, saying why.
  */
-export async function takeAgentJob(agent: WorkerAgentRecord, declared: Declaration, callbackBase: string, config: RouterConfig) {
+export async function takeRunnerJob(runner: WorkerRunnerRecord, declared: Declaration, callbackBase: string, config: RouterConfig) {
   const now = new Date();
-  const queued = (await jobStore().ofAgent(agent.id, ['pending'], 50))
-    .filter(job => !job.nextAttemptAt || new Date(job.nextAttemptAt) <= now)
-    .filter(job => declared.kinds.includes(job.kind ?? ''));
+  // Only those of a kind it declares now, asked of the store: old ones it can't do don't hide
+  // newer ones it can. (Its asset's category is checked below, one by one.)
+  const queued = declared.kinds.length ? await jobStore().queuedForRunner(runner.id, declared.kinds, now, 50) : [];
   for (const current of queued) {
     const project = await findProject(current.projectId);
     const fileDoc = project && await filesCollection()?.findOne({ fileId: current.assetId, projectId: current.projectId });
     try {
       if (!project) throw new WorkerError('Project not found', 404);
-      // As whoever asked for it: it's still theirs to send this agent.
+      // As whoever asked for it: it's still theirs to send this runner.
       await resolveWorker(project, current.worker as WorkerRef, authOf(current), config);
       if (!fileDoc) throw new WorkerError('Asset not found', 404);
     } catch (err) {
@@ -325,7 +325,7 @@ export async function takeAgentJob(agent: WorkerAgentRecord, declared: Declarati
     if (!declared.categories.includes(fileDoc.category)) continue;
 
     const token = crypto.randomBytes(32).toString('base64url');
-    const timeoutSeconds = declared.timeoutSeconds ?? agentTimeoutSeconds(agent);
+    const timeoutSeconds = declared.timeoutSeconds ?? runnerTimeoutSeconds(runner);
     const job = await jobStore().claim(current.jobId, ['pending'], {
       status: 'processing', stage: 'accepted', attempts: (current.attempts ?? 0) + 1, callbackHash: hashOf(token),
       leaseUntil: new Date(Date.now() + timeoutSeconds * 1000), nextAttemptAt: null, updatedAt: new Date(),
@@ -341,8 +341,8 @@ export async function takeAgentJob(agent: WorkerAgentRecord, declared: Declarati
   return null;
 }
 
-/** A job handed to an agent that left before it got it: back in line, as if never taken. */
-export async function returnAgentJob(jobId: string, token: string): Promise<void> {
+/** A job handed to a runner that left before it got it: back in line, as if never taken. */
+export async function returnRunnerJob(jobId: string, token: string): Promise<void> {
   const job = await jobStore().get(jobId);
   if (!job) return;
   const back = await jobStore().claim(jobId, ['processing'], {
@@ -352,11 +352,11 @@ export async function returnAgentJob(jobId: string, token: string): Promise<void
   if (back) notify(back);
 }
 
-/** A revoked agent's jobs, queued or at work: failed, saying so. */
-export async function failAgentJobs(agentId: string, config: RouterConfig): Promise<void> {
-  for (const job of await jobStore().ofAgent(agentId, ['pending', 'processing'], 500)) {
+/** A revoked runner's jobs, queued or at work: failed, saying so. */
+export async function failRunnerJobs(runnerId: string, config: RouterConfig): Promise<void> {
+  for (const job of await jobStore().ofRunner(runnerId, ['pending', 'processing'], 500)) {
     const failed = await jobStore().claim(job.jobId, ['pending', 'processing'], {
-      status: 'failed', stage: 'failed', error: 'Its agent was revoked', leaseUntil: null, callbackHash: null, updatedAt: new Date(),
+      status: 'failed', stage: 'failed', error: 'Its runner was revoked', leaseUntil: null, callbackHash: null, updatedAt: new Date(),
     });
     if (failed) { await discardUpload(job, config).catch(() => {}); notify(failed); }
   }
@@ -390,8 +390,8 @@ export async function authorizeCallback(jobId: string, authorization: string | u
     throw new WorkerError('Invalid job token', 401);
   }
   if (job.status !== 'processing') throw new WorkerError(`The job is ${job.status}`, 409);
-  // An agent calling back about its job is at work: it's online.
-  if (isAgentJob(job)) await agentSeen(job.worker!.id);
+  // A runner calling back about its job is at work: it's online.
+  if (isRunnerJob(job)) await runnerSeen(job.worker!.id);
   return job;
 }
 

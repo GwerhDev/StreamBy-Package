@@ -469,7 +469,7 @@ export const TOOLS = [
   // ── Processing (workers) ──
   tool({
     name: 'list_workers', title: 'List workers', permissions: ['project:read'],
-    description: "The processing workers a project can use: the host's, the project's own, and the agents shared with it (each one's id, source, what it does — its kinds — and the asset categories it takes; an agent's, whether it's online). They show in the project's Workers settings.",
+    description: "The processing workers a project can use: the host's, the project's own, and the runners shared with it (each one's id, source, what it does — its kinds — and the asset categories it takes; a runner's, whether it's online). They show in the project's Workers settings.",
     input: { projectId },
     projectOf: byProject,
     call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/workers` }),
@@ -477,12 +477,12 @@ export const TOOLS = [
   }),
   tool({
     name: 'process_asset', title: 'Process an asset', permissions: ['jobs:run'], write: true,
-    description: "Asks a worker to process an asset (or one of its versions): an external worker, the host's or the project's, or an agent shared with the project (list_workers; an agent's job waits for it if it's offline), does what its kinds say, e.g. optimize a glTF or make a video's thumbnail; its profile is the worker's own options. The result is kept as a new asset derived from it (resultMode 'derived', the default: the original is untouched) or as the asset's new version ('version': its URL then serves the result; not for a result of another category, such as a video's thumbnail, an image). It runs in the background: follow it with get_job or list_jobs; it shows in the file's Jobs tab, in Storage.",
+    description: "Asks a worker to process an asset (or one of its versions): an external worker, the host's or the project's, or a runner shared with the project (list_workers; a runner's job waits for it if it's offline), does what its kinds say, e.g. optimize a glTF or make a video's thumbnail; its profile is the worker's own options. The result is kept as a new asset derived from it (resultMode 'derived', the default: the original is untouched) or as the asset's new version ('version': its URL then serves the result; not for a result of another category, such as a video's thumbnail, an image). It runs in the background: follow it with get_job or list_jobs; it shows in the file's Jobs tab, in Storage.",
     input: {
       projectId,
       assetId: id('asset'),
       versionId: z.string().optional().describe('A version (list_asset_versions); the latest if not given'),
-      worker: z.object({ source: z.enum(['builtin', 'project', 'agent']), id: z.string().min(1) }).describe('A worker, from list_workers'),
+      worker: z.object({ source: z.enum(['builtin', 'project', 'runner']), id: z.string().min(1) }).describe('A worker, from list_workers'),
       kind: z.string().min(1).describe("What it should do: one of the worker's kinds"),
       profile: z.record(z.string(), z.unknown()).optional().describe("Options for the worker (e.g. { \"textureFormat\": \"ktx2\" })"),
       resultMode: z.enum(['derived', 'version']).optional(),
