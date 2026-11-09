@@ -67,16 +67,31 @@ export class S3Adapter implements StorageAdapter {
     return await getSignedUrl(this.s3, command, { expiresIn: 3600 });
   }
 
-  async getPresignedProjectImageUrl(projectId: string): Promise<any> {
-    const key = `${projectId}/project-image`;
+  // Where to upload a project's image. The bucket is private: it's read through StreamBy's
+  // image route, never by a URL of the bucket.
+  async getPresignedProjectImageUrl(projectId: string): Promise<{ url: string }> {
     const command = new PutObjectCommand({
       Bucket: this.bucket,
-      Key: key,
+      Key: `${projectId}/project-image`,
       ContentType: 'image/jpeg',
     });
-    const url = await getSignedUrl(this.s3, command, { expiresIn: 3600 });
-    const publicUrl = `https://${this.bucket}.s3.amazonaws.com/${key}`;
-    return { url, publicUrl };
+    return { url: await getSignedUrl(this.s3, command, { expiresIn: 3600 }) };
+  }
+
+  // The direct URLs of this bucket in a text (virtual-hosted or path style, with a region or
+  // without, signed or not), and the key each one is of, decoded.
+  storageUrlsIn(text: string): { url: string; key: string }[] {
+    const bucket = this.bucket.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const host = '(?:s3(?:[.-][a-z0-9-]+)?\\.amazonaws\\.com)';
+    const pattern = new RegExp(
+      `https?://(?:${bucket}\\.${host}/|${host}/${bucket}/)([^\\s"'<>()\\\\?#]+)(?:\\?[^\\s"'<>()\\\\#]*)?`, 'g');
+    const found: { url: string; key: string }[] = [];
+    for (const match of text.matchAll(pattern)) {
+      let key = match[1];
+      try { key = decodeURIComponent(key); } catch { /* left as it is */ }
+      found.push({ url: match[0], key });
+    }
+    return found;
   }
 
   async getPresignedGetUrl(key: string, expiresIn = 86400, downloadName?: string, options: { stable?: boolean; cacheControl?: string } = {}): Promise<string> {

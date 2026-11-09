@@ -19,6 +19,7 @@ import { tokenAllows } from '../../services/auth';
 import { StorageCategory, VALID_CATEGORIES, validateContentType } from '../../utils/assetCategories';
 import { afterGateChange } from './deliverable';
 import { checksumHeaders, declaredSha256 } from '../../utils/contentHash';
+import { newProjectImageUrl, publicBaseOf } from '../../services/storageReferences';
 
 // The headers an upload is sent with: its declared hash too, for the storage to check it.
 const uploadHeaders = (contentType: string, sha256: string | undefined) =>
@@ -89,8 +90,10 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Permission denied' });
 
-      const response = await getPresignedProjectImageUrl(adapter, projectId);
-      res.status(200).json({ ...response, message: 'Presigned URL generated successfully' });
+      // Where to upload it, and what to save as the project's image: its route (with a version of
+      // its own), never a URL of the bucket.
+      const { url } = await getPresignedProjectImageUrl(adapter, projectId);
+      res.status(200).json({ url, imageUrl: newProjectImageUrl(publicBaseOf(req, config), projectId), message: 'Presigned URL generated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate presigned URL', details: err.message });
     }

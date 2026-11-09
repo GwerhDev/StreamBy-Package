@@ -8,12 +8,14 @@ import { wwwAuthenticate } from './oauthTokens';
 
 // The routes open without a session, read: a project's public export
 // (GET /:projectId/export/:exportName, see routes/export), its catalog (…/catalog.json and
-// …/catalog.hash), and the content its catalog links to (GET /:projectId/content/<sha256>).
+// …/catalog.hash), the content its catalog links to (GET /:projectId/content/<sha256>), and the
+// project's image (GET /:projectId/image).
 // Exactly those paths -- not any path that has an "export" segment somewhere.
 const PUBLIC_PATHS = [
   /^\/[^/]+\/export\/[^/]+\/?$/,
   /^\/[^/]+\/export\/[^/]+\/catalog\.(?:json|hash)$/,
   /^\/[^/]+\/content\/[0-9a-f]{64}(?:\.[a-z0-9]{1,16})?$/,
+  /^\/[^/]+\/image$/,
 ];
 const READ_METHODS = ['GET', 'HEAD', 'OPTIONS'];
 

@@ -12,6 +12,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { Pool } from 'pg';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 import { buildCatalog, CONTENT_NAME, exclusionMessage, IMMUTABLE_CACHE } from '../../services/deliverableCatalog';
+import { projectImageKey, publicBaseOf, resolveStorageReferences } from '../../services/storageReferences';
 
 export const DEFAULT_NODE_SCHEMA = {
   nodes: [
@@ -430,7 +431,7 @@ export function exportRouter(config: StreamByConfig): Router {
   const contentUrlFor = (req: Request) => (key: string) => {
     if (config.contentBaseUrl) return `${config.contentBaseUrl.replace(/\/+$/, '')}/${key}`;
     const [projectId, , name] = key.split('/');
-    return `${req.protocol}://${req.get('host')}${req.baseUrl}/${projectId}/content/${name}`;
+    return `${publicBaseOf(req, config)}/${projectId}/content/${name}`;
   };
 
   const publicCatalog = async (req: Request, res: Response) => {
@@ -481,6 +482,23 @@ export function exportRouter(config: StreamByConfig): Router {
     }
   });
 
+  // A project's image: a redirect to a signed URL of it (stable within the hour), as the content
+  // route does; the bucket is never read by a URL of its own. Open, as project images always were.
+  router.get('/:projectId/image', async (req: Request, res: Response) => {
+    try {
+      const project = await Project.findOne({ _id: req.params.projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!adapter?.contentInfo || !adapter.getPresignedGetUrl) return res.status(501).json({ message: 'The storage cannot serve project images' });
+      const key = projectImageKey(project, adapter) ?? `${req.params.projectId}/project-image`;
+      if (!(await adapter.contentInfo(key))) return res.status(404).json({ message: 'This project has no image' });
+      const url = await adapter.getPresignedGetUrl(key, 3600, undefined, { stable: true, cacheControl: 'public, max-age=3600' });
+      res.setHeader('Cache-Control', 'public, max-age=600');
+      res.redirect(302, url);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to serve the project's image", details: err.message });
+    }
+  });
+
   // The catalog as the export's editors see it: with the deliverables left out of it, and why.
   router.get('/projects/:id/exports/:export_id/catalog', async (req: Request, res: Response) => {
     try {
@@ -509,7 +527,7 @@ export function exportRouter(config: StreamByConfig): Router {
       if (exportMetadata.nodeSchema) {
         // Read without a session: only the nodes that read data run (see executeExport).
         data = await executeExport(exportMetadata.nodeSchema, project, config, { public: true });
-        return res.json(data ?? null);
+        return res.json(await resolveStorageReferences(data ?? null, project, adapter));
       }
 
       // Legacy path: raw JSON or external API export
@@ -563,7 +581,7 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(501).json({ message: 'SQL public exports not yet implemented' });
       }
 
-      res.json(data ?? null);
+      res.json(await resolveStorageReferences(data ?? null, project, adapter));
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch public export data', details: err.message });
     }

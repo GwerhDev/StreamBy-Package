@@ -138,8 +138,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(exportRouter({ ...config, adapter }));
   router.use(memberRouter(config));
   router.use(teamRouter(config));
-  router.use(storageRouter(config));
-  router.use(projectRouter(config));
+  router.use(storageRouter({ ...config, adapter }));
+  router.use(projectRouter({ ...config, adapter }));
   router.use(databaseRouter(config));
   router.use(connectionRouter(config));
   router.use(dbConnectionRouter(config));

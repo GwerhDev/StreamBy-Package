@@ -47,7 +47,10 @@ export interface StorageAdapter {
   deleteProjectImage: (projectId: string) => Promise<any>;
   deleteProjectDirectory: (projectId: string) => Promise<any>;
   getPresignedUrl?: (contentType: string, projectId: string) => Promise<any>;
-  getPresignedProjectImageUrl?: (projectId: string) => Promise<any>;
+  getPresignedProjectImageUrl?: (projectId: string) => Promise<{ url: string }>;
+  // The direct URLs of this storage in a text, and the key each one is of (decoded): what
+  // StreamBy answers in their place, signed (see services/storageReferences).
+  storageUrlsIn?: (text: string) => { url: string; key: string }[];
   // expiresIn: seconds the URL works (the adapter's default if not given). sha256 (hex): the
   // upload is refused unless its bytes have that hash, and the hash is kept with the file
   // (the upload sends it, see utils/contentHash's checksumHeaders).
@@ -182,6 +185,11 @@ export interface StreamByConfig {
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
   adapter?: StorageAdapter;
+  // Where this router is reached from outside (e.g. https://api.example.com/streamby): the URLs
+  // it answers to its own routes (a project's image, a catalog's content) are built on it.
+  // Default: the request's protocol, host and mount path (behind a proxy, set it, or trust the
+  // proxy in Express, or they're http://).
+  publicBaseUrl?: string;
   // Where the default storage's files are served publicly (a CDN in front of its bucket): an
   // export's catalog links its deliverables there (`<contentBaseUrl>/<key>`). Without it, they
   // are linked to StreamBy's content route, which redirects to the storage.

@@ -84,6 +84,33 @@ server.listen(3000);
 
 ---
 
+## 🔒 A private bucket
+
+StreamBy's storage bucket needs no public read: nothing reads it by a URL of the bucket.
+
+- **A project's image** is served at `GET /:projectId/image` (open, without a session): a
+  redirect to a signed URL of it, the same one all hour. Every answer that carries a project's
+  `image` answers that route (with `?v=`, a new image being a new URL), an old project's stored
+  bucket URL included; an external URL is answered as it is. `GET /upload-project-image-url/:id`
+  answers where to upload it (`url`) and what to save as the project's image (`imageUrl`).
+- **A public export** answers a signed URL (stable within the hour, working a day) in place of
+  each direct URL of the project's own storage in its data (any form of the bucket's URLs,
+  URL-encoded keys too, and inside text such as HTML or Markdown): only keys under the project's
+  prefix; another project's, another bucket's and external URLs are left as they are. Existing
+  exports need no change.
+- **An asset referred to** as `streamby://asset/<fileId>` in an export's data (what StreamBy-UI's
+  editor inserts) is answered as a signed URL of its current version: a new version needs no
+  edit of the export. One of another project, or in another storage connection, is left as it is.
+
+URLs StreamBy answers to its own routes are built on `publicBaseUrl` (e.g.
+`https://api.example.com/streamby`); without it, on the request's protocol and host, which behind
+a proxy is `http://` unless Express trusts the proxy.
+
+A browser that fetches with CORS (a `fetch`, a GLTFLoader, `crossorigin` images) and follows a
+redirect to another origin sends `Origin: null` to it: for the image and content routes to work
+that way, the bucket's CORS has to allow it, or `contentBaseUrl` has to point at a CDN in front of
+the bucket. A plain `<img>` is not affected.
+
 ## 🔑 Encryption and key rotation
 
 Credentials stored by StreamBy (connection secrets, export credentials, user integrations,
@@ -1032,7 +1059,7 @@ describe each area; this is the map.
 | Area | Routes |
 |---|---|
 | Session | `GET /auth`, `GET /user/subscription`, `GET /users/search?q=` |
-| Projects | `GET /projects` (`?archived=`), `GET /projects/explore`, `POST /projects/create`, `GET`, `PATCH`, `DELETE /projects/:id`, `GET /projects/:id/preview`, `PATCH /projects/:id/archive` and `/unarchive`, `POST /projects/:id/image`, `GET` and `PATCH /projects/:id/origins`, `GET` and `PUT /projects/:id/permissions`, `GET /projects/:id/dependents/:kind/:resourceId` |
+| Projects | `GET /projects` (`?archived=`), `GET /projects/explore`, `POST /projects/create`, `GET`, `PATCH`, `DELETE /projects/:id`, `GET /projects/:id/preview`, `GET /:projectId/image` (its image, open), `PATCH /projects/:id/archive` and `/unarchive`, `POST /projects/:id/image`, `GET` and `PATCH /projects/:id/origins`, `GET` and `PUT /projects/:id/permissions`, `GET /projects/:id/dependents/:kind/:resourceId` |
 | Members and teams | `GET`, `POST /projects/:id/members`, `PATCH`, `DELETE /projects/:id/members/:userId` (and `/accept`, `/approve`, `/reject`), `POST /projects/:id/request-join`, `GET`, `POST /projects/:id/teams`, `PATCH`, `DELETE /projects/:id/teams/:teamId` |
 | Integrations | `GET`, `POST /user/integrations`, `PATCH`, `DELETE /user/integrations/:id` (and `/dependents`), `GET /user/integrations/oauth/:provider/start` and `/callback`; a project's: `GET`, `POST /projects/:id/integrations`, `DELETE /projects/:id/integrations/:integrationId` |
 | Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `GET /databases`, `GET /storages` |

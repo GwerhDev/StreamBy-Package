@@ -13,6 +13,7 @@ import { addProjectToApiToken, deleteProjectApiTokens } from '../../services/api
 import { deleteProjectRunnerShares } from '../../services/workerRunners';
 import { deleteProductionData } from '../../services/production';
 import { deleteTeamsOf } from '../../services/teams';
+import { projectImageUrl, publicBaseOf } from '../../services/storageReferences';
 import { deletePermissionsOf, readProjectPermissions, setProjectPermissions, ROLE_ACTIONS, APP_PERMISSIONS } from '../../services/projectPermissions';
 import { jobStore } from '../../services/jobStore';
 import { documentStore } from '../../services/documents';
@@ -21,25 +22,30 @@ export function projectRouter(config: StreamByConfig): Router {
 
   const Project = getModel('projects');
 
-  const mapProjectToResponseFormat = (project: any, userId: string) => {
+  // A project's image as it's answered: its image route, never the bucket's URL (see
+  // storageReferences). Built on the request when no publicBaseUrl is set.
+  const imageOf = (req: Request, project: any) => projectImageUrl(project, publicBaseOf(req, config), config.adapter);
+  const present = (req: Request, project: any) => ({ ...sanitizeProject(project), image: imageOf(req, project) });
+
+  const mapProjectToResponseFormat = (req: Request, project: any, userId: string) => {
     const currentUserMember = project.members?.find((member: any) => member.userId === userId);
     return {
       id: project._id || project.id,
       dbType: project.dbType,
       name: project.name,
-      image: project.image || '',
+      image: imageOf(req, project),
       archived: currentUserMember ? currentUserMember.archived || false : false,
     };
   };
 
   // The projects someone is an active member of, as the routes that change one answer them: read
   // by their memberships, never all of them.
-  const activeProjectsOf = async (userId: string) => (await Project.find({ memberUserId: String(userId) }))
+  const activeProjectsOf = async (req: Request, userId: string) => (await Project.find({ memberUserId: String(userId) }))
     .filter(project => {
       const currentUserMember = project.members?.find((m: any) => m.userId?.toString() === userId?.toString());
       return !!currentUserMember && currentUserMember.status === 'active';
     })
-    .map(project => mapProjectToResponseFormat(project, userId));
+    .map(project => mapProjectToResponseFormat(req, project, userId));
 
   router.get('/projects', async (req: Request, res: Response) => {
     try {
@@ -65,7 +71,7 @@ export function projectRouter(config: StreamByConfig): Router {
           }
           return true;
         })
-        .map(project => mapProjectToResponseFormat(project, auth.userId));
+        .map(project => mapProjectToResponseFormat(req, project, auth.userId));
       res.json({ projects, message: 'Projects listed successfully' });
     } catch (err: any) {
       console.error('Error in /projects endpoint:', err);
@@ -84,7 +90,7 @@ export function projectRouter(config: StreamByConfig): Router {
           id: p._id || p.id,
           name: p.name,
           description: p.description || '',
-          image: p.image || '',
+          image: imageOf(req, p),
           memberCount: (p.members || []).filter((m: any) => m.status === 'active').length,
           isMember: (p.members || []).some((m: any) => m.userId?.toString() === auth.userId && m.status === 'active'),
           hasPendingRequest: (p.members || []).some((m: any) => m.userId?.toString() === auth.userId && m.status === 'pending'),
@@ -163,7 +169,7 @@ export function projectRouter(config: StreamByConfig): Router {
         if (stamped) newProject = stamped;
       }
 
-      const projects = await activeProjectsOf(auth.userId);
+      const projects = await activeProjectsOf(req, auth.userId);
       res.status(200).json({ success: true, projects: projects, projectId: newProject._id || newProject.id, message: 'Project created successfully' });
     } catch (err: any) {
       console.error('Error creating project:', err);
@@ -192,7 +198,7 @@ export function projectRouter(config: StreamByConfig): Router {
           id: project._id || project.id,
           name: project.name,
           description: project.description || '',
-          image: project.image || '',
+          image: imageOf(req, project),
           dbType: project.dbType,
           members: (project.members || [])
             .filter((m: any) => !m.archived)
@@ -223,7 +229,7 @@ export function projectRouter(config: StreamByConfig): Router {
 
       const exports = exportSummaries(project.exports);
 
-      const sanitized = sanitizeProject({ ...project, id: project._id || project.id, _id: undefined, connections: project.connections || [], exports });
+      const sanitized = present(req, { ...project, id: project._id || project.id, _id: undefined, connections: project.connections || [], exports });
       res.json({ project: sanitized, message: 'Project fetched successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch project', details: err.message });
@@ -255,7 +261,7 @@ export function projectRouter(config: StreamByConfig): Router {
       if (!updated) {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
-      const projects = await activeProjectsOf(auth.userId);
+      const projects = await activeProjectsOf(req, auth.userId);
 
       res.status(200).json({ success: true, projects: projects, projectId: updated._id || updated.id, message: 'Project updated successfully' });
     } catch (err: any) {
@@ -289,7 +295,7 @@ export function projectRouter(config: StreamByConfig): Router {
       if (projectId) await jobStore().deleteProject(String(projectId));
       if (projectId) await documentStore().deleteProject(String(projectId));
 
-      const projects = await activeProjectsOf(auth.userId);
+      const projects = await activeProjectsOf(req, auth.userId);
 
       res.status(200).json({ success: true, projects: projects, message: 'Project deleted successfully' });
     } catch (err: any) {
@@ -357,7 +363,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       // The user's projects as they are now.
-      const projects = await activeProjectsOf(auth.userId);
+      const projects = await activeProjectsOf(req, auth.userId);
 
       res.status(200).json({ success: true, projects: projects, message: 'Project archived successfully' });
     } catch (err: any) {
@@ -396,7 +402,7 @@ export function projectRouter(config: StreamByConfig): Router {
       }
 
       // The user's projects as they are now.
-      const projects = await activeProjectsOf(auth.userId);
+      const projects = await activeProjectsOf(req, auth.userId);
 
 
       res.status(200).json({ success: true, projects: projects, message: 'Project unarchived successfully' });
@@ -431,7 +437,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
 
-      res.status(200).json({ success: true, project: sanitizeProject({ ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }), message: 'Project image updated successfully' });
+      res.status(200).json({ success: true, project: present(req, { ...updatedProject, id: updatedProject._id || updatedProject.id, _id: undefined }), message: 'Project image updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project image', details: err.message });
     }
@@ -473,7 +479,7 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
 
-      res.status(200).json({ success: true, project: sanitizeProject(updated), message: 'Project origins updated successfully' });
+      res.status(200).json({ success: true, project: present(req, updated), message: 'Project origins updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project origins', details: err.message });
     }
@@ -512,7 +518,7 @@ export function projectRouter(config: StreamByConfig): Router {
       const updated = await Project.findOne({ _id: projectId });
       if (!updated) return res.status(404).json({ message: 'Project not found or not updated' });
 
-      res.status(201).json({ data: result.connection, project: sanitizeProject(updated) });
+      res.status(201).json({ data: result.connection, project: present(req, updated) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to add integration', details: err.message });
     }
@@ -548,7 +554,7 @@ export function projectRouter(config: StreamByConfig): Router {
       await removeFromWorkflow(projectId, dbConn ? 'db' : storageConn ? 'storage' : 'service', gone.id);
       const updated = await Project.findOne({ _id: projectId });
 
-      res.status(200).json({ message: 'Integration removed', project: sanitizeProject(updated) });
+      res.status(200).json({ message: 'Integration removed', project: present(req, updated) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to remove integration', details: err.message });
     }
