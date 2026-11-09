@@ -2,6 +2,10 @@ import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, 
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3Config, StorageAdapter, StorageFileInfo } from '../../types';
 
+const STABLE_WINDOW_MS = 3600_000;
+// The longest an S3 signed URL works (SigV4).
+const MAX_SIGNED_SECONDS = 7 * 24 * 3600;
+
 export class S3Adapter implements StorageAdapter {
   private s3: S3Client;
   private bucket: string;
@@ -74,7 +78,21 @@ export class S3Adapter implements StorageAdapter {
     return { url, publicUrl };
   }
 
-  async getPresignedGetUrl(key: string, expiresIn = 86400, downloadName?: string): Promise<string> {
+  async getPresignedGetUrl(key: string, expiresIn = 86400, downloadName?: string, options: { stable?: boolean } = {}): Promise<string> {
+    if (options.stable) {
+      // Signed as of the start of the hour, and valid an hour longer: every request in the same
+      // hour gets the same URL, and a browser keeps (for up to an hour) what it downloaded with it.
+      const windowStart = Math.floor(Date.now() / STABLE_WINDOW_MS) * STABLE_WINDOW_MS;
+      const command = new GetObjectCommand({
+        Bucket: this.bucket, Key: key,
+        ...(downloadName ? { ResponseContentDisposition: contentDisposition(downloadName) } : {}),
+        ResponseCacheControl: `private, max-age=${Math.min(expiresIn, STABLE_WINDOW_MS / 1000)}`,
+      });
+      return await getSignedUrl(this.s3, command, {
+        signingDate: new Date(windowStart),
+        expiresIn: Math.min(expiresIn + STABLE_WINDOW_MS / 1000, MAX_SIGNED_SECONDS),
+      });
+    }
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: key,

@@ -1,3 +1,4 @@
+import { freshThumbnail, requestThumbnail } from '../../services/thumbnails';
 import { Router, Request, Response } from 'express';
 import { StreamByConfig, StorageAdapter, Auth, StorageConnection } from '../../types';
 import { deleteProjectImage } from '../../services/file';
@@ -278,7 +279,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find({ projectId }).sort({ createdAt: -1 }).limit(12).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter, signedUrlTtl(auth, config, 'download'))));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter, signedUrlTtl(auth, config, 'download'), { project, config })));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch latest files', details: err.message });
@@ -302,7 +303,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find({ projectId, category }).sort({ createdAt: -1 }).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter, signedUrlTtl(auth, config, 'download'))));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, adapter, signedUrlTtl(auth, config, 'download'), { project, config })));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list files', details: err.message });
@@ -430,7 +431,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find(connFilter(projectId, connId, project)).sort({ createdAt: -1 }).limit(12).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter, signedUrlTtl(auth, config, 'download'))));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter, signedUrlTtl(auth, config, 'download'), { project, config })));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to fetch latest files', details: err.message });
@@ -457,7 +458,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!collection) return res.status(500).json({ message: 'Database not available' });
 
       const files = await collection.find(connFilter(projectId, connId, project, { category })).sort({ createdAt: -1 }).toArray();
-      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter, signedUrlTtl(auth, config, 'download'))));
+      const data = await Promise.all(files.map(f => resolveFileUrl(f, connAdapter, signedUrlTtl(auth, config, 'download'), { project, config })));
       res.json({ data });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to list files', details: err.message });
@@ -875,11 +876,16 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   return router;
 }
 
-async function resolveFileUrl(file: any, adapter: StorageAdapter, expiresIn?: number): Promise<any> {
-  let url: string | null = null;
-  if (adapter.getPresignedGetUrl) {
-    try { url = await adapter.getPresignedGetUrl(file.storageKey, expiresIn); } catch { /* leave null */ }
-  }
+// A file as a list shows it: its URL, and its thumbnail's, signed alike for the hour (see the
+// S3 adapter), so a browser keeps what it downloaded. An image or a video without a thumbnail of
+// what it is now gets one made (see services/thumbnails).
+async function resolveFileUrl(file: any, adapter: StorageAdapter, expiresIn: number | undefined, ctx: { project: any; config: StreamByConfig }): Promise<any> {
+  const signed = async (key: string) => {
+    if (!adapter.getPresignedGetUrl) return null;
+    try { return await adapter.getPresignedGetUrl(key, expiresIn, undefined, { stable: true }); } catch { return null; }
+  };
+  const thumbnailKey = freshThumbnail(file);
+  if (!thumbnailKey) requestThumbnail(file, { ...ctx, adapter, signedUrl: signed });
   return {
     id: file.fileId,
     displayName: file.displayName,
@@ -889,7 +895,8 @@ async function resolveFileUrl(file: any, adapter: StorageAdapter, expiresIn?: nu
     uploadedBy: file.uploadedBy,
     createdAt: file.createdAt,
     folderId: file.folderId ?? null,
-    url,
+    url: await signed(file.storageKey),
+    thumbnailUrl: thumbnailKey ? await signed(thumbnailKey) : null,
   };
 }
 
@@ -916,7 +923,8 @@ function uploadRights(req: Request, res: Response): RightsValues | null | false 
 // Its record is the caller's to delete.
 async function deleteAsset(fileDoc: any, adapter: StorageAdapter): Promise<void> {
   const keys = await versionStorageKeys(fileDoc.projectId, fileDoc.fileId, fileDoc.storageKey);
-  if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key);
+  if (fileDoc.thumbnail?.storageKey) keys.push(fileDoc.thumbnail.storageKey);
+  if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key).catch(() => {});
   await deleteVersions(fileDoc.projectId, fileDoc.fileId);
   await deleteDeliverablesOf(fileDoc.projectId, { assetId: fileDoc.fileId });
   await deleteRightsOf(fileDoc.projectId, fileDoc.fileId);

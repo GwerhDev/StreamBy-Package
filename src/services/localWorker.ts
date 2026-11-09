@@ -44,7 +44,7 @@ export function localWorkerConfig(config: StreamByConfig): WorkerConfig | null {
   };
 }
 
-interface Input { bytes: Buffer; fileName: string; contentType: string; category: StorageCategoryName }
+export interface Input { bytes: Buffer; fileName: string; contentType: string; category: StorageCategoryName }
 type Output =
   | { file: { bytes: Buffer; fileName: string; contentType: string; category: StorageCategoryName }; report: Record<string, unknown> }
   | { document: { title: string; content: string }; report: Record<string, unknown> };
@@ -61,7 +61,7 @@ const requireCategory = (input: Input, categories: StorageCategoryName[], what: 
 const ffmpegPath = (config: StreamByConfig) => (config.processing && config.processing.ffmpegPath) || 'ffmpeg';
 
 /** Runs FFmpeg on a file, in a folder of its own: the bytes of what it writes. */
-async function withFfmpeg(config: StreamByConfig, input: Input, args: (inFile: string, outFile: string) => string[], outName: string): Promise<Buffer> {
+export async function withFfmpeg(config: StreamByConfig, input: Input, args: (inFile: string, outFile: string) => string[], outName: string): Promise<Buffer> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'streamby-'));
   try {
     const inFile = path.join(dir, `in.${extOf(input.fileName) || 'bin'}`);

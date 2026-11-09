@@ -54,8 +54,9 @@ export interface StorageAdapter {
   deleteFile?: (key: string) => Promise<void>;
   // Copies a stored file to another key (to archive an asset's version before replacing it).
   copyFile?: (from: string, to: string) => Promise<void>;
-  // downloadName: the file is downloaded (not shown inline) with this name.
-  getPresignedGetUrl?: (key: string, expiresIn?: number, downloadName?: string) => Promise<string>;
+  // downloadName: the file is downloaded (not shown inline) with this name. stable: the same URL
+  // for every request in the same hour (see S3Adapter), for a browser to keep what it downloaded.
+  getPresignedGetUrl?: (key: string, expiresIn?: number, downloadName?: string, options?: { stable?: boolean }) => Promise<string>;
 }
 
 export interface FieldDefinition {

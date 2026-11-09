@@ -347,6 +347,20 @@ every client to send the same header): set it where the files are served, for ex
 `max-age` or `no-cache` on the CDN in front of the bucket, or invalidate the path when an asset
 is replaced.
 
+**What a list of files downloads.** A list's URLs (each file's `url`, and its `thumbnailUrl`)
+are signed as of the start of the hour, valid an hour longer than asked, and ask the storage to
+answer `Cache-Control: private, max-age=3600`: every list read in the same hour gets the same
+URLs, so a browser shows the files it already downloaded without downloading them again.
+
+An image or a video gets a **thumbnail** (a WebP up to 320 px wide, at `<key>.thumb.webp`
+beside it, never an asset of the project) the first time a list shows it, made in the background
+with StreamBy's own FFmpeg (see Processing; none with `processing: false`): the list answers at
+once with `thumbnailUrl: null`, and each member of the project gets an `assetThumbnailEvent`
+(`{ projectId, fileId, thumbnailUrl }`) when it's ready. A file replaced since gets a new one;
+one that couldn't be made (its file not uploaded yet, no FFmpeg) is tried again ten minutes
+later. Files uploaded before thumbnails existed get theirs the same way, as they're listed: the
+files themselves are never changed. A 3D model has none: its card loads the model.
+
 A **deliverable** is an asset, or one of its versions, delivered for a
 production shot or for an export; a shot or an export can have several, and the shot's panel
 in the UI shows them.
