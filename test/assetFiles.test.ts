@@ -46,7 +46,7 @@ const { resolveApiToken, createApiToken, API_TOKEN_PREFIX } = await import('../s
 // long they work. `put` and `get` stand for a client using them.
 const objects = new Map<string, string>();
 const deleted: string[] = [];
-const failures = { copy: false };
+const failures = { copy: false, delete: false };
 const adapter: Record<string, any> = {
   getPresignedUploadUrl: async (key: string, contentType: string, expiresIn?: number) =>
     `https://storage.test/put/${key}?type=${encodeURIComponent(contentType)}&expires=${expiresIn ?? 'default'}`,
@@ -56,7 +56,10 @@ const adapter: Record<string, any> = {
     if (failures.copy || !objects.has(from)) throw new Error('copy failed');
     objects.set(to, objects.get(from)!);
   },
-  deleteFile: async (key: string) => { deleted.push(key); objects.delete(key); },
+  deleteFile: async (key: string) => {
+    if (failures.delete) throw new Error('storage unavailable');
+    deleted.push(key); objects.delete(key);
+  },
 };
 const keyOf = (url: string) => new URL(url).pathname.replace(/^\/(put|get)\//, '');
 const put = (url: string, content: string) => objects.set(keyOf(url), content);
@@ -97,6 +100,7 @@ beforeEach(() => {
   deleted.length = 0;
   objects.clear();
   failures.copy = false;
+  failures.delete = false;
   for (const k of Object.keys(store)) delete store[k];
   store.projects = [{
     _id: 'p1', id: 'p1', name: 'Portfolio', dbType: 'sql',
@@ -306,6 +310,15 @@ it("deleting an asset deletes every key of its file (its own and its versions'),
   expect([...objects.keys()]).toEqual(['p1/3d-models/other.glb']);
   expect(mongo.db.docs('asset_versions')).toEqual([]);
   expect(mongo.db.docs('deliverables')).toEqual([]);
+});
+
+it("keeps an asset whose file the storage couldn't delete: never a record gone with its file left behind", async () => {
+  const first = (await uploadModel()).body;
+  put(first.url, 'v1');
+  failures.delete = true;
+  expect((await eli.delete(`/projects/p1/storage/files/${first.fileId}`)).status).toBe(500);
+  expect(mongo.db.docs('storage_files')).toEqual([expect.objectContaining({ fileId: first.fileId })]);
+  expect(objects.get(first.storageKey)).toBe('v1');
 });
 
 describe('from the MCP server', () => {

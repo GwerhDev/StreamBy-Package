@@ -920,7 +920,7 @@ function uploadRights(req: Request, res: Response): RightsValues | null | false 
 // Its record is the caller's to delete.
 async function deleteAsset(fileDoc: any, adapter: StorageAdapter): Promise<void> {
   const keys = await versionStorageKeys(fileDoc.projectId, fileDoc.fileId, fileDoc.storageKey);
-  if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key).catch(() => {});
+  if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key);
   await deleteVersions(fileDoc.projectId, fileDoc.fileId);
   await deleteDeliverablesOf(fileDoc.projectId, { assetId: fileDoc.fileId });
   await deleteRightsOf(fileDoc.projectId, fileDoc.fileId);
