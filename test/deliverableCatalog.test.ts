@@ -68,7 +68,7 @@ const adapter = {
   },
   getPresignedGetUrl: async (key: string, _expiresIn?: number, _name?: string, options: any = {}) =>
     `https://bucket.test/${key}?signed&cache=${encodeURIComponent(options.cacheControl ?? '')}`,
-  deleteFile: async () => {},
+  deleteFile: async (key: string) => { objects.delete(key); },
 };
 // The client's upload, as the URL it was given lets it: with the hash, if it declared one.
 const upload = (key: string, bytes: string) => {
@@ -84,7 +84,8 @@ const authProvider = async (req: any) => {
 const makeApp = (extra: object = {}) => {
   const app = express();
   app.use(express.json());
-  app.use('/streamby', createStreamByRouter({ storageProviders: [], adapter: adapter as any, databases: [{ id: 'pg', type: 'sql', main: true }], authProvider, ...extra }));
+  // The built-in storage is the adapter itself (an S3 provider would be a client of its own).
+  app.use('/streamby', createStreamByRouter({ storageProviders: [{ id: 'builtin-storage', type: 'gcs' } as any], adapter: adapter as any, databases: [{ id: 'pg', type: 'sql', main: true }], authProvider, ...extra }));
   return app;
 };
 const app = makeApp();
@@ -135,6 +136,7 @@ beforeEach(() => {
   store.projects = [{
     _id: 'p1', id: 'p1', name: 'World', dbType: 'sql', allowedOrigin: ['*'],
     exports: [{ id: 'e1', name: 'Site' }, { id: 'e2', name: 'Docs' }],
+    storageConnections: [{ id: 'c1', name: 'StreamBy', source: 'builtin', integrationId: 'builtin-storage' }],
     members: [{ userId: 'eli', role: 'editor', status: 'active' }, { userId: 'vic', role: 'viewer', status: 'active' }],
   }];
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -160,6 +162,24 @@ describe('an upload with its hash declared', () => {
     const plain = await eli.get(`${P}/storage/3d-models/upload-url?${new URLSearchParams({ fileName: 'rock.glb', contentType: 'model/gltf-binary' })}`);
     expect(plain.status).toBe(200);
     expect(plain.body).not.toHaveProperty('headers');
+  });
+
+  it("is the UI's too, through the project's built-in storage connection, and its asset is catalogued", async () => {
+    const C = `${P}/connections/storage/c1`;
+    const hex = sha('rock v1');
+    const made = await eli.get(`${C}/upload-url?${new URLSearchParams({ fileName: 'rock.glb', contentType: 'model/gltf-binary', category: '3d-models', sha256: hex })}`);
+    expect(made.status).toBe(200);
+    expect(made.body.headers).toEqual({ 'Content-Type': 'model/gltf-binary', 'x-amz-checksum-sha256': b64(hex) });
+    upload(made.body.storageKey, 'rock v1');
+    await deliver(made.body.fileId);
+    expect((await catalog()).entries).toEqual([expect.objectContaining({ assetId: made.body.fileId, hash: hex })]);
+
+    const replaced = await eli.get(`${C}/files/${made.body.fileId}/replace-url?${new URLSearchParams({ fileName: 'rock.glb', contentType: 'model/gltf-binary', sha256: sha('rock v2') })}`);
+    expect(replaced.status).toBe(200);
+    expect(replaced.body.headers['x-amz-checksum-sha256']).toBe(b64(sha('rock v2')));
+    upload(replaced.body.storageKey, 'rock v2');
+    expect((await catalog()).entries[0]).toMatchObject({ version: 2, hash: sha('rock v2') });
+    expect((await eli.get(`${C}/upload-url?${new URLSearchParams({ fileName: 'a.glb', contentType: 'model/gltf-binary', category: '3d-models', sha256: 'nope' })}`)).status).toBe(400);
   });
 
   it('of a new version is recorded on it', async () => {
@@ -296,6 +316,50 @@ describe('a catalogued content', () => {
   it("is not found if it wasn't catalogued, or isn't named by a hash", async () => {
     expect((await publicGet(`/p1/content/${sha('nothing')}.glb`)).status).toBe(404);
     expect(isPublicRoute('GET', '/p1/content/rock.glb')).toBe(false);
+  });
+});
+
+describe("a deleted asset's catalogued content", () => {
+  const remove = async (assetId: string) => expect((await request(app).delete(`/streamby${P}/storage/files/${assetId}`).set('x-test-user', 'eli')).status).toBe(200);
+  const served = async (hex: string) => (await publicGet(`/p1/content/${hex}.glb`)).status;
+
+  it('is deleted with it, every version of it, and no longer served', async () => {
+    const rock = await newAsset('rock.glb', 'rock v1');
+    await deliver(rock.assetId);
+    await catalog();
+    const res = await eli.get(`${P}/storage/files/${rock.assetId}/replace-url?${new URLSearchParams({ fileName: 'rock.glb', contentType: 'model/gltf-binary', sha256: sha('rock v2') })}`);
+    upload(res.body.storageKey, 'rock v2');
+    await catalog();
+    expect([await served(sha('rock v1')), await served(sha('rock v2'))]).toEqual([302, 302]);
+
+    await remove(rock.assetId);
+    expect(objects.has(`p1/content/${sha('rock v1')}.glb`)).toBe(false);
+    expect(objects.has(`p1/content/${sha('rock v2')}.glb`)).toBe(false);
+    expect([await served(sha('rock v1')), await served(sha('rock v2'))]).toEqual([404, 404]);
+    expect((await catalog()).entries).toEqual([]);
+  });
+
+  it('stays while another asset of the project has the same content', async () => {
+    const rock = await newAsset('rock.glb', 'same bytes');
+    const copy = await newAsset('rock-copy.glb', 'same bytes');
+    await deliver(rock.assetId); await deliver(copy.assetId);
+    expect((await catalog()).entries).toHaveLength(2);
+    const key = `p1/content/${sha('same bytes')}.glb`;
+
+    await remove(rock.assetId);
+    expect(objects.has(key)).toBe(true);
+    expect((await catalog()).entries.map((e: any) => e.assetId)).toEqual([copy.assetId]);
+    await remove(copy.assetId);
+    expect(objects.has(key)).toBe(false);
+  });
+
+  it("isn't touched when the asset was never catalogued", async () => {
+    const rock = await newAsset('rock.glb', 'rock');
+    await deliver(rock.assetId);
+    await catalog();
+    const other = await newAsset('other.glb', 'rock');
+    await remove(other.assetId);
+    expect(objects.has(`p1/content/${sha('rock')}.glb`)).toBe(true);
   });
 });
 

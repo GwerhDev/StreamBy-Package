@@ -11,7 +11,7 @@ import { resolveStorageAdapter } from '../../services/connectionResolver';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 import { signedUrlTtl } from '../../services/signedUrls';
-import { archiveCurrentVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions } from '../../services/assetVersions';
+import { archiveCurrentVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions, orphanedContentKeys } from '../../services/assetVersions';
 import { deleteDeliverablesOf } from '../../services/deliverables';
 import { broadcastRights, deleteRightsOf, rightsFromQuery, RightsValues, saveRights } from '../../services/rights';
 import { tokenAllows } from '../../services/auth';
@@ -55,6 +55,13 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
   // which no longer holds since builtin rows get their own id distinct from provider.id.
   function findStorageConn(project: any, connId: string): StorageConnection | undefined {
     return project.storageConnections?.find((c: StorageConnection) => c.id === connId);
+  }
+
+  // The sha256 an upload to a connection declares: kept (and the upload signed with it) only in
+  // the project's built-in storage, the one an export's catalog lists from; ignored in others.
+  function connSha256(req: Request, project: any, connId: string): string | undefined | false {
+    const sha256 = declaredSha256(req.query.sha256);
+    return sha256 && findStorageConn(project, connId)?.source !== 'builtin' ? undefined : sha256;
   }
 
   function connFilter(projectId: string, connId: string, project: any, extra?: Record<string, any>) {
@@ -386,6 +393,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      const sha256 = connSha256(req, project, connId);
+      if (sha256 === false) return res.status(400).json({ message: 'sha256 must be the file\'s SHA-256, in hex or base64' });
       const rights = uploadRights(req, res);
       if (rights === false) return;
 
@@ -410,6 +419,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
           contentType,
           uploadedBy: auth.userId,
           createdAt: new Date(),
+          ...(sha256 ? { sha256 } : {}),
         };
         await collection.insertOne(fileDoc);
         await recordFirstVersion(fileDoc);
@@ -417,8 +427,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       }
 
       const expiresIn = signedUrlTtl(auth, config, 'upload');
-      const url = await connAdapter.getPresignedUploadUrl(storageKey, contentType, expiresIn);
-      res.json({ url, fileId, storageKey, displayName: fileName, ...expiry(expiresIn) });
+      const url = await connAdapter.getPresignedUploadUrl(storageKey, contentType, expiresIn, sha256 ? { sha256 } : undefined);
+      res.json({ url, fileId, storageKey, displayName: fileName, ...uploadHeaders(contentType, sha256), ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate upload URL', details: err.message });
     }
@@ -493,6 +503,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
 
       const fileDoc = await collection.findOne(connFilter(projectId, connId, project, { fileId }));
       if (!fileDoc) return res.status(404).json({ message: 'File not found' });
+      const sha256 = connSha256(req, project, connId);
+      if (sha256 === false) return res.status(400).json({ message: 'sha256 must be the file\'s SHA-256, in hex or base64' });
 
       if (!validateContentType(contentType, fileName, fileDoc.category as StorageCategory)) {
         return res.status(400).json({ message: `File does not match category ${fileDoc.category}` });
@@ -509,18 +521,18 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!connAdapter.copyFile) return res.status(501).json({ message: 'Storage adapter cannot keep versions' });
       let version;
       try {
-        version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: auth.userId }, connAdapter.copyFile.bind(connAdapter));
+        version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: auth.userId, sha256: sha256 ?? null }, connAdapter.copyFile.bind(connAdapter));
       } catch (err: any) {
         return res.status(502).json({ message: 'Failed to archive the current version; nothing was replaced', details: err.message });
       }
       const expiresIn = signedUrlTtl(auth, config, 'upload');
-      const url = await connAdapter.getPresignedUploadUrl(fileDoc.storageKey, contentType, expiresIn);
+      const url = await connAdapter.getPresignedUploadUrl(fileDoc.storageKey, contentType, expiresIn, sha256 ? { sha256 } : undefined);
       await collection.updateOne(
         connFilter(projectId, connId, project, { fileId }),
-        { $set: { contentType, updatedAt: new Date() } },
+        { $set: { contentType, sha256: sha256 ?? null, updatedAt: new Date() } },
       );
 
-      res.json({ url, storageKey: fileDoc.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
+      res.json({ url, storageKey: fileDoc.storageKey, fileId, versionId: version.versionId, version: version.version, ...uploadHeaders(contentType, sha256), ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }
@@ -926,10 +938,14 @@ function uploadRights(req: Request, res: Response): RightsValues | null | false 
   return checked.values;
 }
 
-// An asset's files (every version), its versions, its deliverables and its license metadata.
+// An asset's files (every version, and the copies of them an export's catalog served that no
+// other asset's version shares), its versions, its deliverables and its license metadata.
 // Its record is the caller's to delete.
 async function deleteAsset(fileDoc: any, adapter: StorageAdapter): Promise<void> {
-  const keys = await versionStorageKeys(fileDoc.projectId, fileDoc.fileId, fileDoc.storageKey);
+  const keys = [
+    ...await versionStorageKeys(fileDoc.projectId, fileDoc.fileId, fileDoc.storageKey),
+    ...await orphanedContentKeys(fileDoc.projectId, fileDoc.fileId),
+  ];
   if (adapter.deleteFile) for (const key of keys) await adapter.deleteFile(key);
   await deleteVersions(fileDoc.projectId, fileDoc.fileId);
   await deleteDeliverablesOf(fileDoc.projectId, { assetId: fileDoc.fileId });

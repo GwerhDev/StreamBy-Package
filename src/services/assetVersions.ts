@@ -103,6 +103,20 @@ export async function versionStorageKeys(projectId: string, assetId: string, cur
   return [...new Set([...(currentKey ? [currentKey] : []), ...versions.map(v => v.storageKey)])];
 }
 
+/**
+ * The catalogued content keys (see deliverableCatalog) of an asset's versions -- or of only the
+ * ones given -- that no other version in the project records: the ones to delete with them.
+ * Two versions with the same bytes share a key, and it stays while one of them does.
+ */
+export async function orphanedContentKeys(projectId: string, assetId: string, versionIds?: string[]): Promise<string[]> {
+  const col = versionsCollection();
+  if (!col) return [];
+  const all = (await col.find({ projectId }).toArray()) as unknown as AssetVersion[];
+  const going = (v: AssetVersion) => v.assetId === assetId && (!versionIds || versionIds.includes(v.versionId));
+  const kept = new Set(all.filter(v => !going(v) && v.content?.key).map(v => v.content!.key));
+  return [...new Set(all.filter(v => going(v) && v.content?.key).map(v => v.content!.key))].filter(key => !kept.has(key));
+}
+
 /** Forgets an asset's versions (once their files are deleted). */
 export async function deleteVersions(projectId: string, assetId: string): Promise<void> {
   await versionsCollection()?.deleteMany({ projectId, assetId });

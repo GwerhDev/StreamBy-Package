@@ -430,7 +430,10 @@ hash (`<projectId>/content/<sha256><ext>`, served with
 `integrity` (Subresource Integrity) lets the build check it. The URL is StreamBy's
 `GET /:projectId/content/<sha256><ext>`, which redirects to the storage, or, with
 `contentBaseUrl` in the router's config (a CDN in front of the bucket), `<contentBaseUrl>/<key>`.
-The bucket's CORS has to allow the `x-amz-checksum-sha256` header for uploads from a browser.
+The bucket's CORS has to allow the `x-amz-checksum-sha256` header for uploads from a browser
+(StreamBy-UI declares the hash of every file it uploads). Deleting an asset deletes the content
+copies of its versions too, but those another version in the project shares (the same bytes):
+its content route answers 404 from then on.
 
 `GET /projects/:id/exports/:exportId/catalog` (the project's members) answers the same catalog and
 the deliverables left out of it, each with its `reason`: `blocked`, `no-hash` (uploaded without
