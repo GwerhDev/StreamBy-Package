@@ -20,7 +20,8 @@ export const publicBaseOf = (req: Request, config: Pick<StreamByConfig, 'publicB
   (config.publicBaseUrl ?? `${req.protocol}://${req.get('host')}${req.baseUrl}`).replace(/\/+$/, '');
 
 export const projectImagePath = (projectId: string) => `/${projectId}/image`;
-const imageKey = (projectId: string) => `${projectId}/project-image`;
+/** Where a project's own image is stored. */
+export const projectImageStorageKey = (projectId: string) => `${projectId}/project-image`;
 
 /**
  * The key a project's image is read from: its own (`<project>/project-image`), or the key of
@@ -31,7 +32,7 @@ export function projectImageKey(project: any, adapter: StorageAdapter | undefine
   const projectId = String(project?._id ?? project?.id ?? '');
   const stored: string = typeof project?.image === 'string' ? project.image.trim() : '';
   if (!projectId || !stored) return null;
-  if (stored.split('?')[0].endsWith(projectImagePath(projectId))) return imageKey(projectId);
+  if (stored.split('?')[0].endsWith(projectImagePath(projectId))) return projectImageStorageKey(projectId);
   const [found] = adapter?.storageUrlsIn?.(stored) ?? [];
   return found && found.key.startsWith(`${projectId}/`) ? found.key : null;
 }

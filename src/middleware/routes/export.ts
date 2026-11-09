@@ -12,7 +12,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import { Pool } from 'pg';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
 import { buildCatalog, CONTENT_NAME, exclusionMessage, IMMUTABLE_CACHE } from '../../services/deliverableCatalog';
-import { projectImageKey, publicBaseOf, resolveStorageReferences } from '../../services/storageReferences';
+import { projectImageKey, projectImageStorageKey, publicBaseOf, resolveStorageReferences } from '../../services/storageReferences';
 
 export const DEFAULT_NODE_SCHEMA = {
   nodes: [
@@ -489,7 +489,7 @@ export function exportRouter(config: StreamByConfig): Router {
       const project = await Project.findOne({ _id: req.params.projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!adapter?.contentInfo || !adapter.getPresignedGetUrl) return res.status(501).json({ message: 'The storage cannot serve project images' });
-      const key = projectImageKey(project, adapter) ?? `${req.params.projectId}/project-image`;
+      const key = projectImageKey(project, adapter) ?? projectImageStorageKey(req.params.projectId);
       if (!(await adapter.contentInfo(key))) return res.status(404).json({ message: 'This project has no image' });
       const url = await adapter.getPresignedGetUrl(key, 3600, undefined, { stable: true, cacheControl: 'public, max-age=3600' });
       res.setHeader('Cache-Control', 'public, max-age=600');
