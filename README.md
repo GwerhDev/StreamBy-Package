@@ -397,6 +397,47 @@ workflow (`nodes`, by node id). When something a gate reads changes (a review de
 asset's credits, a credits sheet, a file deleted, the workflow saved), each member gets a
 `deliverableGatesEvent` (`{ projectId }`) to read the states again.
 
+**An export's catalog.** A build (a game's, a site's) asks an export for its deliverables as
+Unity Addressables asks a content catalog: `GET /:projectId/export/:exportName/catalog.json`,
+open without a session for the export's allowed origins, as the export itself is:
+
+```json
+{
+  "formatVersion": 1,
+  "export": "Site",
+  "hash": "<sha256 of its entries>",
+  "entries": [
+    { "key": "rock.glb", "assetId": "…", "version": 2, "contentType": "model/gltf-binary",
+      "size": 48213, "hash": "<sha256, hex>", "integrity": "sha256-<base64>",
+      "url": "https://api.example.com/streamby/<projectId>/content/<sha256>.glb" }
+  ]
+}
+```
+
+`GET .../catalog.hash` answers its `hash` alone (text): a build reads it, and fetches the catalog
+only when it's not the one it has. It changes when an entry does (a deliverable added, removed,
+ready or blocked, a new version), and only then: where the entries are served isn't part of it.
+
+Only a ready deliverable is in it (one a gate holds back isn't), and only one whose content hash
+StreamBy can vouch for, which it never computes (it doesn't read the files): the uploader
+declares the file's SHA-256 when it asks for the upload URL (`sha256`, hex or base64, in
+`GET .../upload-url` and `.../replace-url`, the workers' `upload-url` body, or
+`request_asset_upload` from the MCP server), the URL is signed with it, and the upload must send
+the `headers` answered with it (`x-amz-checksum-sha256`): the storage refuses other bytes, and
+keeps the hash. When it's catalogued, the storage itself copies the content to a key named by its
+hash (`<projectId>/content/<sha256><ext>`, served with
+`Cache-Control: public, max-age=31536000, immutable`): its URL never serves anything else, and
+`integrity` (Subresource Integrity) lets the build check it. The URL is StreamBy's
+`GET /:projectId/content/<sha256><ext>`, which redirects to the storage, or, with
+`contentBaseUrl` in the router's config (a CDN in front of the bucket), `<contentBaseUrl>/<key>`.
+The bucket's CORS has to allow the `x-amz-checksum-sha256` header for uploads from a browser.
+
+`GET /projects/:id/exports/:exportId/catalog` (the project's members) answers the same catalog and
+the deliverables left out of it, each with its `reason`: `blocked`, `no-hash` (uploaded without
+its SHA-256), `not-uploaded` (its upload hasn't finished, or doesn't match the declared hash),
+`other-storage` (in a storage connection: only the project's own storage is catalogued),
+`asset-missing` or `version-missing`.
+
 For example, with Claude connected to StreamBy and to Blender's MCP server, asking *"export the
 scene as glTF and deliver it for shot SH010 of Portfolio"* goes:
 
@@ -996,7 +1037,7 @@ describe each area; this is the map.
 | Workflow and pipelines | `GET`, `PATCH /projects/:id/workflow`, `GET`, `POST /projects/:projectId/pipelines`, `GET`, `PATCH`, `DELETE .../:pipelineId`, `GET`, `POST .../:pipelineId/runs`, `GET /projects/:projectId/production/shots/:shot/pipeline-runs` |
 | Production | `/projects/:projectId/production/board` (its columns, `key`, `labels`), `/sequences`, `/sequences/:seqId/shots` (and `/batch`), `/shots` (`?q=`), `/shots/:shotId`, `/shots/:shotId/tasks`, `/task-templates` (and `/:templateId/apply`) |
 | Documents | `GET`, `POST /projects/:projectId/documents`, `GET`, `PATCH`, `DELETE .../:docId`, `PATCH .../:docId/sections`, `POST .../:docId/publish`, `GET .../:docId/versions` (and `/:version`) |
-| Exports | `GET`, `POST /projects/:id/exports`, `GET`, `PATCH`, `DELETE /projects/:id/exports/:exportId`; served at `GET /:projectId/export/:exportName` |
+| Exports | `GET`, `POST /projects/:id/exports`, `GET`, `PATCH`, `DELETE /projects/:id/exports/:exportId`, `GET .../:exportId/catalog`; served at `GET /:projectId/export/:exportName`, its catalog at `.../catalog.json` and `.../catalog.hash`, its catalogued content at `GET /:projectId/content/:sha256` |
 | Tokens and agents | `GET`, `POST`, `DELETE /user/api-tokens` and `/projects/:id/api-tokens`, `POST`, `GET`, `DELETE /mcp`, `GET /.well-known/oauth-protected-resource` |
 | Notifications | `GET /notifications` (and `/:id`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all` |
 

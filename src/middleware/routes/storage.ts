@@ -18,6 +18,11 @@ import { tokenAllows } from '../../services/auth';
 
 import { StorageCategory, VALID_CATEGORIES, validateContentType } from '../../utils/assetCategories';
 import { afterGateChange } from './deliverable';
+import { checksumHeaders, declaredSha256 } from '../../utils/contentHash';
+
+// The headers an upload is sent with: its declared hash too, for the storage to check it.
+const uploadHeaders = (contentType: string, sha256: string | undefined) =>
+  sha256 ? { headers: { 'Content-Type': contentType, ...checksumHeaders(sha256) } } : {};
 
 function getRawFilesCollection() {
   const model = getModel('storage_files', 'nosql') as any;
@@ -107,6 +112,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const auth = (req as any).auth as Auth;
       const { projectId, category } = req.params;
       const { fileName, contentType } = req.query as { fileName?: string; contentType?: string };
+      const sha256 = declaredSha256(req.query.sha256);
+      if (sha256 === false) return res.status(400).json({ message: 'sha256 must be the file\'s SHA-256, in hex or base64' });
 
       if (!VALID_CATEGORIES.includes(category as StorageCategory)) {
         return res.status(400).json({ message: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(', ')}` });
@@ -147,6 +154,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
           contentType,
           uploadedBy: auth.userId,
           createdAt: new Date(),
+          ...(sha256 ? { sha256 } : {}),
         };
         await collection.insertOne(fileDoc);
         await recordFirstVersion(fileDoc);
@@ -154,8 +162,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       }
 
       const expiresIn = signedUrlTtl(auth, config, 'upload');
-      const url = await adapter.getPresignedUploadUrl(storageKey, contentType, expiresIn);
-      res.json({ url, fileId, storageKey, displayName: fileName, ...expiry(expiresIn) });
+      const url = await adapter.getPresignedUploadUrl(storageKey, contentType, expiresIn, sha256 ? { sha256 } : undefined);
+      res.json({ url, fileId, storageKey, displayName: fileName, ...uploadHeaders(contentType, sha256), ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate upload URL', details: err.message });
     }
@@ -166,6 +174,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const auth = (req as any).auth as Auth;
       const { projectId, fileId } = req.params;
       const { contentType, fileName } = req.query as { contentType?: string; fileName?: string };
+      const sha256 = declaredSha256(req.query.sha256);
+      if (sha256 === false) return res.status(400).json({ message: 'sha256 must be the file\'s SHA-256, in hex or base64' });
 
       if (!contentType || !fileName) {
         return res.status(400).json({ message: 'Query params contentType and fileName are required' });
@@ -194,15 +204,15 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!adapter.copyFile) return res.status(501).json({ message: 'Storage adapter cannot keep versions' });
       let version;
       try {
-        version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: auth.userId }, adapter.copyFile.bind(adapter));
+        version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: auth.userId, sha256: sha256 ?? null }, adapter.copyFile.bind(adapter));
       } catch (err: any) {
         return res.status(502).json({ message: 'Failed to archive the current version; nothing was replaced', details: err.message });
       }
       const expiresIn = signedUrlTtl(auth, config, 'upload');
-      const url = await adapter.getPresignedUploadUrl(fileDoc.storageKey, contentType, expiresIn);
-      await collection.updateOne({ fileId, projectId }, { $set: { contentType, updatedAt: new Date() } });
+      const url = await adapter.getPresignedUploadUrl(fileDoc.storageKey, contentType, expiresIn, sha256 ? { sha256 } : undefined);
+      await collection.updateOne({ fileId, projectId }, { $set: { contentType, sha256: sha256 ?? null, updatedAt: new Date() } });
 
-      res.json({ url, storageKey: fileDoc.storageKey, fileId, versionId: version.versionId, version: version.version, ...expiry(expiresIn) });
+      res.json({ url, storageKey: fileDoc.storageKey, fileId, versionId: version.versionId, version: version.version, ...uploadHeaders(contentType, sha256), ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate replace URL', details: err.message });
     }

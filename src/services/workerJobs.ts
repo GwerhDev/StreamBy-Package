@@ -11,6 +11,7 @@ import { createJob, getJob, notify } from './jobQueue';
 import { jobStore } from './jobStore';
 import { assertPublicEndpoint, availableWorkers, PrivateEndpointError, resolveWorker, ResolvedWorker, STORAGE_CATEGORIES, WorkerError } from './workers';
 import { RUNNER_WAIT_MS, runnerSeen, runnerTimeoutSeconds, Declaration, WorkerRunnerRecord, wakeRunner } from './workerRunners';
+import { checksumHeaders, declaredSha256 } from '../utils/contentHash';
 
 // A worker's job, from start to end (the README has the contract a worker follows):
 //
@@ -416,6 +417,8 @@ export async function resultUploadUrl(job: JobRecord, body: any, config: RouterC
   const fileName = typeof body?.fileName === 'string' ? body.fileName.trim() : '';
   const contentType = typeof body?.contentType === 'string' ? body.contentType.trim() : '';
   if (!fileName || !contentType || fileName.includes('/')) throw new WorkerError('fileName and contentType are required');
+  const sha256 = declaredSha256(body?.sha256);
+  if (sha256 === false) throw new WorkerError("sha256 must be the result's SHA-256, in hex or base64");
   const project = await findProject(job.projectId);
   const fileDoc = await filesCollection()?.findOne({ fileId: job.assetId, projectId: job.projectId });
   if (!project || !fileDoc) throw new WorkerError('Asset not found', 404);
@@ -435,14 +438,14 @@ export async function resultUploadUrl(job: JobRecord, body: any, config: RouterC
   const storageKey = job.resultMode === 'version'
     ? `${String(fileDoc.storageKey).replace(/\.[^./]*$/, '')}.job-${job.jobId}${extensionOf(fileName)}`
     : `${job.projectId}/${category}/${crypto.randomUUID()}${extensionOf(fileName)}`;
-  const url = await adapter.getPresignedUploadUrl(storageKey, contentType, UPLOAD_TTL_SECONDS);
+  const url = await adapter.getPresignedUploadUrl(storageKey, contentType, UPLOAD_TTL_SECONDS, sha256 ? { sha256 } : undefined);
   const updated = await jobStore().claim(job.jobId, ['processing'], {
-    upload: { storageKey, fileName, contentType, category }, stage: 'uploading', updatedAt: new Date(),
+    upload: { storageKey, fileName, contentType, category, ...(sha256 ? { sha256 } : {}) }, stage: 'uploading', updatedAt: new Date(),
   });
   if (!updated) throw new WorkerError('The job is no longer in progress', 409);
   notify(updated);
   return {
-    url, method: 'PUT', headers: { 'Content-Type': contentType },
+    url, method: 'PUT', headers: { 'Content-Type': contentType, ...(sha256 ? checksumHeaders(sha256) : {}) },
     expiresAt: new Date(Date.now() + UPLOAD_TTL_SECONDS * 1000).toISOString(),
   };
 }
@@ -480,6 +483,7 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
   if (!project || !files || !fileDoc) throw new WorkerError('Asset not found', 404);
   const adapter = await fileAdapter(project, fileDoc, authOf(job), config);
   const { storageKey, fileName, contentType } = job.upload!;
+  const sha256 = job.upload!.sha256 ?? null;
   const category = job.upload!.category ?? fileDoc.category;
   const meta = { report, jobId: job.jobId, kind: job.kind, worker: job.worker };
 
@@ -487,10 +491,10 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
   if (job.resultMode === 'version') {
     if (!adapter.copyFile) throw new WorkerError("This asset's storage can't keep versions", 400);
     // The asset keeps its key (and URL): its current version is archived, the result takes its place.
-    const version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: job.userId }, adapter.copyFile.bind(adapter));
+    const version = await archiveCurrentVersion(fileDoc as any, { fileName, contentType, userId: job.userId, sha256 }, adapter.copyFile.bind(adapter));
     await adapter.copyFile(storageKey, fileDoc.storageKey);
     if (adapter.deleteFile) await adapter.deleteFile(storageKey).catch(() => { /* a leftover upload only */ });
-    await files.updateOne({ fileId: job.assetId, projectId: job.projectId }, { $set: { contentType, updatedAt: new Date() } });
+    await files.updateOne({ fileId: job.assetId, projectId: job.projectId }, { $set: { contentType, sha256, updatedAt: new Date() } });
     await versionsCollection()?.updateOne({ versionId: version.versionId }, { $set: meta });
     result = { assetId: job.assetId!, versionId: version.versionId, mode: 'version' };
   } else {
@@ -500,7 +504,7 @@ async function keepResult(job: JobRecord, report: Record<string, unknown> | null
       _id: new ObjectId(), fileId, projectId: job.projectId,
       ...(fileDoc.storageConnectionId ? { storageConnectionId: fileDoc.storageConnectionId } : {}),
       category, storageKey, displayName: fileName, contentType,
-      uploadedBy: job.userId, createdAt: new Date(), folderId: fileDoc.folderId ?? null,
+      uploadedBy: job.userId, createdAt: new Date(), folderId: fileDoc.folderId ?? null, sha256,
       derivedFrom: { assetId: job.assetId, versionId: job.versionId ?? null, jobId: job.jobId, kind: job.kind },
     };
     await files.insertOne(derived);

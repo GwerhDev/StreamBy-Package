@@ -48,15 +48,22 @@ export interface StorageAdapter {
   deleteProjectDirectory: (projectId: string) => Promise<any>;
   getPresignedUrl?: (contentType: string, projectId: string) => Promise<any>;
   getPresignedProjectImageUrl?: (projectId: string) => Promise<any>;
-  // expiresIn: seconds the URL works (the adapter's default if not given).
-  getPresignedUploadUrl?: (key: string, contentType: string, expiresIn?: number) => Promise<string>;
+  // expiresIn: seconds the URL works (the adapter's default if not given). sha256 (hex): the
+  // upload is refused unless its bytes have that hash, and the hash is kept with the file
+  // (the upload sends it, see utils/contentHash's checksumHeaders).
+  getPresignedUploadUrl?: (key: string, contentType: string, expiresIn?: number, options?: { sha256?: string }) => Promise<string>;
   listFilesByCategory?: (projectId: string, category: string) => Promise<StorageFileInfo[]>;
   deleteFile?: (key: string) => Promise<void>;
-  // Copies a stored file to another key (to archive an asset's version before replacing it).
-  copyFile?: (from: string, to: string) => Promise<void>;
+  // Copies a stored file to another key (to archive an asset's version before replacing it),
+  // with another content type or Cache-Control if given.
+  copyFile?: (from: string, to: string, options?: { contentType?: string; cacheControl?: string }) => Promise<void>;
+  // A stored file's size and the sha256 (hex) the storage checked it against when it was
+  // uploaded (null if it wasn't uploaded with one); null if there's no such file.
+  contentInfo?: (key: string) => Promise<{ size: number; sha256: string | null } | null>;
   // downloadName: the file is downloaded (not shown inline) with this name. stable: the same URL
-  // for every request in the same hour (see S3Adapter), for a browser to keep what it downloaded.
-  getPresignedGetUrl?: (key: string, expiresIn?: number, downloadName?: string, options?: { stable?: boolean }) => Promise<string>;
+  // for every request in the same hour (see S3Adapter), for a browser to keep what it downloaded,
+  // for as long as cacheControl says (an hour, privately, if not given).
+  getPresignedGetUrl?: (key: string, expiresIn?: number, downloadName?: string, options?: { stable?: boolean; cacheControl?: string }) => Promise<string>;
 }
 
 export interface FieldDefinition {
@@ -175,6 +182,10 @@ export interface StreamByConfig {
   authProvider: AuthProvider;
   databases?: DatabaseCredential[];
   adapter?: StorageAdapter;
+  // Where the default storage's files are served publicly (a CDN in front of its bucket): an
+  // export's catalog links its deliverables there (`<contentBaseUrl>/<key>`). Without it, they
+  // are linked to StreamBy's content route, which redirects to the storage.
+  contentBaseUrl?: string;
   // The key stored credentials are encrypted with (64 hex characters), and the previous ones
   // they may still be in: rotating is putting the new key here and the old one in
   // encryptPreviousKeys -- what's stored is re-encrypted with the new one at startup.
@@ -555,7 +566,8 @@ export interface JobRecord {
   callbackHash?: string | null;
   // The result's upload, while the worker sends it: its key and what it is.
   // Its category: the asset's, unless the worker gave its derived result another (a video's thumbnail).
-  upload?: { storageKey: string; fileName: string; contentType: string; category?: StorageCategoryName } | null;
+  // sha256: the hash the worker declared for its result (hex), checked by the storage.
+  upload?: { storageKey: string; fileName: string; contentType: string; category?: StorageCategoryName; sha256?: string } | null;
   // What the worker reported, and what was made of its result.
   report?: Record<string, unknown> | null;
   result?: { assetId: string; versionId: string; mode: WorkerResultMode } | null;

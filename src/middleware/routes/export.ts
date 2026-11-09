@@ -11,6 +11,7 @@ import { getConnection } from '../../adapters/database/connectionManager';
 import { MongoClient, ObjectId } from 'mongodb';
 import { Pool } from 'pg';
 import { decrypt, isEncryptionKeySet } from '../../utils/encryption';
+import { buildCatalog, CONTENT_NAME, exclusionMessage, IMMUTABLE_CACHE } from '../../services/deliverableCatalog';
 
 export const DEFAULT_NODE_SCHEMA = {
   nodes: [
@@ -356,67 +357,152 @@ export function exportRouter(config: StreamByConfig): Router {
     }
   });
 
+  // A project's export, as its public routes find it: by its name, and only for the origins it
+  // (or its project) allows -- or a page in dev mode, on localhost. null once it has answered why not.
+  async function publicExport(req: Request, res: Response): Promise<{ project: any; exportMetadata: any } | null> {
+    const { projectId, exportName } = req.params;
+
+    const project = await Project.findOne({ _id: projectId });
+    if (!project) {
+      res.status(404).json({ message: 'Project not found' }); return null;
+    }
+
+    const exportMetadata = (project.exports as any[] | undefined)?.find(
+      (e: any) => e.name?.toLowerCase().trim() === exportName.toLowerCase().trim(),
+    );
+    if (!exportMetadata) {
+      res.status(404).json({ message: 'Export not found in this project' }); return null;
+    }
+
+    const origin = req.headers.origin;
+    let effectiveAllowedOrigins = exportMetadata.allowedOrigin;
+    const projectOrigins = project.allowedOrigin;
+
+    // If export's allowedOrigin is empty, ['*'], or not set, it inherits from the project.
+    if (!effectiveAllowedOrigins || effectiveAllowedOrigins.length === 0 || (effectiveAllowedOrigins.length === 1 && effectiveAllowedOrigins[0] === '*')) {
+      effectiveAllowedOrigins = projectOrigins;
+    } else {
+      if (projectOrigins && !projectOrigins.includes('*')) {
+        const isSubset = effectiveAllowedOrigins.every((o: string) => projectOrigins.includes(o));
+        if (!isSubset) {
+          res.status(403).json({ message: 'Unauthorized: Export origins are not allowed by the parent project.' }); return null;
+        }
+      }
+    }
+
+    // Dev mode: auto-allow localhost requests on configured ports.
+    let devModeAllowed = false;
+    if (exportMetadata.devMode && origin) {
+      const match = origin.match(/^https?:\/\/localhost:(\d+)$/);
+      if (match) {
+        const port = parseInt(match[1]);
+        const allowedPorts: number[] = exportMetadata.devPorts?.length
+          ? exportMetadata.devPorts
+          : [3000, 5173, 8080, 4200];
+        if (allowedPorts.includes(port)) {
+          devModeAllowed = true;
+          res.header('Access-Control-Allow-Origin', origin);
+          res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+          res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        }
+      }
+    }
+
+    if (!devModeAllowed) {
+      if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
+        res.status(403).json({ message: 'Origin header required' }); return null;
+      }
+
+      const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
+
+      if (!isAllowed) {
+        res.status(403).json({ message: 'Unauthorized' }); return null;
+      }
+    }
+
+    return { project, exportMetadata };
+  }
+
+  // ── An export's catalog (see services/deliverableCatalog) ──
+
+  const adapter = config.adapter;
+  // Where the catalog links a content key: the CDN in front of the storage, or the content route.
+  const contentUrlFor = (req: Request) => (key: string) => {
+    if (config.contentBaseUrl) return `${config.contentBaseUrl.replace(/\/+$/, '')}/${key}`;
+    const [projectId, , name] = key.split('/');
+    return `${req.protocol}://${req.get('host')}${req.baseUrl}/${projectId}/content/${name}`;
+  };
+
+  const publicCatalog = async (req: Request, res: Response) => {
+    const found = await publicExport(req, res);
+    if (!found) return null;
+    if (!adapter) {
+      res.status(501).json({ message: 'No storage to catalog deliverables from' });
+      return null;
+    }
+    const { catalog } = await buildCatalog(found.project, found.exportMetadata, adapter, contentUrlFor(req));
+    // Asked again every time (it's cheap with its ETag): it changes when a deliverable does.
+    res.setHeader('Cache-Control', 'no-cache');
+    return catalog;
+  };
+
+  router.get('/:projectId/export/:exportName/catalog.json', async (req: Request, res: Response) => {
+    try {
+      const catalog = await publicCatalog(req, res);
+      if (catalog) res.json(catalog);
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to build the catalog', details: err.message });
+    }
+  });
+
+  router.get('/:projectId/export/:exportName/catalog.hash', async (req: Request, res: Response) => {
+    try {
+      const catalog = await publicCatalog(req, res);
+      if (catalog) res.type('text/plain').send(catalog.hash);
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to build the catalog', details: err.message });
+    }
+  });
+
+  // A catalogued content, by its hash: a redirect to the storage. What it serves never changes,
+  // and is cached forever; the redirect, for as long as the signed URL it gives is the same.
+  router.get('/:projectId/content/:name', async (req: Request, res: Response) => {
+    try {
+      const { projectId, name } = req.params;
+      if (!CONTENT_NAME.test(name)) return res.status(404).json({ message: 'Content not found' });
+      if (!adapter?.contentInfo || !adapter.getPresignedGetUrl) return res.status(501).json({ message: 'The storage cannot serve catalogued content' });
+      const key = `${projectId}/content/${name}`;
+      if (!(await adapter.contentInfo(key))) return res.status(404).json({ message: 'Content not found' });
+      const url = await adapter.getPresignedGetUrl(key, 3600, undefined, { stable: true, cacheControl: IMMUTABLE_CACHE });
+      res.setHeader('Cache-Control', 'public, max-age=600');
+      res.redirect(302, url);
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to serve the content', details: err.message });
+    }
+  });
+
+  // The catalog as the export's editors see it: with the deliverables left out of it, and why.
+  router.get('/projects/:id/exports/:export_id/catalog', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      const exportMeta = (project.exports as any[] | undefined)?.find((e: any) => String(e.id) === req.params.export_id);
+      if (!exportMeta) return res.status(404).json({ message: 'Export not found' });
+      if (!adapter) return res.status(501).json({ message: 'No storage to catalog deliverables from' });
+      const { catalog, excluded } = await buildCatalog(project, exportMeta, adapter, contentUrlFor(req));
+      res.json({ catalog, excluded: excluded.map(e => ({ ...e, message: exclusionMessage(e.reason) })) });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to build the catalog', details: err.message });
+    }
+  });
+
   router.get('/:projectId/export/:exportName', async (req: Request, res: Response) => {
     try {
-      const { projectId, exportName } = req.params;
-
-      const project = await Project.findOne({ _id: projectId });
-      if (!project) {
-        return res.status(404).json({ message: 'Project not found' });
-      }
-
-      const exportMetadata = (project.exports as any[] | undefined)?.find(
-        (e: any) => e.name?.toLowerCase().trim() === exportName.toLowerCase().trim(),
-      );
-      if (!exportMetadata) {
-        return res.status(404).json({ message: 'Export not found in this project' });
-      }
-
-      const origin = req.headers.origin;
-      let effectiveAllowedOrigins = exportMetadata.allowedOrigin;
-      const projectOrigins = project.allowedOrigin;
-
-      // If export's allowedOrigin is empty, ['*'], or not set, it inherits from the project.
-      if (!effectiveAllowedOrigins || effectiveAllowedOrigins.length === 0 || (effectiveAllowedOrigins.length === 1 && effectiveAllowedOrigins[0] === '*')) {
-        effectiveAllowedOrigins = projectOrigins;
-      } else {
-        if (projectOrigins && !projectOrigins.includes('*')) {
-          const isSubset = effectiveAllowedOrigins.every((o: string) => projectOrigins.includes(o));
-          if (!isSubset) {
-            return res.status(403).json({ message: 'Unauthorized: Export origins are not allowed by the parent project.' });
-          }
-        }
-      }
-
-      // Dev mode: auto-allow localhost requests on configured ports.
-      let devModeAllowed = false;
-      if (exportMetadata.devMode && origin) {
-        const match = origin.match(/^https?:\/\/localhost:(\d+)$/);
-        if (match) {
-          const port = parseInt(match[1]);
-          const allowedPorts: number[] = exportMetadata.devPorts?.length
-            ? exportMetadata.devPorts
-            : [3000, 5173, 8080, 4200];
-          if (allowedPorts.includes(port)) {
-            devModeAllowed = true;
-            res.header('Access-Control-Allow-Origin', origin);
-            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-            res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-          }
-        }
-      }
-
-      if (!devModeAllowed) {
-        if (!origin && !(effectiveAllowedOrigins && effectiveAllowedOrigins.includes('*'))) {
-          return res.status(403).json({ message: 'Origin header required' });
-        }
-
-        const isAllowed = effectiveAllowedOrigins && (effectiveAllowedOrigins.includes('*') || (origin && effectiveAllowedOrigins.includes(origin)));
-
-        if (!isAllowed) {
-          return res.status(403).json({ message: 'Unauthorized' });
-        }
-      }
+      const found = await publicExport(req, res);
+      if (!found) return;
+      const { project, exportMetadata } = found;
 
       let data: any;
 

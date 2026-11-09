@@ -1,6 +1,7 @@
-import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, CopyObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { S3Config, StorageAdapter, StorageFileInfo } from '../../types';
+import { sha256Base64 } from '../../utils/contentHash';
 
 const STABLE_WINDOW_MS = 3600_000;
 // The longest an S3 signed URL works (SigV4).
@@ -78,7 +79,7 @@ export class S3Adapter implements StorageAdapter {
     return { url, publicUrl };
   }
 
-  async getPresignedGetUrl(key: string, expiresIn = 86400, downloadName?: string, options: { stable?: boolean } = {}): Promise<string> {
+  async getPresignedGetUrl(key: string, expiresIn = 86400, downloadName?: string, options: { stable?: boolean; cacheControl?: string } = {}): Promise<string> {
     if (options.stable) {
       // Signed as of the start of the hour, and valid an hour longer: every request in the same
       // hour gets the same URL, and a browser keeps (for up to an hour) what it downloaded with it.
@@ -86,7 +87,7 @@ export class S3Adapter implements StorageAdapter {
       const command = new GetObjectCommand({
         Bucket: this.bucket, Key: key,
         ...(downloadName ? { ResponseContentDisposition: contentDisposition(downloadName) } : {}),
-        ResponseCacheControl: `private, max-age=${Math.min(expiresIn, STABLE_WINDOW_MS / 1000)}`,
+        ResponseCacheControl: options.cacheControl ?? `private, max-age=${Math.min(expiresIn, STABLE_WINDOW_MS / 1000)}`,
       });
       return await getSignedUrl(this.s3, command, {
         signingDate: new Date(windowStart),
@@ -101,14 +102,38 @@ export class S3Adapter implements StorageAdapter {
     return await getSignedUrl(this.s3, command, { expiresIn });
   }
 
-  async getPresignedUploadUrl(key: string, contentType: string, expiresIn = 3600): Promise<string> {
+  async getPresignedUploadUrl(key: string, contentType: string, expiresIn = 3600, options: { sha256?: string } = {}): Promise<string> {
+    if (options.sha256) {
+      // The checksum is a signed header, not a query param: the upload must send it (see
+      // checksumHeaders), and S3 refuses bytes that don't match it, and keeps it with the object.
+      const command = new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType, ChecksumSHA256: sha256Base64(options.sha256) });
+      return await getSignedUrl(this.s3, command, { expiresIn, unhoistableHeaders: new Set(['x-amz-checksum-sha256']) });
+    }
     const command = new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType });
     return await getSignedUrl(this.s3, command, { expiresIn });
   }
 
-  async copyFile(from: string, to: string): Promise<void> {
+  async copyFile(from: string, to: string, options: { contentType?: string; cacheControl?: string } = {}): Promise<void> {
     const source = `${this.bucket}/${from.split('/').map(encodeURIComponent).join('/')}`;
-    await this.s3.send(new CopyObjectCommand({ Bucket: this.bucket, CopySource: source, Key: to }));
+    const replace = options.contentType !== undefined || options.cacheControl !== undefined;
+    await this.s3.send(new CopyObjectCommand({
+      Bucket: this.bucket, CopySource: source, Key: to,
+      // S3 computes the copy's sha256 itself: an archived version keeps a hash to check against.
+      ChecksumAlgorithm: 'SHA256',
+      ...(replace ? { MetadataDirective: 'REPLACE', ContentType: options.contentType, CacheControl: options.cacheControl } : {}),
+    }));
+  }
+
+  async contentInfo(key: string): Promise<{ size: number; sha256: string | null } | null> {
+    try {
+      const head = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key, ChecksumMode: 'ENABLED' }));
+      // A multipart upload's checksum is of its parts ("<hash>-<parts>"), not of the file.
+      const whole = head.ChecksumSHA256 && head.ChecksumType !== 'COMPOSITE' && !head.ChecksumSHA256.includes('-');
+      return { size: head.ContentLength ?? 0, sha256: whole ? Buffer.from(head.ChecksumSHA256!, 'base64').toString('hex') : null };
+    } catch (err: any) {
+      if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) return null;
+      throw err;
+    }
   }
 
   async deleteFile(key: string): Promise<void> {

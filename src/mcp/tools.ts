@@ -374,6 +374,7 @@ export const TOOLS = [
       "The URL works for that file only. A new version keeps the asset's URL (it replaces what it serves); the earlier ones are archived and can still be downloaded.",
       "Categories: images, audios, videos, 3d-models (.glb, .gltf, .obj, .fbx, .stl, .ply); contentType must match it.",
       "For a new asset taken from someone else (a CC model, a stock image), give its license metadata too, so it's credited (it needs the rights:write permission); for a new version, set_asset_rights changes it.",
+      "Give the file's sha256 for it to be in an export's catalog (what a build fetches its deliverables from): the storage then refuses bytes that don't match it, and the upload must send `upload.headers` as given (they carry it).",
     ].join(' '),
     input: {
       projectId,
@@ -382,12 +383,13 @@ export const TOOLS = [
       contentType: z.string().min(1).describe('Its MIME type (e.g. model/gltf-binary, image/png, video/mp4)'),
       assetId: z.string().optional().describe('An existing asset to upload a new version of; a new asset if not given'),
       connectionId: z.string().optional().describe("A storage connection to store it in; the project's built-in storage if not given"),
+      sha256: z.string().optional().describe("The file's SHA-256 (hex), for an export's catalog to list it; only the project's built-in storage keeps it"),
       ...rightsFields,
     },
     projectOf: byProject,
-    call: ({ projectId, category, fileName, contentType, assetId, connectionId, ...rights }) => {
+    call: ({ projectId, category, fileName, contentType, assetId, connectionId, sha256, ...rights }) => {
       const query = new URLSearchParams({
-        fileName, contentType, ...(connectionId && !assetId ? { category } : {}),
+        fileName, contentType, ...(connectionId && !assetId ? { category } : {}), ...(sha256 ? { sha256 } : {}),
         ...(assetId ? {} : defined(rights) as Record<string, string>),
       });
       const files = connectionId ? `/projects/${enc(projectId)}/connections/storage/${enc(connectionId)}` : `/projects/${enc(projectId)}/storage`;
@@ -399,7 +401,7 @@ export const TOOLS = [
     pick: (data, { contentType }) => ({
       assetId: data?.fileId,
       ...(data?.versionId ? { versionId: data.versionId, version: data.version } : { version: 1 }),
-      upload: { method: 'PUT', url: data?.url, headers: { 'Content-Type': contentType } },
+      upload: { method: 'PUT', url: data?.url, headers: data?.headers ?? { 'Content-Type': contentType } },
       expiresAt: data?.expiresAt ?? null,
     }),
   }),

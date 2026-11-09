@@ -135,7 +135,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(userRouter(config));
   router.use(apiTokenRouter(config));
   router.use(mcpRouter(config));
-  router.use(exportRouter(config));
+  router.use(exportRouter({ ...config, adapter }));
   router.use(memberRouter(config));
   router.use(teamRouter(config));
   router.use(storageRouter(config));

@@ -6,14 +6,19 @@ import { appAddsFor, memberMay, RoleAction, ROLE_ACTIONS } from './projectPermis
 import { getModel } from '../models/manager';
 import { wwwAuthenticate } from './oauthTokens';
 
-// The one route open without a session: a project's public export, read
-// (GET /:projectId/export/:exportName, see routes/export). Exactly that path -- not any path
-// that has an "export" segment somewhere.
-const PUBLIC_EXPORT = /^\/[^/]+\/export\/[^/]+\/?$/;
+// The routes open without a session, read: a project's public export
+// (GET /:projectId/export/:exportName, see routes/export), its catalog (…/catalog.json and
+// …/catalog.hash), and the content its catalog links to (GET /:projectId/content/<sha256>).
+// Exactly those paths -- not any path that has an "export" segment somewhere.
+const PUBLIC_PATHS = [
+  /^\/[^/]+\/export\/[^/]+\/?$/,
+  /^\/[^/]+\/export\/[^/]+\/catalog\.(?:json|hash)$/,
+  /^\/[^/]+\/content\/[0-9a-f]{64}(?:\.[a-z0-9]{1,16})?$/,
+];
 const READ_METHODS = ['GET', 'HEAD', 'OPTIONS'];
 
 export const isPublicRoute = (method: string, path: string): boolean =>
-  READ_METHODS.includes(method.toUpperCase()) && PUBLIC_EXPORT.test(path);
+  READ_METHODS.includes(method.toUpperCase()) && PUBLIC_PATHS.some(p => p.test(path));
 
 // ── API tokens ──
 // A request made with an API token reaches only what the token does: its route's permission

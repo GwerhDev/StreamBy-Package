@@ -16,6 +16,11 @@ export interface AssetVersion {
   storageKey: string;
   contentType: string | null;
   fileName: string | null;
+  // The sha256 (hex) its uploader declared, which the storage checks the bytes against; null if
+  // it was uploaded without one (then it can't be in an export's catalog).
+  sha256?: string | null;
+  // Where its content was copied for an export's catalog, once checked (see deliverableCatalog).
+  content?: { key: string; size: number } | null;
   createdBy: string | null;
   createdAt: Date;
 }
@@ -31,7 +36,7 @@ export const archivedVersionKey = (assetKey: string, version: number) => {
 /** Records the first version of an asset just made (or one made before versions were kept). */
 export async function recordFirstVersion(file: {
   fileId: string; projectId: string; storageKey: string; contentType?: string; displayName?: string;
-  uploadedBy?: string; createdAt?: Date;
+  uploadedBy?: string; createdAt?: Date; sha256?: string | null;
 }): Promise<void> {
   const col = versionsCollection();
   if (!col) return;
@@ -45,6 +50,7 @@ export async function recordFirstVersion(file: {
     storageKey: file.storageKey,
     contentType: file.contentType ?? null,
     fileName: file.displayName ?? null,
+    sha256: file.sha256 ?? null,
     createdBy: file.uploadedBy ?? null,
     createdAt: file.createdAt ?? new Date(),
   });
@@ -57,7 +63,7 @@ export async function recordFirstVersion(file: {
  */
 export async function archiveCurrentVersion(
   file: { fileId: string; projectId: string; storageKey: string; contentType?: string; displayName?: string; uploadedBy?: string; createdAt?: Date },
-  upload: { fileName: string; contentType: string; userId: string },
+  upload: { fileName: string; contentType: string; userId: string; sha256?: string | null },
   copyFile: (from: string, to: string) => Promise<void>,
 ): Promise<AssetVersion> {
   const col = versionsCollection();
@@ -78,6 +84,7 @@ export async function archiveCurrentVersion(
     storageKey: file.storageKey,
     contentType: upload.contentType,
     fileName: upload.fileName,
+    sha256: upload.sha256 ?? null,
     createdBy: upload.userId,
     createdAt: new Date(),
   };
