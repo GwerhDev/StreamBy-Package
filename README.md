@@ -739,6 +739,11 @@ the result) is the same.
    `DELETE /user/runners/:id/shares/:shareId` stops sharing it there. Shared, it's in the
    project's workers: for its editors (a team's: only its members, and the runner's owner), while
    its owner is still an active member. Not shared, it's in no project's, its owner's included.
+   A project's admins choose what a runner shared with it runs by itself on the project's
+   deliverables, as a project worker's `autoKind` (`PATCH /projects/:projectId/workers/runners/:id`
+   `{ autoKind }`): one of the kinds it declares, or `null`. While it stops declaring that kind,
+   nothing is queued for it by itself. Its job waits for it if it's offline; a pipeline's step can
+   be set to it too.
 3. **Asking for jobs.** The runner asks with a long poll:
 
    ```
@@ -985,7 +990,7 @@ describe each area; this is the map.
 | Integrations | `GET`, `POST /user/integrations`, `PATCH`, `DELETE /user/integrations/:id` (and `/dependents`), `GET /user/integrations/oauth/:provider/start` and `/callback`; a project's: `GET`, `POST /projects/:id/integrations`, `DELETE /projects/:id/integrations/:integrationId` |
 | Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `/projects/:projectId/distribution-connections`, `GET /databases`, `GET /storages` |
 | Storage and assets | `GET /projects/:projectId/storage/:category` (and `/upload-url`), `GET /projects/:projectId/storage/lasts`, `PATCH`, `DELETE /projects/:projectId/storage/files/:fileId` (and `/replace-url`), `GET /projects/:projectId/assets/:fileId/download-url`, `/metadata`, `/versions`, `GET`, `PUT .../assets/:assetId/rights`, `GET`, `POST .../assets/:assetId/qc-report`, `GET /projects/:projectId/credits-sheets` (and `/:docId`) |
-| Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail`; runners: `GET`, `POST /user/runners`, `DELETE .../:runnerId`, `POST .../:runnerId/shares`, `DELETE .../shares/:shareId`, and they ask at `POST /runner/jobs/next` |
+| Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail`; runners: `GET`, `POST /user/runners`, `DELETE .../:runnerId`, `POST .../:runnerId/shares`, `DELETE .../shares/:shareId`, `PATCH /projects/:projectId/workers/runners/:runnerId` (a project's admins: its `autoKind`), and they ask at `POST /runner/jobs/next` |
 | Reviews | `GET`, `POST /projects/:projectId/reviews`, `GET /projects/:projectId/reviews/:reviewId`, `POST .../decision` |
 | Deliverables | `GET`, `POST /projects/:projectId/deliverables`, `DELETE .../:deliverableId`, `POST .../:deliverableId/start-workers`, `GET .../gates`, `POST /projects/:projectId/deliverables/:exportId/publish` |
 | Workflow and pipelines | `GET`, `PATCH /projects/:id/workflow`, `GET`, `POST /projects/:projectId/pipelines`, `GET`, `PATCH`, `DELETE .../:pipelineId`, `GET`, `POST .../:pipelineId/runs`, `GET /projects/:projectId/production/shots/:shot/pipeline-runs` |

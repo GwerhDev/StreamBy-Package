@@ -276,6 +276,7 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
         "teamId"        VARCHAR(255),
         "createdAt"     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE streamby.worker_runner_shares ADD COLUMN IF NOT EXISTS "autoKind" VARCHAR(100);
       CREATE INDEX IF NOT EXISTS worker_runner_shares_runner_idx ON streamby.worker_runner_shares ("runnerId");
       CREATE INDEX IF NOT EXISTS worker_runner_shares_project_idx ON streamby.worker_runner_shares ("projectId");
     `);

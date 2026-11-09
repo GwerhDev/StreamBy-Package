@@ -48,6 +48,9 @@ export interface RunnerShare {
   projectId: string;
   // Only this team's members (and the runner's owner) use it; null: the project's editors.
   teamId: string | null;
+  // What it runs by itself on a deliverable of the project (chosen by the project's admins):
+  // one of the kinds it declares, or null.
+  autoKind?: string | null;
   createdAt: Date;
 }
 
@@ -209,16 +212,37 @@ const memoTeams = (project: any) => {
   return () => (cached ??= listTeams(project).then(t => t ?? []));
 };
 
-/** The runners shared with a project that `auth` may send jobs to. */
-export async function projectRunners(project: any, auth: Auth): Promise<WorkerRunnerRecord[]> {
+/** What a runner runs by itself in a project: its share's choice, while it still declares it. */
+const autoKindOf = (runner: WorkerRunnerRecord, share: RunnerShare): string | null =>
+  share.autoKind && runner.kinds.includes(share.autoKind) ? share.autoKind : null;
+
+/** The runners shared with a project that `auth` may send jobs to, with what each runs by itself. */
+export async function projectRunners(project: any, auth: Auth): Promise<{ runner: WorkerRunnerRecord; autoKind: string | null }[]> {
   const projectId = String(project._id ?? project.id);
   const teamsOf = memoTeams(project);
-  const found: WorkerRunnerRecord[] = [];
+  const found: { runner: WorkerRunnerRecord; autoKind: string | null }[] = [];
   for (const share of (await shares().find({ projectId })) as RunnerShare[]) {
     const runner = await findRunner(share.runnerId);
-    if (runner && !(await usable(project, runner, share, auth, teamsOf))) found.push(runner);
+    if (runner && !(await usable(project, runner, share, auth, teamsOf))) found.push({ runner, autoKind: autoKindOf(runner, share) });
   }
   return found;
+}
+
+/**
+ * Chooses what a runner shared with a project runs by itself on its deliverables (a project
+ * admin's to choose, the route checks): one of the kinds it declares, or null for nothing.
+ */
+export async function setRunnerAutoKind(project: any, runnerId: string, value: unknown): Promise<string | null> {
+  const projectId = String(project._id ?? project.id);
+  const runner = await findRunner(runnerId);
+  const [share] = runner ? ((await shares().find({ runnerId, projectId })) as RunnerShare[]) : [];
+  if (!runner || !share) throw new WorkerError('Worker not found', 404);
+  const autoKind = value === null || value === '' ? null : value;
+  if (autoKind !== null && (typeof autoKind !== 'string' || !runner.kinds.includes(autoKind))) {
+    throw new WorkerError(`autoKind must be one of the kinds ${runner.name} declares (${runner.kinds.join(', ') || 'none yet'}), or null`);
+  }
+  await shares().update({ id: share.id }, { autoKind });
+  return autoKind;
 }
 
 /** A runner of a project that `auth` may send jobs to, or why not. */

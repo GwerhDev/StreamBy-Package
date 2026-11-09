@@ -82,9 +82,9 @@ const builtinSummary = (worker: WorkerConfig): WorkerSummary => ({
 });
 
 // What a runner declared last: what it's offered for while it's offline too.
-const runnerSummary = (runner: WorkerRunnerRecord): WorkerSummary => ({
+const runnerSummary = ({ runner, autoKind }: { runner: WorkerRunnerRecord; autoKind: string | null }): WorkerSummary => ({
   source: 'runner', id: runner.id, name: runner.name, provider: 'runner',
-  kinds: runner.kinds, categories: runner.categories, autoKind: null, description: null,
+  kinds: runner.kinds, categories: runner.categories, autoKind, description: null,
   hasCredential: false, createdBy: runner.userId, online: isOnline(runner), lastSeenAt: runner.lastSeenAt,
 });
 

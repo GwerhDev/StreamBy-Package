@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { Auth, StorageAdapter, StreamByConfig } from '../../types';
 import { getModel } from '../../models/manager';
-import { canEditProject, isProjectMember } from '../../utils/auth';
+import { canEditProject, isProjectAdmin, isProjectMember } from '../../utils/auth';
+import { setRunnerAutoKind } from '../../services/workerRunners';
 import { listJobs, getJob } from '../../services/jobQueue';
 import {
   assertPublicEndpoint, availableWorkers, newWorkerConnection, projectWorkers, summarizeProjectWorker, WorkerError,
@@ -72,6 +73,21 @@ export function workerRouter(config: StreamByConfig & { adapter?: StorageAdapter
       res.json({ message: 'Worker removed' });
     } catch (err) {
       failed(res, 'remove the worker', err);
+    }
+  });
+
+  // What a runner shared with the project runs by itself on its deliverables: { autoKind }, one
+  // of the kinds it declares, or null. The project's admins choose it.
+  router.patch('/projects/:projectId/workers/runners/:runnerId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectAdmin(project, auth.userId)) return res.status(403).json({ message: "Only the project's admins choose what a runner runs by itself" });
+      const autoKind = await setRunnerAutoKind(project, req.params.runnerId, req.body?.autoKind);
+      res.json({ data: { autoKind } });
+    } catch (err) {
+      failed(res, "set the runner's automatic kind", err);
     }
   });
 

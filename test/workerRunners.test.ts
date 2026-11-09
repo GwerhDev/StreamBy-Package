@@ -117,6 +117,8 @@ beforeEach(() => {
     { fileId: 'model', projectId: 'p1', category: '3d-models', storageKey: 'p1/3d-models/model.glb', displayName: 'hero.glb', contentType: 'model/gltf-binary' },
     { fileId: 'poster', projectId: 'p1', category: 'images', storageKey: 'p1/images/poster.png', displayName: 'poster.png', contentType: 'image/png' },
   );
+  mongo.db.collection('production_shots').docs.push({ id: 's1', projectId: 'p1', sequenceId: 'q1', name: 'SH010' });
+  mongo.db.collection('production_sequences').docs.push({ id: 'q1', projectId: 'p1', name: 'Opening' });
   mongo.db.collection('project_teams').docs.push({ id: 'lighting', projectId: 'p1', name: 'Lighting', memberIds: ['eli'] });
   objects.set('p1/3d-models/model.glb', 'original glb');
   vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -238,6 +240,49 @@ describe('the jobs a runner is handed', () => {
     const taken = await poll(token);
     expect(taken.status).toBe(200);
     expect(taken.body.job).toMatchObject({ jobId: wanted, kind: 'gltf-optimize' });
+  });
+});
+
+describe("what a runner runs by itself in a project", () => {
+  const setAutoKind = (runnerId: string, autoKind: string | null, user = 'ada') =>
+    call('PATCH', `/projects/p1/workers/runners/${runnerId}`, { user, body: { autoKind } });
+
+  it("is chosen by the project's admins only, among the kinds it declares", async () => {
+    const { data: runner } = await ready();
+    expect((await setAutoKind(runner.id, 'gltf-optimize', 'eli')).status).toBe(403);
+    const wrong = await setAutoKind(runner.id, 'render');
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.message).toMatch(/one of the kinds Ada workstation declares \(gltf-optimize\)/);
+    expect((await setAutoKind('not-shared', 'gltf-optimize')).status).toBe(404);
+    expect((await setAutoKind(runner.id, 'gltf-optimize')).body.data).toEqual({ autoKind: 'gltf-optimize' });
+    expect((await workersOf())[0]).toMatchObject({ source: 'runner', autoKind: 'gltf-optimize' });
+    expect((await setAutoKind(runner.id, null)).body.data).toEqual({ autoKind: null });
+    expect((await workersOf())[0].autoKind).toBeNull();
+  });
+
+  it("is queued for it when a deliverable is marked, waiting while it's offline", async () => {
+    const { token, data: runner } = await ready();
+    await setAutoKind(runner.id, 'gltf-optimize');
+    store.worker_runners[0].lastSeenAt = new Date(Date.now() - 3600_000);
+    expect((await workersOf())[0].online).toBe(false);
+
+    const marked = await call('POST', '/projects/p1/deliverables', { user: 'eli', body: { assetId: 'model', shotId: 's1' } });
+    expect(marked.status).toBe(201);
+    expect(marked.body.jobs).toEqual([expect.objectContaining({ status: 'pending', kind: 'gltf-optimize', worker: expect.objectContaining({ source: 'runner', id: runner.id }) })]);
+    // It takes it once it's back.
+    expect((await poll(token)).body.job).toMatchObject({ jobId: marked.body.jobs[0].jobId, asset: { id: 'model' } });
+  });
+
+  it("isn't queued once the runner stops declaring its kind", async () => {
+    const { token, data: runner } = await ready();
+    await setAutoKind(runner.id, 'gltf-optimize');
+    await poll(token, { kinds: ['render'], categories: ['3d-models'] });
+    expect((await workersOf())[0].autoKind).toBeNull();
+    const marked = await call('POST', '/projects/p1/deliverables', { user: 'eli', body: { assetId: 'model', shotId: 's1' } });
+    expect(marked.body.jobs).toEqual([]);
+    // Declared again, it runs it again.
+    await poll(token);
+    expect((await workersOf())[0].autoKind).toBe('gltf-optimize');
   });
 });
 
