@@ -605,7 +605,7 @@ no 3D toolkit, and no more memory than its requests. There's one way to ask for 
 
 | Processing | Done by | With |
 |---|---|---|
-| Anything done to an asset's content (thumbnails, transcoding, LODs, glTF optimization or conversion, transcripts, rendering, upscaling...) | a worker of the host or of the project | its own tools |
+| Anything done to an asset's content (thumbnails, transcoding, LODs, glTF optimization or conversion, transcripts, rendering, upscaling...) | a worker of the host or of the project, or an agent shared with it | its own tools |
 | Ingest: an uploaded file's metadata (its codec, from its content type) and its first version (`POST .../jobs/ingest`) | StreamBy | nothing external |
 | QC reports (`.../assets/:assetId/qc-report`) | whoever posts one | a record of the checks given |
 | Publishing an export | nobody | a record of when, by whom and where to (see Deliverables) |
@@ -651,12 +651,17 @@ refused for it).
   The host's own workers aren't checked this way: the host chose them, and they may well be on
   its private network.
 
-`GET /projects/:projectId/workers` lists the workers a member can use.
+- **An agent**: a machine with no public URL (a user's own, behind a router, or one in the
+  cloud) that connects to StreamBy and asks for jobs, as self-hosted CI runners do (see Agents,
+  below). Its owner shares it with a project or a team.
+
+`GET /projects/:projectId/workers` lists the workers a member can use (an agent's with
+`online` and `lastSeenAt`).
 
 **Asking for a job**
 
 `POST /projects/:projectId/jobs/process` with
-`{ assetId, versionId?, worker: { source: 'builtin' | 'project', id }, kind, profile?, resultMode? }`
+`{ assetId, versionId?, worker: { source: 'builtin' | 'project' | 'agent', id }, kind, profile?, resultMode? }`
 (editors and admins; an API token needs `jobs:run`, and the MCP server has `process_asset`).
 `resultMode` decides where the result goes:
 
@@ -713,6 +718,50 @@ callback without it, with another, or after the job ended answers 401.
 
 A job its worker doesn't complete before its deadline is sent again, up to
 `workerOptions.maxAttempts` times; then it fails, with its error, and can be retried.
+
+**Agents: workers that ask for their jobs**
+
+A worker needs a public URL to be sent jobs. An agent doesn't: it connects to StreamBy and asks
+for them, so a user's own machine processes their assets. Only how it gets a job changes; the
+rest of the contract (downloading, calling back, the result) is the same.
+
+1. **Registering it.** Its owner registers it, with a session (`POST /user/worker-agents`
+   `{ name }`; no API token reaches these routes): one agent is one machine. The answer has its
+   token (`sba_` and 32 random bytes), shown once: only its hash is kept. The token only asks for
+   jobs and hands them in; it acts as nobody. `GET /user/worker-agents` lists the owner's agents
+   (`online`, what each declared last, where it's shared); `DELETE /user/worker-agents/:id`
+   revokes one: its token stops working, and its queued and running jobs fail.
+2. **Sharing it.** Its owner shares it with a project they're an active member of
+   (`POST /user/worker-agents/:id/shares` `{ projectId }`), or only with one of its teams
+   (`{ projectId, teamId }`); again with the same project, it changes with whom.
+   `DELETE /user/worker-agents/:id/shares/:shareId` stops sharing it there. Shared, it's in the
+   project's workers: for its editors (a team's: only its members, and the agent's owner), while
+   its owner is still an active member. Not shared, it's in no project's, its owner's included.
+3. **Asking for jobs.** The agent asks with a long poll:
+
+   ```
+   POST /worker-agent/jobs/next
+   Authorization: Bearer sba_…
+   { "kinds": ["gltf-optimize", "lod"], "categories": ["3d-models"], "timeoutSeconds": 3600 }
+   ```
+
+   It declares, each time, what its machine can do now (e.g. whether it has Blender or FFmpeg);
+   `timeoutSeconds` (optional, 60 seconds to a week; default an hour) is how long it may take a
+   job. The answer waits up to 25 seconds (`workerOptions.agentPollWaitMs`) for a job it can do:
+   `200 { "job": … }`, the same body a worker is sent (`jobId`, `kind`, `profile`, `asset`,
+   `download`, `callback`, `deadline`), or `204` with none; then it asks again. Each poll is its
+   heartbeat: it's `online` if it asked in the last minute (a callback about its job counts too).
+
+A job asked of an agent (`worker: { source: 'agent', id }`) isn't sent: it waits for it, offline
+or not. The agent is offered for what it declared last, but it's handed a job only if it
+declares the job's kind, and its asset's category, when it asks; and only while whoever asked
+for the job may still send it that agent (otherwise the job fails, saying why). An agent that
+never connected can't be asked anything yet.
+
+An agent that goes away with a job leaves it, when its deadline passes, back in line: it takes it
+again when it's back (a new attempt, with a new callback token), up to
+`workerOptions.maxAttempts`. A job its agent doesn't take within 24 hours fails, saying so, and
+can be retried.
 
 ---
 
@@ -934,7 +983,7 @@ describe each area; this is the map.
 | Integrations | `GET`, `POST /user/integrations`, `PATCH`, `DELETE /user/integrations/:id` (and `/dependents`), `GET /user/integrations/oauth/:provider/start` and `/callback`; a project's: `GET`, `POST /projects/:id/integrations`, `DELETE /projects/:id/integrations/:integrationId` |
 | Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `/projects/:projectId/distribution-connections`, `GET /databases`, `GET /storages` |
 | Storage and assets | `GET /projects/:projectId/storage/:category` (and `/upload-url`), `GET /projects/:projectId/storage/lasts`, `PATCH`, `DELETE /projects/:projectId/storage/files/:fileId` (and `/replace-url`), `GET /projects/:projectId/assets/:fileId/download-url`, `/metadata`, `/versions`, `GET`, `PUT .../assets/:assetId/rights`, `GET`, `POST .../assets/:assetId/qc-report`, `GET /projects/:projectId/credits-sheets` (and `/:docId`) |
-| Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail` |
+| Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail`; agents: `GET`, `POST /user/worker-agents`, `DELETE .../:agentId`, `POST .../:agentId/shares`, `DELETE .../shares/:shareId`, and they ask at `POST /worker-agent/jobs/next` |
 | Reviews | `GET`, `POST /projects/:projectId/reviews`, `GET /projects/:projectId/reviews/:reviewId`, `POST .../decision` |
 | Deliverables | `GET`, `POST /projects/:projectId/deliverables`, `DELETE .../:deliverableId`, `POST .../:deliverableId/start-workers`, `GET .../gates`, `POST /projects/:projectId/deliverables/:exportId/publish` |
 | Workflow and pipelines | `GET`, `PATCH /projects/:id/workflow`, `GET`, `POST /projects/:projectId/pipelines`, `GET`, `PATCH`, `DELETE .../:pipelineId`, `GET`, `POST .../:pipelineId/runs`, `GET /projects/:projectId/production/shots/:shot/pipeline-runs` |

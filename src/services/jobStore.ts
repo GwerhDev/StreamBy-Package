@@ -19,8 +19,13 @@ export interface JobStore {
    * lease ended by `leaseEndedBy` and its callback hash is `callbackHash`.
    */
   claim(jobId: string, statuses: JobRecord['status'][], patch: Partial<JobRecord>, only?: ClaimConditions): Promise<JobRecord | null>;
-  /** Worker jobs to look at now: queued and due, or dispatched with their lease ended. */
+  /**
+   * Worker jobs to look at now: queued and due (an agent's only once it waited too long: its
+   * agent asks for it), or dispatched with their lease ended.
+   */
   due(now: Date, limit: number): Promise<JobRecord[]>;
+  /** An agent's jobs in one of `statuses`, oldest first. */
+  ofAgent(agentId: string, statuses: JobRecord['status'][], limit: number): Promise<JobRecord[]>;
   /** A deleted project's jobs. */
   deleteProject(projectId: string): Promise<void>;
 }
@@ -93,10 +98,18 @@ const sqlStore = (pool: Pool): JobStore => {
       const { rows } = await pool.query(
         `SELECT * FROM ${table}
           WHERE worker IS NOT NULL AND (
-            (status = 'pending' AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= $1))
+            (status = 'pending' AND worker->>'source' IS DISTINCT FROM 'agent' AND ("nextAttemptAt" IS NULL OR "nextAttemptAt" <= $1))
+            OR (status = 'pending' AND worker->>'source' = 'agent' AND "waitUntil" <= $1)
             OR (status = 'processing' AND "leaseUntil" <= $1))
           ORDER BY "createdAt" LIMIT $2`,
         [now, limit],
+      );
+      return rows.map(row => fromRow(row)!);
+    },
+    async ofAgent(agentId, statuses, limit) {
+      const { rows } = await pool.query(
+        `SELECT * FROM ${table} WHERE worker->>'source' = 'agent' AND worker->>'id' = $1 AND status = ANY($2) ORDER BY "createdAt" LIMIT $3`,
+        [agentId, statuses, limit],
       );
       return rows.map(row => fromRow(row)!);
     },
@@ -142,10 +155,15 @@ const mongoStore = (client: MongoClient): JobStore => {
       const docs = await col().find({
         worker: { $ne: null },
         $or: [
-          { status: 'pending', $or: [{ nextAttemptAt: null }, { nextAttemptAt: { $lte: now } }] },
+          { status: 'pending', 'worker.source': { $ne: 'agent' }, $or: [{ nextAttemptAt: null }, { nextAttemptAt: { $lte: now } }] },
+          { status: 'pending', 'worker.source': 'agent', waitUntil: { $lte: now } },
           { status: 'processing', leaseUntil: { $lte: now } },
         ],
       }).sort({ createdAt: 1 }).limit(limit).toArray();
+      return docs.map(doc => fromDoc(doc)!);
+    },
+    async ofAgent(agentId, statuses, limit) {
+      const docs = await col().find({ 'worker.source': 'agent', 'worker.id': agentId, status: { $in: statuses } }).sort({ createdAt: 1 }).limit(limit).toArray();
       return docs.map(doc => fromDoc(doc)!);
     },
     async deleteProject(projectId) {
@@ -181,8 +199,16 @@ const memoryStore = (): JobStore => {
     async due(now, limit) {
       return [...jobs.values()]
         .filter(job => job.worker && (
-          (job.status === 'pending' && (!job.nextAttemptAt || new Date(job.nextAttemptAt) <= now))
+          (job.status === 'pending' && job.worker.source !== 'agent' && (!job.nextAttemptAt || new Date(job.nextAttemptAt) <= now))
+          || (job.status === 'pending' && job.worker.source === 'agent' && job.waitUntil && new Date(job.waitUntil) <= now)
           || (job.status === 'processing' && job.leaseUntil && new Date(job.leaseUntil) <= now)))
+        .slice(0, limit)
+        .map(job => ({ ...job }));
+    },
+    async ofAgent(agentId, statuses, limit) {
+      return [...jobs.values()]
+        .filter(job => job.worker?.source === 'agent' && job.worker.id === agentId && statuses.includes(job.status))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
         .slice(0, limit)
         .map(job => ({ ...job }));
     },

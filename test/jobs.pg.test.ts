@@ -64,6 +64,22 @@ describe('jobs in PostgreSQL', () => {
     for (const id of [later.jobId, running.jobId, plain.jobId]) expect(ids).not.toContain(id);
   });
 
+  it("leaves an agent's queued job to its agent: due only once it waited too long; found by agent", async () => {
+    const agent = { source: 'agent' as const, id: `agent-${Date.now()}`, name: 'Ada workstation' };
+    const waiting = newJob({ worker: agent, waitUntil: new Date(Date.now() + 60_000) });
+    const tooLong = newJob({ worker: agent, waitUntil: new Date(Date.now() - 1000) });
+    const working = newJob({ worker: agent, status: 'processing', leaseUntil: new Date(Date.now() + 60_000) });
+    const done = newJob({ worker: agent, status: 'completed' });
+    const another = newJob({ worker: { ...agent, id: 'another' } });
+    for (const job of [waiting, tooLong, working, done, another]) await jobStore().insert(job);
+    const ids = (await jobStore().due(new Date(), 500)).map(j => j.jobId);
+    expect(ids).toContain(tooLong.jobId);
+    expect(ids).not.toContain(waiting.jobId);
+    expect((await jobStore().ofAgent(agent.id, ['pending', 'processing'], 10)).map(j => j.jobId).sort())
+      .toEqual([waiting.jobId, tooLong.jobId, working.jobId].sort());
+    expect(new Date((await jobStore().get(waiting.jobId))!.waitUntil!).getTime()).toBe(waiting.waitUntil.getTime());
+  });
+
   it("deletes a project's jobs, and only its", async () => {
     const other = `${PROJECT}-other`;
     await jobStore().insert(newJob());

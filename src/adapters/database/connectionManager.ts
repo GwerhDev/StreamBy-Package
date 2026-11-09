@@ -245,9 +245,41 @@ const createTables = async (pool: Pick<Pool, 'query'>) => {
         "updatedAt"      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS jobs_project_idx ON streamby.jobs ("projectId", "createdAt");
+      -- An agent's job waits for its agent until then (see services/workerAgents).
+      ALTER TABLE streamby.jobs ADD COLUMN IF NOT EXISTS "waitUntil" TIMESTAMP WITH TIME ZONE;
+      CREATE INDEX IF NOT EXISTS jobs_agent_idx ON streamby.jobs ((worker->>'id'), status) WHERE worker->>'source' = 'agent';
       CREATE INDEX IF NOT EXISTS jobs_due_idx ON streamby.jobs (status, "nextAttemptAt") WHERE worker IS NOT NULL;
     `);
     console.log('✅ "jobs" table ensured to exist.');
+
+    // Worker agents (a machine that asks for jobs) and the projects or teams their owners
+    // shared them with (see services/workerAgents). Main db only.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS streamby.worker_agents (
+        id              TEXT PRIMARY KEY,
+        "userId"        VARCHAR(255) NOT NULL,
+        "ownerName"     VARCHAR(255),
+        name            VARCHAR(255) NOT NULL,
+        prefix          VARCHAR(32) NOT NULL,
+        hash            CHAR(64) NOT NULL UNIQUE,
+        kinds           JSONB NOT NULL DEFAULT '[]',
+        categories      JSONB NOT NULL DEFAULT '[]',
+        "timeoutSeconds" INTEGER,
+        "lastSeenAt"    TIMESTAMP WITH TIME ZONE,
+        "createdAt"     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS worker_agents_user_idx ON streamby.worker_agents ("userId");
+      CREATE TABLE IF NOT EXISTS streamby.worker_agent_shares (
+        id              TEXT PRIMARY KEY,
+        "agentId"       VARCHAR(255) NOT NULL,
+        "projectId"     VARCHAR(255) NOT NULL,
+        "teamId"        VARCHAR(255),
+        "createdAt"     TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS worker_agent_shares_agent_idx ON streamby.worker_agent_shares ("agentId");
+      CREATE INDEX IF NOT EXISTS worker_agent_shares_project_idx ON streamby.worker_agent_shares ("projectId");
+    `);
+    console.log('✅ "worker_agents" tables ensured to exist.');
 
     // The MCP server's audit log: every tool call (see mcp/audit). Main db only.
     await pool.query(`

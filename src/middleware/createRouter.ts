@@ -36,6 +36,7 @@ import { workflowRouter } from './routes/workflow';
 import { pipelineRouter } from './routes/pipeline';
 import { workerRouter } from './routes/worker';
 import { workerCallbackRouter } from './routes/workerCallback';
+import { workerAgentPollRouter, workerAgentRouter } from './routes/workerAgent';
 import { startWorkerSweeper } from '../services/workerJobs';
 import { deliverableRouter } from './routes/deliverable';
 import { documentRouter } from './routes/document';
@@ -109,6 +110,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
       registerModel('user_integrations', [mainDb.id], 'user_integrations', streambySchema);
       registerModel('api_tokens', [mainDb.id], 'api_tokens', streambySchema);
       registerModel('mcp_audit', [mainDb.id], 'mcp_audit', streambySchema);
+      registerModel('worker_agents', [mainDb.id], 'worker_agents', streambySchema);
+      registerModel('worker_agent_shares', [mainDb.id], 'worker_agent_shares', streambySchema);
     }
   }
 
@@ -123,6 +126,8 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(authRouter(config));
   // Workers call back with their job's token, not a session (see routes/workerCallback).
   router.use(workerCallbackRouter({ ...config, adapter }));
+  // Agents ask for jobs with their own token, not a session (see routes/workerAgent).
+  router.use(workerAgentPollRouter({ ...config, adapter }));
   router.use(authenticate(config));
   router.use(enforceApiTokenScope);
   router.use(enforceProjectRoles);
@@ -151,6 +156,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(workflowRouter(config));
   router.use(pipelineRouter(config));
   router.use(workerRouter({ ...config, adapter }));
+  router.use(workerAgentRouter({ ...config, adapter }));
   router.use(deliverableRouter({ ...config, adapter }));
   router.use(documentRouter(config));
   router.use(projectResourcesRouter(config));

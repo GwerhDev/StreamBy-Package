@@ -215,6 +215,9 @@ export interface StreamByConfig {
     sweepIntervalMs?: number;
     // Lets a project's worker be on a local or private address, or plain http (development).
     allowLocalEndpoints?: boolean;
+    // How long an agent's poll waits for a job before answering there's none (ms; default 25
+    // seconds). See services/workerAgents.
+    agentPollWaitMs?: number;
   };
   // Registers this deploy as an OAuth CLIENT of Jira/Google (StreamBy is the client, NOT
   // the provider). Absent per-provider = that provider's OAuth start/callback routes
@@ -546,6 +549,8 @@ export interface JobRecord {
   // When it may be sent (again) to the worker; until when the worker has it.
   nextAttemptAt?: Date | null;
   leaseUntil?: Date | null;
+  // An agent's job: until when it waits for its agent to take it (then it fails).
+  waitUntil?: Date | null;
   // sha256 of the token the worker calls back with (never the token itself).
   callbackHash?: string | null;
   // The result's upload, while the worker sends it: its key and what it is.
@@ -557,7 +562,8 @@ export interface JobRecord {
 }
 
 export type WorkerResultMode = 'version' | 'derived';
-export type WorkerSource = 'builtin' | 'project';
+// The host's (builtin) and a project's are sent their jobs; an agent asks for them.
+export type WorkerSource = 'builtin' | 'project' | 'agent';
 export interface WorkerRef { source: WorkerSource; id: string; name: string }
 
 /**
