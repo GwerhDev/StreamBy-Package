@@ -84,6 +84,21 @@ server.listen(3000);
 
 ---
 
+## 🗃️ A project's database records
+
+A database connection's tables (or collections) and records are under
+`/projects/:id/connections/db/:connId/tables` (MongoDB and PostgreSQL, as the Database section
+uses them). `GET .../tables/:table/:recordId` answers one record and its `version`: a hash of what
+it holds, which changes when it does. `PUT .../tables/:table/:recordId` changes the fields given
+(the rest stay), or with `?replace=true` replaces the record whole (its id stays; a field it isn't
+given is gone, a PostgreSQL column set to null, and a column the table doesn't have is a 400).
+With `?baseVersion=<version>` it's only made on that version: changed since, a 409 with its
+`version` now. From the MCP server: `list_database_connections`, `list_database_tables`,
+`list_database_records`, `get_database_record`, `update_database_record` and
+`replace_database_record` (always on the version read), `create_database_record`,
+`delete_database_record`. A record's `streamby://asset/<fileId>` is answered as a signed URL by the
+exports that serve it.
+
 ## 📁 Storage's folders
 
 A storage's folders and files are under `/projects/:projectId/connections/storage/:connId`
@@ -355,6 +370,8 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `get_export` | `exports:read` |
 | `set_export_json`, `update_export` | `exports:write` |
 | `get_job`, `list_jobs` | `jobs:read` |
+| `list_database_connections`, `list_database_tables`, `list_database_records`, `get_database_record` | `project:read` |
+| `update_database_record`, `replace_database_record`, `create_database_record`, `delete_database_record` | `project:update` |
 | `list_workers` | `project:read` |
 | `process_asset`, `retry_job`, `start_pipeline_run` | `jobs:run` |
 | `list_teams` | `members:read` |

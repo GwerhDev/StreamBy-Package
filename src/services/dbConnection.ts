@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Client, Pool } from 'pg';
 import { MongoClient, Db } from 'mongodb';
 import { ExternalDbType, CreateTableSchema } from '../types';
@@ -340,6 +341,58 @@ export async function updateRecordInternal(
     { returnDocument: 'after', projection: RECORD_META_PROJECTION },
   );
 }
+
+/**
+ * A record's version: a hash of what it holds, as it's read (its fields, by name). It changes
+ * when any of them does, and only then: a change is made on the version it was read at.
+ */
+export function recordVersion(record: unknown): string {
+  const canonical = (value: any): any => {
+    if (value === null || typeof value !== 'object') return value;
+    if (value instanceof Date) return value.toISOString();
+    if (typeof value.toHexString === 'function') return value.toHexString();
+    if (Array.isArray(value)) return value.map(canonical);
+    return Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])]));
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(canonical(record))).digest('hex').slice(0, 16);
+}
+
+/**
+ * Replaces a record's fields with the ones given, all of them (its id stays): a field it had
+ * and the new one doesn't is gone (in a SQL table, its column set to null).
+ */
+export async function replaceRecordInternal(
+  client: Pool | MongoClient,
+  dbType: 'sql' | 'nosql',
+  tableName: string,
+  recordId: string,
+  record: Record<string, unknown>,
+  projectId?: string,
+): Promise<any | null> {
+  const current = await queryRecordByIdInternal(client, dbType, tableName, recordId, projectId);
+  if (!current) return null;
+  if (dbType === 'sql') {
+    const columns = Object.keys(current).filter(k => k !== 'id');
+    const unknown = Object.keys(record).filter(k => k !== 'id' && !columns.includes(k));
+    if (unknown.length) throw new RecordError(`The table has no column ${unknown.join(', ')}`);
+    const full = Object.fromEntries(columns.map(k => [k, record[k] ?? null]));
+    return updateRecordInternal(client, dbType, tableName, recordId, full, projectId);
+  }
+  const { _id, _projectId: _p, _tableName: _t, ...fields } = record as any;
+  const gone = Object.keys(current).filter(k => !['_id', '_projectId', '_tableName'].includes(k) && !(k in fields));
+  const meta: any = {};
+  if (projectId) meta._projectId = projectId;
+  if (tableName) meta._tableName = tableName;
+  const collection = (client as MongoClient).db().collection('records');
+  await collection.updateOne(
+    { ...meta, _id: current._id },
+    { $set: fields, ...(gone.length ? { $unset: Object.fromEntries(gone.map(k => [k, ''])) } : {}) },
+  );
+  return queryRecordByIdInternal(client, dbType, tableName, recordId, projectId);
+}
+
+/** A change to a record that can't be made, and why. */
+export class RecordError extends Error {}
 
 export async function deleteRecordInternal(
   client: Pool | MongoClient,

@@ -15,6 +15,10 @@ import {
   createTableOrCollectionInternal,
   insertRecordInternal,
   updateRecordInternal,
+  queryRecordByIdInternal,
+  replaceRecordInternal,
+  recordVersion,
+  RecordError,
   deleteRecordInternal,
   deleteTableOrCollectionInternal,
 } from '../../services/dbConnection';
@@ -258,7 +262,32 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
     }
   });
 
+  // ─── Read one record ──────────────────────────────────────────────────────
+  // With its version (a hash of what it holds), to change it on (baseVersion).
+  router.get('/projects/:id/connections/db/:connId/tables/:tableName/:recordId', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const project = await Project.findOne({ _id: req.params.id });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!isProjectMember(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      await withResolvedDbClient(project, req.params.connId, config, auth, res, async resolved => {
+        const record = await queryRecordByIdInternal(resolved.client, resolved.type, req.params.tableName, req.params.recordId, req.params.id);
+        if (!record) {
+          res.status(404).json({ message: 'Record not found' });
+          return;
+        }
+        res.status(200).json({ data: record, version: recordVersion(record) });
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to read record', details: err.message });
+    }
+  });
+
   // ─── Update record ────────────────────────────────────────────────────────
+  // Its fields given, changed (the rest as they are); with ?replace=true, the record is what's
+  // given, all of it. With ?baseVersion= (its version as it was read), only on that version: a
+  // 409 if it changed since (what an agent always does; the Database section doesn't, yet).
   router.put('/projects/:id/connections/db/:connId/tables/:tableName/:recordId', async (req: Request, res: Response) => {
     try {
       const auth = (req as any).auth as Auth;
@@ -271,10 +300,37 @@ export function dbConnectionRouter(config: StreamByConfig): Router {
       if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
         return res.status(400).json({ message: 'Request body must be a JSON object' });
       }
+      const baseVersion = req.query.baseVersion;
+      if (baseVersion !== undefined && typeof baseVersion !== 'string') return res.status(400).json({ message: 'baseVersion is the version the record was read at' });
+      const replace = req.query.replace === 'true';
 
       await withResolvedDbClient(project, req.params.connId, config, auth, res, async resolved => {
-        const updated = await updateRecordInternal(resolved.client, resolved.type, req.params.tableName, req.params.recordId, updates, req.params.id);
-        res.status(200).json({ data: updated });
+        const { tableName, recordId, id: projectId } = req.params;
+        if (baseVersion !== undefined || replace) {
+          const current = await queryRecordByIdInternal(resolved.client, resolved.type, tableName, recordId, projectId);
+          if (!current) {
+            res.status(404).json({ message: 'Record not found' });
+            return;
+          }
+          const version = recordVersion(current);
+          if (baseVersion !== undefined && baseVersion !== version) {
+            res.status(409).json({ message: 'The record changed since it was read: read it again to see the change.', version });
+            return;
+          }
+        }
+        try {
+          const updated = replace
+            ? await replaceRecordInternal(resolved.client, resolved.type, tableName, recordId, updates, projectId)
+            : await updateRecordInternal(resolved.client, resolved.type, tableName, recordId, updates, projectId);
+          if (!updated && (baseVersion !== undefined || replace)) {
+            res.status(404).json({ message: 'Record not found' });
+            return;
+          }
+          res.status(200).json({ data: updated, ...(updated ? { version: recordVersion(updated) } : {}) });
+        } catch (err) {
+          if (!(err instanceof RecordError)) throw err;
+          res.status(400).json({ message: err.message });
+        }
       });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update record', details: err.message });

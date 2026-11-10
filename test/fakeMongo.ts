@@ -107,6 +107,7 @@ export class FakeCollection {
         return cursor;
       },
       limit: (n: number) => { result = result.slice(0, n); return cursor; },
+      skip: (n: number) => { result = result.slice(n); return cursor; },
       // A projection keeps the fields asked for (1s only), as the routes use it.
       project: (fields: Doc) => {
         const keep = Object.keys(fields).filter(k => fields[k]);

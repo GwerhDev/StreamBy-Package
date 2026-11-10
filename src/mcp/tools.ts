@@ -77,6 +77,9 @@ const rightsFields = {
 };
 
 // Only the fields given (an unset optional field isn't sent as undefined).
+// A database connection's routes.
+const databaseOf = (projectId: string, connectionId: string) => `/projects/${enc(projectId)}/connections/db/${enc(connectionId)}`;
+
 // A storage's routes: a connection's, or (`builtin`) the project's built-in storage's.
 const storageOf = (projectId: string, connectionId?: string) =>
   `/projects/${enc(projectId)}/connections/storage/${enc(connectionId ?? 'builtin')}`;
@@ -702,6 +705,93 @@ export const TOOLS = [
     input: { projectId },
     projectOf: byProject,
     call: ({ projectId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}` }),
+    pick: (data) => ({ message: data?.message }),
+  }),
+
+  // ── The project's databases: their tables and records ──
+  tool({
+    name: 'list_database_connections', title: "List a project's databases", permissions: ['project:read'],
+    description: "A project's database connections (MongoDB, PostgreSQL), each with its id: what its Data Source nodes read records from, and the Database section shows.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/connections/db` }),
+    pick: (data) => data?.data ?? [],
+  }),
+  tool({
+    name: 'list_database_tables', title: "List a database's tables", permissions: ['project:read'],
+    description: "The tables (PostgreSQL) or collections (MongoDB) of one of a project's database connections.",
+    input: { projectId, connectionId: id('database connection') },
+    projectOf: byProject,
+    call: ({ projectId, connectionId }) => ({ method: 'GET', path: `${databaseOf(projectId, connectionId)}/tables` }),
+    pick: (data) => data?.data ?? [],
+  }),
+  tool({
+    name: 'list_database_records', title: "List a table's records", permissions: ['project:read'],
+    description: "Records of a table (or collection) of one of a project's databases, at most `limit` (50 if not given, up to 500) from `offset`. To change one, read it first (get_database_record): its version is what it's changed on.",
+    input: {
+      projectId, connectionId: id('database connection'), table: z.string().min(1),
+      limit: z.number().int().min(1).max(500).optional(), offset: z.number().int().min(0).optional(),
+    },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, table, limit, offset }) => ({
+      method: 'GET',
+      path: `${databaseOf(projectId, connectionId)}/tables/${enc(table)}?${new URLSearchParams(defined({ limit, offset }) as Record<string, string>)}`,
+    }),
+    pick: (data) => data?.data ?? [],
+  }),
+  tool({
+    name: 'get_database_record', title: 'Get a record', permissions: ['project:read'],
+    description: "One record of a table of a project's database, by its id (`id` in PostgreSQL, `_id` in MongoDB), and its version: what update_database_record, replace_database_record work on.",
+    input: { projectId, connectionId: id('database connection'), table: z.string().min(1), recordId: id('record') },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, table, recordId }) => ({ method: 'GET', path: `${databaseOf(projectId, connectionId)}/tables/${enc(table)}/${enc(recordId)}` }),
+    pick: (data) => ({ record: data?.data, version: data?.version }),
+  }),
+  tool({
+    name: 'update_database_record', title: "Change a record's fields", permissions: ['project:update'], write: true,
+    description: [
+      "Changes some fields of a record (the rest stay as they are), on its version as it was read (get_database_record): if it changed since, nothing changes and the answer says so; read it again and make the change on it. Answers the record and its new version.",
+      "An asset of the project is referred to as streamby://asset/<fileId>: an export serving the record answers it as a signed URL of the asset's current version.",
+    ].join(' '),
+    input: {
+      projectId, connectionId: id('database connection'), table: z.string().min(1), recordId: id('record'),
+      fields: z.record(z.string(), z.unknown()).describe('The fields to change, and their new values'),
+      baseVersion: z.string().describe('Its version as it was read (get_database_record)'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, table, recordId, fields, baseVersion }) => ({
+      method: 'PUT', path: `${databaseOf(projectId, connectionId)}/tables/${enc(table)}/${enc(recordId)}?${new URLSearchParams({ baseVersion })}`, body: fields,
+    }),
+    pick: (data) => ({ record: data?.data, version: data?.version }),
+  }),
+  tool({
+    name: 'replace_database_record', title: 'Replace a record', permissions: ['project:update'], write: true,
+    description: "Replaces a whole record with the one given (its id stays; a field it doesn't have is gone, in PostgreSQL its column set to null), on its version as it was read (get_database_record): if it changed since, nothing changes and the answer says so. Answers the record and its new version.",
+    input: {
+      projectId, connectionId: id('database connection'), table: z.string().min(1), recordId: id('record'),
+      record: z.record(z.string(), z.unknown()).describe('The whole record, as it is to be'),
+      baseVersion: z.string().describe('Its version as it was read (get_database_record)'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, table, recordId, record, baseVersion }) => ({
+      method: 'PUT', path: `${databaseOf(projectId, connectionId)}/tables/${enc(table)}/${enc(recordId)}?${new URLSearchParams({ baseVersion, replace: 'true' })}`, body: record,
+    }),
+    pick: (data) => ({ record: data?.data, version: data?.version }),
+  }),
+  tool({
+    name: 'create_database_record', title: 'Create a record', permissions: ['project:update'], write: true,
+    description: "Adds a record to a table (or collection) of one of a project's databases. Answers it, with its id.",
+    input: { projectId, connectionId: id('database connection'), table: z.string().min(1), record: z.record(z.string(), z.unknown()) },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, table, record }) => ({ method: 'POST', path: `${databaseOf(projectId, connectionId)}/tables/${enc(table)}`, body: record }),
+    pick: (data) => data?.data,
+  }),
+  tool({
+    name: 'delete_database_record', title: 'Delete a record', permissions: ['project:update'], write: true, destructive: true,
+    description: "Deletes a record of a table of one of a project's databases. It cannot be undone; an export reading it stops serving it.",
+    input: { projectId, connectionId: id('database connection'), table: z.string().min(1), recordId: id('record') },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, table, recordId }) => ({ method: 'DELETE', path: `${databaseOf(projectId, connectionId)}/tables/${enc(table)}/${enc(recordId)}` }),
     pick: (data) => ({ message: data?.message }),
   }),
 
