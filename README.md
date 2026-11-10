@@ -84,6 +84,19 @@ server.listen(3000);
 
 ---
 
+## ✏️ Changing an export's data
+
+`PATCH /projects/:id/exports/:exportId` changes an export (as its editor saves it), and with
+`baseUpdatedAt` (its `updatedAt` as it was read with `GET`, or `null` if it had none) only on that
+version: saved since, it's a 409 with its `updatedAt` now. Each save gives it a new `updatedAt`.
+
+- `{ jsonNode: { nodeId, json } }` replaces one JSON Data node's JSON (`json` as text, valid JSON,
+  or a 400), leaving the rest of its schema as it is. From the MCP server, `set_export_json`.
+- `name` (no other export's, case aside), `description` and `allowedOrigin` (a list) change
+  them. From the MCP server, `update_export`.
+
+The editor in the UI saves without `baseUpdatedAt`: its save isn't checked against a version.
+
 ## 🔒 A private bucket
 
 StreamBy's storage bucket needs no public read: nothing reads it by a URL of the bucket.
@@ -328,6 +341,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `create_pipeline`, `update_pipeline`, `edit_workflow` | `workflow:write` |
 | `list_exports` | `project:read` and `exports:read` |
 | `get_export` | `exports:read` |
+| `set_export_json`, `update_export` | `exports:write` |
 | `get_job`, `list_jobs` | `jobs:read` |
 | `list_workers` | `project:read` |
 | `process_asset`, `retry_job`, `start_pipeline_run` | `jobs:run` |

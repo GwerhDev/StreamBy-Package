@@ -10,6 +10,8 @@ import { createSQLExportTable } from '../adapters/database/sql';
 interface ExportResult {
   exportId: string;
   message: string;
+  // Its new version (an update's), to change it on next.
+  updatedAt?: Date;
 }
 
 export async function createExport(
@@ -123,6 +125,11 @@ export async function updateExport(
   }
   // SQL raw export table update would go here if needed in future
 
+  // Each save a later version than the one before, even within the same millisecond: a change
+  // is made on the version it was read at (baseUpdatedAt, see routes/export).
+  const before = exportEntry?.updatedAt ? new Date(exportEntry.updatedAt).getTime() : 0;
+  const updatedAt = new Date(Math.max(Date.now(), before + 1));
+
   // Update the export entry in the project document
   if (isSqlProject) {
     // For SQL projects: read-modify-write the exports JSONB array
@@ -130,7 +137,7 @@ export async function updateExport(
     const currentExports: any[] = (project as any)?.exports ?? [];
     const updatedExports = currentExports.map((e: any) =>
       String(e.id) === exportId
-        ? { ...e, name: exportName, private: isPrivate, allowedOrigin, devMode, devPorts, nodeSchema, useConnections, useCredentials, description }
+        ? { ...e, name: exportName, private: isPrivate, allowedOrigin, devMode, devPorts, nodeSchema, useConnections, useCredentials, description, updatedAt }
         : e,
     );
     await SqlProject.update({ _id: projectId }, { exports: updatedExports } as any);
@@ -138,11 +145,11 @@ export async function updateExport(
     const NoSQLProject = getModel('projects');
     await NoSQLProject.update(
       { _id: new ObjectId(projectId), 'exports.id': { $in: [new ObjectId(exportId), exportId] } },
-      { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.devMode': devMode, 'exports.$.devPorts': devPorts, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description } },
+      { $set: { 'exports.$.name': exportName, 'exports.$.private': isPrivate, 'exports.$.allowedOrigin': allowedOrigin, 'exports.$.devMode': devMode, 'exports.$.devPorts': devPorts, 'exports.$.nodeSchema': nodeSchema, 'exports.$.useConnections': useConnections, 'exports.$.useCredentials': useCredentials, 'exports.$.description': description, 'exports.$.updatedAt': updatedAt } },
     );
   }
 
-  return { exportId, message: `${exportType} export updated successfully` };
+  return { exportId, updatedAt, message: `${exportType} export updated successfully` };
 }
 
 export async function deleteExport(

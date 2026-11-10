@@ -63,6 +63,44 @@ export const DEFAULT_NODE_SCHEMA = {
   ],
 };
 
+// A JSON Data node's node type.
+const JSON_NODE = 'jsonInputNode';
+
+/** A schema with one JSON Data node's JSON replaced, or why it can't be. */
+export function replaceNodeJson(nodeSchema: any, jsonNode: any): { nodeSchema: any } | { error: string; status: number } {
+  if (!jsonNode || typeof jsonNode !== 'object' || typeof jsonNode.nodeId !== 'string' || typeof jsonNode.json !== 'string') {
+    return { error: 'jsonNode is { nodeId, json }: the JSON as text', status: 400 };
+  }
+  const node = (nodeSchema?.nodes ?? []).find((n: any) => n.id === jsonNode.nodeId);
+  if (!node) return { error: `The export has no node ${jsonNode.nodeId}`, status: 404 };
+  if (node.type !== JSON_NODE) return { error: `${jsonNode.nodeId} isn't a JSON Data node`, status: 400 };
+  try {
+    JSON.parse(jsonNode.json);
+  } catch (err: any) {
+    return { error: `Not valid JSON: ${err.message}`, status: 400 };
+  }
+  return {
+    nodeSchema: {
+      ...nodeSchema,
+      nodes: nodeSchema.nodes.map((n: any) => (n.id === node.id ? { ...n, data: { ...(n.data ?? {}), jsonString: jsonNode.json } } : n)),
+    },
+  };
+}
+
+/** What's wrong with an export's new name or allowed origins, if anything. */
+function checkExportFields(project: any, exportMetadata: any, { name, allowedOrigin }: { name?: unknown; allowedOrigin?: unknown }): string | null {
+  if (name !== undefined) {
+    if (typeof name !== 'string' || !name.trim()) return 'name is a non-empty text';
+    // It's served by its name (case aside): two can't share one.
+    const taken = (project.exports ?? []).some((e: any) => e !== exportMetadata && e.name?.toLowerCase().trim() === name.toLowerCase().trim());
+    if (taken) return `The project has an export named ${name.trim()} already`;
+  }
+  if (allowedOrigin !== undefined && (!Array.isArray(allowedOrigin) || !allowedOrigin.every(o => typeof o === 'string' && o.trim()))) {
+    return 'allowedOrigin is a list of origins (e.g. https://example.com), or ["*"]';
+  }
+  return null;
+}
+
 export function exportRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -243,6 +281,8 @@ export function exportRouter(config: StreamByConfig): Router {
       responseData = {
         ...data,
         id: exportId,
+        // Its version, to change it on (baseUpdatedAt): null until it's first saved.
+        updatedAt: exportMetadata.updatedAt ?? null,
         allowedOrigin: exportMetadata.allowedOrigin,
         private: exportMetadata.private,
         devMode: exportMetadata.devMode,
@@ -303,7 +343,7 @@ export function exportRouter(config: StreamByConfig): Router {
       }
 
       const { id: projectId, export_id: exportId } = req.params;
-      const { name, description, isPrivate, allowedOrigin, devMode, devPorts, useConnections, useCredentials, nodeSchema } = req.body;
+      const { name, description, isPrivate, allowedOrigin, devMode, devPorts, useConnections, useCredentials, nodeSchema, jsonNode } = req.body;
 
       const project = await Project.findOne({ _id: projectId });
       if (!project || !canEditProject(project, auth.userId)) {
@@ -315,8 +355,33 @@ export function exportRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Export not found' });
       }
 
+      // Made on the version it was read at, when it says which (an agent always does): a change
+      // saved since would be undone.
+      if (req.body && 'baseUpdatedAt' in req.body) {
+        const base = req.body.baseUpdatedAt;
+        if (base !== null && (typeof base !== 'string' || Number.isNaN(new Date(base).getTime()))) {
+          return res.status(400).json({ message: "baseUpdatedAt is the export's updatedAt as it was read (null if it had none)" });
+        }
+        const current = exportMetadata.updatedAt ? new Date(exportMetadata.updatedAt).toISOString() : null;
+        if (current !== (base === null ? null : new Date(base).toISOString())) {
+          return res.status(409).json({ message: 'The export changed since it was read: read it again to see the change.', updatedAt: current });
+        }
+      }
+
+      const checked = checkExportFields(project, exportMetadata, { name, allowedOrigin });
+      if (checked) return res.status(400).json({ message: checked });
+
+      // One JSON Data node's JSON, replaced (the rest of its schema as it is).
+      let replacedSchema: any;
+      if (jsonNode !== undefined) {
+        if (nodeSchema !== undefined) return res.status(400).json({ message: 'Give nodeSchema or jsonNode, not both' });
+        const replaced = replaceNodeJson(exportMetadata.nodeSchema, jsonNode);
+        if ('error' in replaced) return res.status(replaced.status).json({ message: replaced.error });
+        replacedSchema = replaced.nodeSchema;
+      }
+
       const resolvedName = name ?? exportMetadata.name;
-      const resolvedNodeSchema = nodeSchema ?? exportMetadata.nodeSchema;
+      const resolvedNodeSchema = replacedSchema ?? nodeSchema ?? exportMetadata.nodeSchema;
       const resolvedUseConnections = useConnections ?? exportMetadata.useConnections;
       const exportType = resolvedUseConnections ? 'externalApi' : 'json';
 

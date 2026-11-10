@@ -220,10 +220,44 @@ export const TOOLS = [
   }),
   tool({
     name: 'get_export', title: 'Get an export', permissions: ['exports:read'],
-    description: 'An export, with its node schema.',
+    description: "An export, with its node schema and its updatedAt (the version to change it on: set_export_json, update_export).",
     input: { projectId, exportId: id('export') },
     projectOf: byProject,
     call: ({ projectId, exportId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/exports/${enc(exportId)}` }),
+  }),
+  tool({
+    name: 'set_export_json', title: "Replace a JSON Data node's JSON", permissions: ['exports:write'], write: true,
+    description: [
+      "Replaces the JSON of one of an export's JSON Data nodes (jsonInputNode, by its id in the export's nodeSchema, get_export), as its editor in the UI does, and saves the export: the export serves it from then on.",
+      "`json` is the whole new JSON, as text; it must be valid JSON. The rest of the export doesn't change.",
+      "`baseUpdatedAt` is the export's updatedAt as it was read (get_export; null if it had none): if it was saved since, nothing changes and the answer says so; read it again and make the change on it.",
+      "An asset of the project is referred to as streamby://asset/<fileId>: StreamBy answers it as a signed URL of its current version (its bucket isn't read by direct URLs).",
+    ].join(' '),
+    input: {
+      projectId, exportId: id('export'),
+      nodeId: z.string().describe("The JSON Data node's id"),
+      json: z.string().describe('The whole new JSON, as text'),
+      baseUpdatedAt: z.string().nullable().describe("The export's updatedAt as it was read (get_export), or null if it had none"),
+    },
+    projectOf: byProject,
+    call: ({ projectId, exportId, nodeId, json, baseUpdatedAt }) => ({
+      method: 'PATCH', path: `/projects/${enc(projectId)}/exports/${enc(exportId)}`, body: { baseUpdatedAt, jsonNode: { nodeId, json } },
+    }),
+    pick: (data) => data?.data,
+  }),
+  tool({
+    name: 'update_export', title: 'Update an export', permissions: ['exports:write'], write: true,
+    description: "Changes an export's name (it's served at /<projectId>/export/<name>: changing it changes its URL), its description, or the origins allowed to read it (allowedOrigin: e.g. [\"https://example.com\"], or [\"*\"] for the project's). `baseUpdatedAt` is its updatedAt as it was read (get_export; null if it had none): if it was saved since, nothing changes and the answer says so.",
+    input: {
+      projectId, exportId: id('export'),
+      name: z.string().min(1).optional(),
+      description: z.string().optional(),
+      allowedOrigin: z.array(z.string().min(1)).optional(),
+      baseUpdatedAt: z.string().nullable().describe("The export's updatedAt as it was read (get_export), or null if it had none"),
+    },
+    projectOf: byProject,
+    call: ({ projectId, exportId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/exports/${enc(exportId)}`, body: { ...defined(fields), baseUpdatedAt: fields.baseUpdatedAt } }),
+    pick: (data) => data?.data,
   }),
   tool({
     name: 'get_job', title: 'Get a job', permissions: ['jobs:read'],
