@@ -84,6 +84,24 @@ server.listen(3000);
 
 ---
 
+## 📐 What a 3D asset measures, against the project's budgets
+
+StreamBy measures nothing itself: whoever opens a version measures it (StreamBy-UI's inspector,
+in the browser with three.js; later a worker or a local tool) and sends what it measures with
+`PUT /projects/:projectId/assets/:assetId/versions/:versionId/measurements` (`assets:write`):
+`{ triangles, vertices, meshes, materials, textures: [{ name, width, height, format }],
+animations: [{ name, duration }], tool? }`, checked and kept with the version (each time again).
+`GET /projects/:projectId/assets/:assetId/measurements?versionId=` (`assets:read`; the latest
+version if none is given) answers them (`null` while unmeasured), the budget profile they're
+checked against and what's over it (`exceeded`: each metric, its limit and its value).
+
+A project's budgets (`GET`, `PUT /projects/:projectId/asset-budgets`; `project:read`,
+`project:update`) are profiles, one per kind of piece, each with the most it may have of
+triangles, materials, textures, a texture's side (px), texture formats (MIME types) and
+animations (a limit not set isn't checked), and a default profile. An asset chooses its own with
+`PUT .../assets/:assetId/budget-profile { profileId }` (null: the default). From the MCP server:
+`get_asset_measurements`, `get_asset_budgets`, and `list_asset_versions` says which are measured.
+
 ## 🗃️ A project's database records
 
 A database connection's tables (or collections) and records are under
@@ -360,7 +378,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `get_project` | `project:read` |
 | `create_project` | `projects:create` |
 | `delete_project` | `project:delete` |
-| `list_assets` (by category, optionally in one storage connection, and filtered by name), `get_asset_metadata` | `assets:read` |
+| `list_assets` (by category, optionally in one storage connection, and filtered by name), `get_asset_metadata`, `get_asset_measurements` | `assets:read` |
 | `update_asset_metadata` | `assets:write` |
 | `delete_asset` | `assets:delete` |
 | `get_asset_rights`, `get_credits_sheet` / `set_asset_rights` | `rights:read` / `rights:write` |
@@ -370,6 +388,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `get_export` | `exports:read` |
 | `set_export_json`, `update_export` | `exports:write` |
 | `get_job`, `list_jobs` | `jobs:read` |
+| `get_asset_budgets` | `project:read` |
 | `list_database_connections`, `list_database_tables`, `list_database_records`, `get_database_record` | `project:read` |
 | `update_database_record`, `replace_database_record`, `create_database_record`, `delete_database_record` | `project:update` |
 | `list_workers` | `project:read` |

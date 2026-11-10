@@ -28,6 +28,7 @@ import { oauthResourceRouter } from './routes/oauthResource';
 import { notificationRouter } from './routes/notification';
 import { subscriptionRouter, ensureSubscription } from './routes/subscription';
 import { mediaRouter } from './routes/media';
+import { assetMeasurementsRouter } from './routes/assetMeasurements';
 import { reviewRouter } from './routes/review';
 import { distributionRouter } from './routes/distribution';
 import { productionRouter } from './routes/production';
@@ -149,6 +150,7 @@ export function createStreamByRouter(config: StreamByConfig & { adapter?: Storag
   router.use(notificationRouter(config));
   router.use(subscriptionRouter(config));
   router.use(mediaRouter(config));
+  router.use(assetMeasurementsRouter(config));
   router.use(reviewRouter(config));
   router.use(distributionRouter(config));
   router.use(productionRouter(config));

@@ -144,6 +144,26 @@ export const TOOLS = [
     call: ({ projectId, fileId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(fileId)}/metadata` }),
   }),
   tool({
+    name: 'get_asset_measurements', title: "Get a 3D asset's measurements", permissions: ['assets:read'],
+    description: [
+      "What a 3D asset's version measures (its latest if versionId isn't given): triangles, vertices, meshes, materials, textures (each one's name, width, height and format) and animations (name, duration in seconds), when and by whom it was measured; and the project's budget profile it's checked against, with what it has over it (`exceeded`: each metric, its limit and its value).",
+      "`measurements` is null if no one has opened that version in the inspector yet (it's measured there, in the browser): it's unmeasured.",
+    ].join(' '),
+    input: { projectId, assetId: id('asset'), versionId: z.string().optional().describe('A version (list_asset_versions); the latest if not given') },
+    projectOf: byProject,
+    call: ({ projectId, assetId, versionId }) => ({
+      method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/measurements${versionId ? `?${new URLSearchParams({ versionId })}` : ''}`,
+    }),
+  }),
+  tool({
+    name: 'get_asset_budgets', title: "Get a project's 3D budgets", permissions: ['project:read'],
+    description: "A project's budgets for its 3D assets: its profiles (one per kind of piece, e.g. Character, Prop), each with the most it may have of triangles, materials, textures, a texture's side in pixels, texture formats and animations; and its default profile, for an asset that chose none.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/asset-budgets` }),
+    pick: (data) => data?.budgets,
+  }),
+  tool({
     name: 'get_asset_rights', title: "Get an asset's rights", permissions: ['rights:read'],
     description: "An asset's license metadata: where it was taken from, its creator (name and link), its license and comments; null if it has none.",
     input: { projectId, assetId: id('asset') },
@@ -431,12 +451,14 @@ export const TOOLS = [
   // the user's own tool (Blender's or Godot's MCP, a script) uploads or downloads it directly.
   tool({
     name: 'list_asset_versions', title: "List an asset's versions", permissions: ['assets:read'],
-    description: "An asset's versions, newest first: each one's id, number, file name and when it was made. Any of them can be downloaded (get_asset_download_url).",
+    description: "An asset's versions, newest first: each one's id, number, file name, when it was made, and whether it was measured (a 3D one, get_asset_measurements). Any of them can be downloaded (get_asset_download_url).",
     input: { projectId, assetId: id('asset') },
     projectOf: byProject,
     call: ({ projectId, assetId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/versions` }),
     pick: (data) => (data?.versions ?? []).map((v: any) => ({
       versionId: v.versionId, version: v.version, fileName: v.fileName ?? null, contentType: v.contentType ?? null, createdAt: v.createdAt,
+      // Whether it was measured (get_asset_measurements).
+      measured: !!v.measurements,
     })),
   }),
   tool({

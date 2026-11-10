@@ -89,7 +89,11 @@ const RULES = [
   rule('read', `${P}/connections/storage/[^/]+/(files|folders)(/.+)?`, 'assets:read'),
   rule(['POST', 'PATCH'], `${P}/connections/storage/[^/]+/(files|folders)(/.+)?`, 'assets:write'),
   rule('delete', `${P}/connections/storage/[^/]+/(files|folders)/[^/]+`, 'assets:delete'),
-  rule('read', `${P}/assets/[^/]+/(metadata|versions|qc-report|download-url)`, 'assets:read'),
+  rule('read', `${P}/assets/[^/]+/(metadata|versions|qc-report|download-url|measurements)`, 'assets:read'),
+  // What a 3D asset measures (sent by whoever measured it) and the budget profile it's checked against.
+  rule(['PUT'], `${P}/assets/[^/]+/(versions/[^/]+/measurements|budget-profile)`, 'assets:write'),
+  rule('read', `${P}/asset-budgets`, 'project:read'),
+  rule(['PUT'], `${P}/asset-budgets`, 'project:update'),
   rule(['PATCH'], `${P}/assets/[^/]+/metadata`, 'assets:write'),
   rule(['POST'], `${P}/assets/[^/]+/qc-report`, 'assets:write'),
   rule('read', `${P}/(reviews(/[^/]+)?|assets/[^/]+/versions/[^/]+/annotations)`, 'assets:read'),
