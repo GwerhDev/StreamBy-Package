@@ -77,6 +77,36 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
     return { projectId, ...connMatch, ...(extra ?? {}) };
   }
 
+  // `builtin` stands for the project's built-in storage connection, whatever its row's id (what
+  // an agent, or a page that only knows it's the built-in one, names it by).
+  router.param('connId', async (req, _res, next, connId) => {
+    try {
+      if (connId === 'builtin') {
+        const project = await Project.findOne({ _id: req.params.projectId });
+        const builtin = project?.storageConnections?.find((c: StorageConnection) => c.source === 'builtin');
+        if (builtin) req.params.connId = builtin.id;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // A folder to upload into, if one is given: one of the storage's (the connection's, or the
+  // project's built-in one when none is). Its id, null for none, or why it can't be.
+  async function uploadFolder(req: Request, project: any, connId: string | null): Promise<string | null | { error: string; status: number }> {
+    const folderId = req.query.folderId;
+    if (folderId === undefined || folderId === '' || folderId === 'null') return null;
+    if (typeof folderId !== 'string') return { error: 'folderId is a folder\'s id', status: 400 };
+    const folders = getRawFoldersCollection();
+    if (!folders) return { error: 'Database not available', status: 500 };
+    const builtin = connId ?? project.storageConnections?.find((c: StorageConnection) => c.source === 'builtin')?.id;
+    const filter = builtin
+      ? connFilter(String(project._id ?? project.id), builtin, project, { folderId })
+      : { projectId: String(project._id ?? project.id), folderId, storageConnectionId: { $exists: false } };
+    return (await folders.findOne(filter)) ? folderId : { error: 'Folder not found', status: 404 };
+  }
+
   const resolveConnAdapter = (connId: string, project: any, auth: Auth) =>
     resolveStorageAdapter(project, connId, { ...config, adapter }, auth);
 
@@ -141,6 +171,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+      const folderId = await uploadFolder(req, project, null);
+      if (folderId && typeof folderId === 'object') return res.status(folderId.status).json({ message: folderId.error });
       const rights = uploadRights(req, res);
       if (rights === false) return;
 
@@ -164,6 +196,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
           contentType,
           uploadedBy: auth.userId,
           createdAt: new Date(),
+          folderId,
           ...(sha256 ? { sha256 } : {}),
         };
         await collection.insertOne(fileDoc);
@@ -398,6 +431,8 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
       const sha256 = connSha256(req, project, connId);
       if (sha256 === false) return res.status(400).json({ message: 'sha256 must be the file\'s SHA-256, in hex or base64' });
+      const folderId = await uploadFolder(req, project, connId);
+      if (folderId && typeof folderId === 'object') return res.status(folderId.status).json({ message: folderId.error });
       const rights = uploadRights(req, res);
       if (rights === false) return;
 
@@ -422,6 +457,7 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
           contentType,
           uploadedBy: auth.userId,
           createdAt: new Date(),
+          folderId,
           ...(sha256 ? { sha256 } : {}),
         };
         await collection.insertOne(fileDoc);

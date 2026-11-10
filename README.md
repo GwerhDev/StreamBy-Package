@@ -84,6 +84,18 @@ server.listen(3000);
 
 ---
 
+## 📁 Storage's folders
+
+A storage's folders and files are under `/projects/:projectId/connections/storage/:connId`
+(`folders`, `folders/:folderId`, `files/:fileId`, `files/:fileId/move`), where `:connId` is a
+storage connection's id, or `builtin` for the project's built-in storage (whatever its row's id).
+A new asset goes into a folder of its storage with `folderId` in its `upload-url` query (a 404 if
+the storage has no such folder); without it, at the top. Deleting a folder deletes no asset: what
+was in it goes to the folder it was in. From the MCP server: `list_storage_folders`,
+`create_storage_folder`, `rename_storage_folder`, `delete_storage_folder`, `move_asset`,
+`rename_asset` (its name in Storage; its file and URL stay), and `request_asset_upload` with
+`folderId`.
+
 ## ✏️ Changing an export's data
 
 `PATCH /projects/:id/exports/:exportId` changes an export (as its editor saves it), and with
@@ -350,8 +362,9 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `update_sequence`, `update_shot`, `update_task` | `production:write` |
 | `create_sequence`, `create_shot`, `create_shots`, `create_task`, `create_task_template`, `update_task_template`, `apply_task_template` | `production:write` |
 | `delete_sequence`, `delete_shot`, `delete_task`, `delete_task_template` | `production:delete` |
-| `list_asset_versions`, `get_asset_download_url`, `list_deliverables` | `assets:read` |
-| `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable` | `assets:write` |
+| `list_asset_versions`, `get_asset_download_url`, `list_deliverables`, `list_storage_folders` | `assets:read` |
+| `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable`, `create_storage_folder`, `rename_storage_folder`, `move_asset`, `rename_asset` | `assets:write` |
+| `delete_storage_folder` | `assets:delete` |
 | `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
 | `create_document`, `update_document`, `update_document_section`, `move_document` | `docs:write` |
 | `delete_document` | `docs:delete` |

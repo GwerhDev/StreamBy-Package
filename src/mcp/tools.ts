@@ -77,6 +77,11 @@ const rightsFields = {
 };
 
 // Only the fields given (an unset optional field isn't sent as undefined).
+// A storage's routes: a connection's, or (`builtin`) the project's built-in storage's.
+const storageOf = (projectId: string, connectionId?: string) =>
+  `/projects/${enc(projectId)}/connections/storage/${enc(connectionId ?? 'builtin')}`;
+const storageConnection = z.string().optional().describe("A storage connection's id; the project's built-in storage if not given");
+
 const defined = (fields: Record<string, unknown>) =>
   Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 
@@ -449,12 +454,14 @@ export const TOOLS = [
       assetId: z.string().optional().describe('An existing asset to upload a new version of; a new asset if not given'),
       connectionId: z.string().optional().describe("A storage connection to store it in; the project's built-in storage if not given"),
       sha256: z.string().optional().describe("The file's SHA-256 (hex), for an export's catalog to list it; only the project's built-in storage keeps it"),
+      folderId: z.string().optional().describe("A Storage folder to put a new asset in (list_storage_folders); the top if not given"),
       ...rightsFields,
     },
     projectOf: byProject,
-    call: ({ projectId, category, fileName, contentType, assetId, connectionId, sha256, ...rights }) => {
+    call: ({ projectId, category, fileName, contentType, assetId, connectionId, sha256, folderId, ...rights }) => {
       const query = new URLSearchParams({
         fileName, contentType, ...(connectionId && !assetId ? { category } : {}), ...(sha256 ? { sha256 } : {}),
+        ...(folderId && !assetId ? { folderId } : {}),
         ...(assetId ? {} : defined(rights) as Record<string, string>),
       });
       const files = connectionId ? `/projects/${enc(projectId)}/connections/storage/${enc(connectionId)}` : `/projects/${enc(projectId)}/storage`;
@@ -696,6 +703,61 @@ export const TOOLS = [
     projectOf: byProject,
     call: ({ projectId }) => ({ method: 'DELETE', path: `/projects/${enc(projectId)}` }),
     pick: (data) => ({ message: data?.message }),
+  }),
+
+  // ── Storage folders, and an asset's name and folder ──
+  tool({
+    name: 'list_storage_folders', title: 'List Storage folders', permissions: ['assets:read'],
+    description: "The folders of a project's storage, at its top or inside one (parentId), by name: each with its id and parentId. An asset's folder is its folderId (list_assets).",
+    input: { projectId, connectionId: storageConnection, parentId: z.string().optional().describe('A folder: the ones inside it; the top if not given') },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, parentId }) => ({
+      method: 'GET', path: `${storageOf(projectId, connectionId)}/folders${parentId ? `?${new URLSearchParams({ parentId })}` : ''}`,
+    }),
+    pick: (data) => data?.data ?? [],
+  }),
+  tool({
+    name: 'create_storage_folder', title: 'Create a Storage folder', permissions: ['assets:write'], write: true,
+    description: "Creates a folder in a project's storage, at its top or inside another (parentId), as Storage does. Upload into it (request_asset_upload with folderId) or move assets to it (move_asset).",
+    input: { projectId, connectionId: storageConnection, name: z.string().min(1), parentId: z.string().optional().describe('The folder it goes in; the top if not given') },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, name, parentId }) => ({ method: 'POST', path: `${storageOf(projectId, connectionId)}/folders`, body: defined({ name, parentId }) }),
+    pick: (data) => data?.folder,
+  }),
+  tool({
+    name: 'rename_storage_folder', title: 'Rename a Storage folder', permissions: ['assets:write'], write: true,
+    description: 'Renames a folder of a project\'s storage.',
+    input: { projectId, connectionId: storageConnection, folderId: id('folder'), name: z.string().min(1) },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, folderId, name }) => ({ method: 'PATCH', path: `${storageOf(projectId, connectionId)}/folders/${enc(folderId)}`, body: { name } }),
+    pick: (data) => data?.folder,
+  }),
+  tool({
+    name: 'delete_storage_folder', title: 'Delete a Storage folder', permissions: ['assets:delete'], write: true, destructive: true,
+    description: "Deletes a folder of a project's storage, as Storage does: what's in it (its assets and folders) goes to the folder it was in. No asset is deleted.",
+    input: { projectId, connectionId: storageConnection, folderId: id('folder') },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, folderId }) => ({ method: 'DELETE', path: `${storageOf(projectId, connectionId)}/folders/${enc(folderId)}` }),
+    pick: (data) => ({ message: data?.message }),
+  }),
+  tool({
+    name: 'move_asset', title: 'Move an asset to a folder', permissions: ['assets:write'], write: true,
+    description: "Moves an asset to a folder of its storage (list_storage_folders), or to its top (folderId null). Its file and URL don't change.",
+    input: {
+      projectId, connectionId: storageConnection, assetId: id('asset'),
+      folderId: z.string().nullable().describe('The folder; null for the top'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, assetId, folderId }) => ({ method: 'PATCH', path: `${storageOf(projectId, connectionId)}/files/${enc(assetId)}/move`, body: { folderId } }),
+    pick: (data) => data?.file && { assetId: data.file.fileId, displayName: data.file.displayName, folderId: data.file.folderId ?? null },
+  }),
+  tool({
+    name: 'rename_asset', title: 'Rename an asset', permissions: ['assets:write'], write: true,
+    description: "Renames an asset: the name Storage shows it by (with its extension, e.g. SH010_layout.glb). Its file and URL don't change.",
+    input: { projectId, connectionId: storageConnection, assetId: id('asset'), name: z.string().min(1) },
+    projectOf: byProject,
+    call: ({ projectId, connectionId, assetId, name }) => ({ method: 'PATCH', path: `${storageOf(projectId, connectionId)}/files/${enc(assetId)}`, body: { displayName: name } }),
+    pick: (data) => data?.file && { assetId: data.file.fileId, displayName: data.file.displayName, folderId: data.file.folderId ?? null },
   }),
 
   // ── Deleting ──
