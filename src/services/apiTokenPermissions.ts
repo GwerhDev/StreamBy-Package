@@ -119,6 +119,7 @@ const RULES = [
   // Workflow and pipelines.
   rule('read', `${P}/(workflow|pipelines(/[^/]+(/runs)?)?)`, 'workflow:read'),
   rule(['PATCH'], `${P}/workflow`, 'workflow:write'),
+  rule(['POST'], `${P}/workflow/changes`, 'workflow:write'),
   rule(['POST'], `${P}/pipelines`, 'workflow:write'),
   rule(['PATCH', 'DELETE'], `${P}/pipelines/[^/]+`, 'workflow:write'),
 

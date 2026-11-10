@@ -325,7 +325,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `delete_asset` | `assets:delete` |
 | `get_asset_rights`, `get_credits_sheet` / `set_asset_rights` | `rights:read` / `rights:write` |
 | `get_workflow`, `list_pipelines`, `get_pipeline`, `list_pipeline_runs` | `workflow:read` |
-| `create_pipeline`, `update_pipeline` | `workflow:write` |
+| `create_pipeline`, `update_pipeline`, `edit_workflow` | `workflow:write` |
 | `list_exports` | `project:read` and `exports:read` |
 | `get_export` | `exports:read` |
 | `get_job`, `list_jobs` | `jobs:read` |
@@ -926,6 +926,26 @@ resource; a data source reading one of a database's tables is a node of its own.
     would remove resources is a 403 listing them (`removing`).
   - A node holding a configuration of its own beside its resource's id (a data source reading one
     table, an Ingest importing one file) consumes the resource: never merged into its node.
+- **Editing it node by node** (`POST /projects/:id/workflow/changes` `{ baseUpdatedAt, edits }`,
+  from the MCP server `edit_workflow`): the edits are made in their order on the workflow as it
+  was read, all or none, and saved as above (the same answer, the same 409, and an app connected
+  with OAuth removes nothing). Each edit is one of:
+  - `{ op: 'add', type, id?, label?, data?, position? }`: a node of a workflow's types
+    (`dataSourceNode`, `connectionNode`, `ingestNode`, `integrationConnectionNode`,
+    `pipelineRefNode`, `exportNode`, `creditsSheetNode`, `reviewGateNode`, `annotationNode`,
+    `exportFormatNode`, `deliverableNode`); `id` lets the edits after it refer to it;
+  - `{ op: 'update', id, data }` (merged into its data), `{ op: 'move', id, position }`;
+  - `{ op: 'connect' | 'disconnect', source, target }`: only what the canvas connects, with its
+    handles (e.g. a Credits sheet to a Review Gate or a Deliverable node, a Review Gate to a
+    Deliverable node, an Ingest node to a Credits sheet);
+  - `{ op: 'remove', id }`: the node and its edges (a resource's node, its resource, as saving
+    removes it).
+
+  What a node is tied to is the project's: a Credits sheet node's `documentId` a credits sheet
+  (made first, a document of kind `credits`), a Review Gate's `reviewId` a review session, a
+  Deliverable node's `exportId` an export, a resource's node its resource (or one to connect).
+  StreamBy's orchestrator can't be added, changed or removed. An edit that can't be made is a
+  400 naming it (`Edit 2 (connect): ...`), and nothing is saved.
 - **Reading it** (`GET`) never rewrites it, except once, for a workflow made before this: the
   nodes once drawn from the project's lists are bound by their ids, a resource without a node gets
   one, and two nodes of the same resource are merged.
@@ -1067,7 +1087,7 @@ describe each area; this is the map.
 | Processing | `GET /projects/:projectId/workers`, `POST`, `DELETE` (a project's), `POST /projects/:projectId/jobs/process`, `POST /projects/:projectId/jobs/ingest`, `GET /projects/:projectId/jobs`, `GET /jobs/:jobId`, `POST /projects/:projectId/jobs/:jobId/retry`; workers call back at `POST /worker-jobs/:jobId/progress`, `/upload-url`, `/complete`, `/fail`; runners: `GET`, `POST /user/runners`, `DELETE .../:runnerId`, `POST .../:runnerId/shares`, `DELETE .../shares/:shareId`, `PATCH /projects/:projectId/workers/runners/:runnerId` (a project's admins: its `autoKind`), and they ask at `POST /runner/jobs/next` |
 | Reviews | `GET`, `POST /projects/:projectId/reviews`, `GET /projects/:projectId/reviews/:reviewId`, `POST .../decision` |
 | Deliverables | `GET`, `POST /projects/:projectId/deliverables`, `DELETE .../:deliverableId`, `POST .../:deliverableId/start-workers`, `GET .../gates`, `POST /projects/:projectId/deliverables/:exportId/publish` |
-| Workflow and pipelines | `GET`, `PATCH /projects/:id/workflow`, `GET`, `POST /projects/:projectId/pipelines`, `GET`, `PATCH`, `DELETE .../:pipelineId`, `GET`, `POST .../:pipelineId/runs`, `GET /projects/:projectId/production/shots/:shot/pipeline-runs` |
+| Workflow and pipelines | `GET`, `PATCH /projects/:id/workflow`, `POST /projects/:id/workflow/changes`, `GET`, `POST /projects/:projectId/pipelines`, `GET`, `PATCH`, `DELETE .../:pipelineId`, `GET`, `POST .../:pipelineId/runs`, `GET /projects/:projectId/production/shots/:shot/pipeline-runs` |
 | Production | `/projects/:projectId/production/board` (its columns, `key`, `labels`), `/sequences`, `/sequences/:seqId/shots` (and `/batch`), `/shots` (`?q=`), `/shots/:shotId`, `/shots/:shotId/tasks`, `/task-templates` (and `/:templateId/apply`) |
 | Documents | `GET`, `POST /projects/:projectId/documents`, `GET`, `PATCH`, `DELETE .../:docId`, `PATCH .../:docId/sections`, `POST .../:docId/publish`, `GET .../:docId/versions` (and `/:version`) |
 | Exports | `GET`, `POST /projects/:id/exports`, `GET`, `PATCH`, `DELETE /projects/:id/exports/:exportId`, `GET .../:exportId/catalog`; served at `GET /:projectId/export/:exportName`, its catalog at `.../catalog.json` and `.../catalog.hash`, its catalogued content at `GET /:projectId/content/:sha256` |

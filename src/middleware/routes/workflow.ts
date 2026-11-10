@@ -8,8 +8,11 @@ import { addConnection } from '../../services/connection';
 import { createExport } from '../../services/export';
 import { DEFAULT_NODE_SCHEMA } from './export';
 import {
-  createPipelineOf, listsOf, migrateSchema, oneNodePerResource, pendingOf, readWorkflow, referencedIn, removeResourceOf, ResourceKind, writeWorkflow,
+  createPipelineOf, listsOf, migrateSchema, oneNodePerResource, pendingOf, readWorkflow, referencedIn, removeResourceOf, ResourceKind, schemaOf, writeWorkflow,
 } from '../../services/workflowResources';
+import { applyWorkflowEdits, WorkflowEditError } from '../../services/workflowEdits';
+import { documentStore } from '../../services/documents';
+import { nosqlDb } from '../../utils/nosqlDb';
 import { afterGateChange } from './deliverable';
 
 const isSchema = (value: any): value is NodeSchema =>
@@ -47,7 +50,7 @@ export function workflowRouter(config: StreamByConfig): Router {
   // project doesn't have connects it, a new API node's connection is made, and a resource whose
   // nodes are all gone is removed. Answers the workflow and the project's lists as they are then,
   // and what couldn't be done (its node kept as it was sent).
-  router.patch('/projects/:id/workflow', async (req: Request, res: Response) => {
+  const updateWorkflow = async (req: Request, res: Response, body: any) => {
     try {
       const auth = await config.authProvider(req);
       if (!auth?.userId) return res.status(401).json({ message: 'Unauthorized' });
@@ -58,7 +61,7 @@ export function workflowRouter(config: StreamByConfig): Router {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const { name, description, status, nodeSchema, baseUpdatedAt } = req.body;
+      const { name, description, status, nodeSchema, baseUpdatedAt } = body ?? {};
       if (nodeSchema !== undefined) {
         // A schema saved removes what it lacks: one that isn't a schema is never read as empty.
         if (!isSchema(nodeSchema)) return res.status(400).json({ message: 'nodeSchema is { nodes: [...], edges: [...] }' });
@@ -163,6 +166,47 @@ export function workflowRouter(config: StreamByConfig): Router {
       res.json({ data: updated, project: await listsOf(projectId), errors, message: 'Workflow updated successfully' });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update workflow', details: err.message });
+    }
+  };
+
+  router.patch('/projects/:id/workflow', (req: Request, res: Response) => updateWorkflow(req, res, req.body));
+
+  // Edits made node by node (adding, changing, moving, connecting, disconnecting, removing; see
+  // services/workflowEdits) on the workflow as it was read (baseUpdatedAt), and saved as the
+  // canvas saves it: the same rules, the same answer. What an agent does through edit_workflow.
+  router.post('/projects/:id/workflow/changes', async (req: Request, res: Response) => {
+    try {
+      const auth = await config.authProvider(req);
+      if (!auth?.userId) return res.status(401).json({ message: 'Unauthorized' });
+      const projectId = req.params.id;
+      const project = await Project.findOne({ _id: projectId });
+      if (!project || !canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized project access' });
+
+      const { edits, baseUpdatedAt } = req.body ?? {};
+      if (!Array.isArray(edits) || !edits.length) return res.status(400).json({ message: 'edits is a list of { op, ... }' });
+      if (typeof baseUpdatedAt !== 'string' || Number.isNaN(new Date(baseUpdatedAt).getTime())) {
+        return res.status(400).json({ message: "baseUpdatedAt is required: the workflow's updatedAt as it was read" });
+      }
+      const current = project.workflow?.updatedAt ? new Date(project.workflow.updatedAt).toISOString() : null;
+      if (current !== new Date(baseUpdatedAt).toISOString()) {
+        return res.status(409).json({ message: 'The workflow changed since it was read: read it again to see the change.', data: await readWorkflow(project) });
+      }
+
+      const read = project.workflow?.resourceNodesAt ? schemaOf(project.workflow) : migrateSchema(project, schemaOf(project.workflow));
+      let nodeSchema: NodeSchema;
+      try {
+        nodeSchema = await applyWorkflowEdits(read, edits, {
+          project,
+          creditsSheet: async documentId => (await documentStore().get(projectId, documentId))?.kind === 'credits',
+          review: async reviewId => !!(await nosqlDb()?.collection('review_sessions').findOne({ id: reviewId, projectId })),
+        });
+      } catch (err) {
+        if (err instanceof WorkflowEditError) return res.status(400).json({ message: err.message });
+        throw err;
+      }
+      return updateWorkflow(req, res, { nodeSchema, baseUpdatedAt });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to edit the workflow', details: err.message });
     }
   });
 

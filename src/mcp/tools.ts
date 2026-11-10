@@ -150,6 +150,37 @@ export const TOOLS = [
     call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/workflow` }),
   }),
   tool({
+    name: 'edit_workflow', title: "Edit a project's workflow", permissions: ['workflow:write'], write: true, destructive: true,
+    description: [
+      "Edits a project's workflow node by node, as the canvas does, and saves it: the edits are made in their order, all or none.",
+      "`baseUpdatedAt` is the workflow's updatedAt as it was read (get_workflow): if it was saved since, nothing is changed and the answer says so; read it again and make the edits on it.",
+      "Ops: add (a node of a type, with its data; `id` to refer to it in the edits after it), update (merges into a node's data, e.g. a Review Gate's reviewId or a Deliverable's appliesTo), move, connect and disconnect (source → target, by node id: the canvas's handles are set), remove (a node and its edges).",
+      "Node types: dataSourceNode, connectionNode, ingestNode, integrationConnectionNode, pipelineRefNode, exportNode, creditsSheetNode, reviewGateNode, annotationNode, exportFormatNode, deliverableNode. StreamBy's orchestrator (orchestratorNode) is in every workflow: it can't be added, changed or removed.",
+      "A node tied to something of the project names it by id: a Credits sheet node its sheet (documentId; create it first with create_document, kind 'credits'), a Review Gate its review session (reviewId, optional), a Deliverable node what it applies to (appliesTo: all, shots or exports, and exportId for one export's), a resource's node its resource.",
+      "Gates hold back the deliverables of the Deliverable nodes they lead to: connect a Credits sheet to a Review Gate, and the Review Gate (or the sheet) to the Deliverable node.",
+      "Removing a resource's node removes the resource, as saving the canvas does (an app connected with OAuth removes nothing).",
+    ].join(' '),
+    input: {
+      projectId,
+      baseUpdatedAt: z.string().describe("The workflow's updatedAt as it was read (get_workflow)"),
+      edits: z.array(z.discriminatedUnion('op', [
+        z.object({
+          op: z.literal('add'), type: z.string().describe('The node type'), id: z.string().optional().describe('Its id; one is made if not given'),
+          label: z.string().optional(), data: z.record(z.string(), z.unknown()).optional().describe("Its data (what it's tied to, its settings)"),
+          position: z.object({ x: z.number(), y: z.number() }).optional().describe('Where on the canvas; below the rest if not given'),
+        }),
+        z.object({ op: z.literal('update'), id: z.string(), data: z.record(z.string(), z.unknown()).describe('Fields merged into its data') }),
+        z.object({ op: z.literal('move'), id: z.string(), position: z.object({ x: z.number(), y: z.number() }) }),
+        z.object({ op: z.literal('connect'), source: z.string(), target: z.string() }),
+        z.object({ op: z.literal('disconnect'), source: z.string(), target: z.string() }),
+        z.object({ op: z.literal('remove'), id: z.string() }),
+      ])).min(1),
+    },
+    projectOf: byProject,
+    call: ({ projectId, baseUpdatedAt, edits }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/workflow/changes`, body: { baseUpdatedAt, edits } }),
+    pick: (data) => ({ workflow: data?.data, errors: data?.errors ?? [] }),
+  }),
+  tool({
     name: 'list_pipelines', title: 'List pipelines', permissions: ['workflow:read'],
     description: "A project's pipelines.",
     input: { projectId },
@@ -550,12 +581,12 @@ export const TOOLS = [
   }),
   tool({
     name: 'create_document', title: 'Create a document', permissions: ['docs:write'], write: true,
-    description: "Creates a markdown document (or, with kind 'folder', a folder to group them) in a project's Documents section, at the end of its folder. It's a draft: nothing is exported until someone publishes a version of it in the UI.",
+    description: "Creates a markdown document (or, with kind 'folder', a folder to group them) in a project's Documents section, at the end of its folder. It's a draft: nothing is exported until someone publishes a version of it in the UI. With kind 'credits', a credits sheet: a Credits sheet node of the workflow is its place (edit_workflow, with its documentId), and it lists the assets of the Ingest nodes connected to it.",
     input: {
       projectId,
       title: z.string().min(1),
-      content: z.string().optional().describe('Its markdown'),
-      kind: z.enum(['document', 'folder']).optional(),
+      content: z.string().optional().describe('Its markdown (none for a folder or a credits sheet)'),
+      kind: z.enum(['document', 'folder', 'credits']).optional(),
       parentId: z.string().optional().describe("The folder it goes in (a folder's id); at the top if not given"),
     },
     projectOf: byProject,
