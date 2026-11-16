@@ -152,14 +152,14 @@ describe("a 3D asset's measurements", () => {
 
 describe("a project's budgets", () => {
   it('are none until set, and then its profiles, checked', async () => {
-    expect((await eli.get('/asset-budgets')).body.budgets).toEqual({ profiles: [], defaultProfileId: null });
+    expect((await eli.get('/asset-budgets')).body.budgets).toEqual({ profiles: [], defaultProfileId: null, defaultAudioProfileId: null });
     expect((await eli.put('/asset-budgets', BUDGETS)).status).toBe(200);
-    expect((await vic.get('/asset-budgets')).body.budgets).toEqual(BUDGETS);
+    expect((await vic.get('/asset-budgets')).body.budgets).toEqual({ ...BUDGETS, defaultAudioProfileId: null });
     for (const [body, message] of [
       [{ profiles: [{ maxTriangles: 1 }] }, 'Each profile has a name'],
       [{ profiles: [{ name: 'A', maxTriangles: 1.5 }] }, 'A: maxTriangles is a whole number, 0 or more'],
       [{ profiles: [{ name: 'A' }, { name: 'a' }] }, 'Two profiles are named a'],
-      [{ profiles: [{ name: 'A' }], defaultProfileId: 'nope' }, 'defaultProfileId is one of the profiles'],
+      [{ profiles: [{ name: 'A' }], defaultProfileId: 'nope' }, 'defaultProfileId is one of the 3D profiles'],
       [{ profiles: [{ name: 'A', textureFormats: 'png' }] }, 'A: textureFormats is a list of MIME types (image/png, image/ktx2...)'],
     ] as const) {
       const res = await eli.put('/asset-budgets', body);
@@ -176,6 +176,81 @@ describe("a project's budgets", () => {
       { metric: 'textures', limit: 1, value: 2 }, { metric: 'animations', limit: 1, value: 2 },
     ]);
     expect((checkBudgets({ profiles: [{ name: 'New' }] }) as any).profiles[0].id).toEqual(expect.any(String));
+  });
+});
+
+// What the inspector measures of a WAV of World of Gwerh's soundtrack: its true peak over a
+// Music profile's -1 dBTP, its loudness within -14 ±1 LUFS.
+const THEME = {
+  duration: 92.48, sampleRate: 48_000, channels: 2, bitDepth: 24, format: 'audio/wav', tool: 'streamby-inspector',
+  integratedLufs: -14.4, shortTermLufsMax: -10.2, truePeak: -0.3, rms: -17.9, lra: 6.1,
+};
+const AUDIO_BUDGETS = {
+  profiles: [
+    ...BUDGETS.profiles,
+    { id: 'music', name: 'Music', kind: 'audio', targetLufs: -14, lufsTolerance: 1, maxTruePeak: -1, audioFormats: ['audio/wav', 'audio/ogg'], sampleRates: [48_000] },
+    { id: 'sfx', name: 'SFX', kind: 'audio', targetLufs: -18, maxTruePeak: -1, sampleRates: [44_100] },
+  ],
+  defaultProfileId: 'prop',
+  defaultAudioProfileId: 'music',
+};
+
+describe("an audio asset's measurements", () => {
+  beforeEach(() => {
+    mongo.db.collection('storage_files').docs.push(
+      { fileId: 'w1', projectId: 'p1', category: 'audios', storageKey: 'p1/audios/w1.wav', displayName: 'theme.wav' },
+      { fileId: 'i1', projectId: 'p1', category: 'images', storageKey: 'p1/images/i1.png', displayName: 'cover.png' },
+    );
+    mongo.db.collection('asset_versions').docs.push({ versionId: 'w1v1', assetId: 'w1', projectId: 'p1', version: 1, storageKey: 'p1/audios/w1.wav' });
+  });
+
+  it('are its format and loudness, kept with its version, checked against an audio profile', async () => {
+    expect((await eli.put('/asset-budgets', AUDIO_BUDGETS)).status).toBe(200);
+    const sent = await eli.put('/assets/w1/versions/w1v1/measurements', THEME);
+    expect(sent.status).toBe(200);
+    expect(sent.body.measurements).toMatchObject({ kind: 'audio', ...THEME, measuredBy: 'eli' });
+    // The project's audio default (Music): only its true peak is over.
+    const read = (await eli.get('/assets/w1/measurements')).body;
+    expect(read).toMatchObject({ kind: 'audio', profileId: null, profile: { id: 'music' } });
+    expect(read.exceeded).toEqual([{ metric: 'truePeak', limit: -1, value: -0.3 }]);
+    // As an SFX: too loud, and at the wrong rate.
+    expect((await eli.put('/assets/w1/budget-profile', { profileId: 'sfx' })).status).toBe(200);
+    expect((await eli.get('/assets/w1/measurements')).body.exceeded).toEqual([
+      { metric: 'loudness', limit: -18, tolerance: 1, value: -14.4 },
+      { metric: 'truePeak', limit: -1, value: -0.3 },
+      { metric: 'sampleRate', limit: [44_100], value: 48_000 },
+    ]);
+    // A 3D profile isn't one for it, nor an audio one for a 3D asset.
+    expect((await eli.put('/assets/w1/budget-profile', { profileId: 'character' })).status).toBe(400);
+    expect((await eli.put('/assets/a1/budget-profile', { profileId: 'music' })).status).toBe(400);
+  });
+
+  it("aren't a 3D asset's, and only 3D and audio assets are measured", async () => {
+    for (const body of [GOBLIN, { ...THEME, sampleRate: 0 }, { ...THEME, channels: 0 }, { ...THEME, truePeak: 'loud' }, { ...THEME, integratedLufs: undefined }, { ...THEME, lra: -1 }]) {
+      expect((await eli.put('/assets/w1/versions/w1v1/measurements', body)).status, JSON.stringify(body)).toBe(400);
+    }
+    // Silence: nothing to measure its levels by.
+    const silent = await eli.put('/assets/w1/versions/w1v1/measurements', { ...THEME, integratedLufs: null, shortTermLufsMax: null, truePeak: null, rms: null, lra: null });
+    expect(silent.status).toBe(200);
+    expect(silent.body.exceeded).toEqual([]);
+    expect((await eli.get('/assets/i1/measurements')).status).toBe(400);
+  });
+
+  it('have their profiles checked: a loudness, a true peak, formats and rates', async () => {
+    for (const [profile, message] of [
+      [{ name: 'A', kind: 'audio', targetLufs: 5 }, 'A: targetLufs is a loudness in LUFS (e.g. -14), -70 to 0'],
+      [{ name: 'A', kind: 'audio', lufsTolerance: 1 }, 'A: lufsTolerance goes with a targetLufs'],
+      [{ name: 'A', kind: 'audio', maxTruePeak: 'high' }, 'A: maxTruePeak is in dBTP (e.g. -1), -70 to 6'],
+      [{ name: 'A', kind: 'audio', sampleRates: [44.1] }, 'A: sampleRates is a list of rates in Hz (44100, 48000...)'],
+      [{ name: 'A', kind: 'video' }, 'A: kind is model or audio'],
+    ] as const) {
+      const res = await eli.put('/asset-budgets', { profiles: [profile] });
+      expect(res.body.message, JSON.stringify(profile)).toBe(message);
+    }
+    expect((await eli.put('/asset-budgets', { ...AUDIO_BUDGETS, defaultAudioProfileId: 'prop' })).body.message).toBe('defaultAudioProfileId is one of the audio profiles');
+    expect((await eli.put('/asset-budgets', { ...AUDIO_BUDGETS, defaultProfileId: 'music' })).body.message).toBe('defaultProfileId is one of the 3D profiles');
+    // A target alone takes a tolerance of 1 LU.
+    expect((checkBudgets({ profiles: [{ name: 'Dialogue', kind: 'audio', targetLufs: -23 }] }) as any).profiles[0]).toMatchObject({ targetLufs: -23, lufsTolerance: 1 });
   });
 });
 
@@ -204,5 +279,20 @@ describe('the measurements, from an agent', () => {
     expect((await call('get_asset_measurements', { assetId: 'a1', versionId: 'v1' })).measurements).toBeNull();
     expect((await call('list_asset_versions', { assetId: 'a1' })).map((v: any) => [v.version, v.measured])).toEqual([[2, true], [1, false]]);
     expect((await call('get_asset_budgets', {})).profiles.map((p: any) => p.name)).toEqual(['Character', 'Prop']);
+  });
+
+  it("reads an audio asset's measurements, its true peak over its profile marked", async () => {
+    mongo.db.collection('storage_files').docs.push({ fileId: 'w1', projectId: 'p1', category: 'audios', storageKey: 'p1/audios/w1.wav', displayName: 'theme.wav' });
+    mongo.db.collection('asset_versions').docs.push({ versionId: 'w1v1', assetId: 'w1', projectId: 'p1', version: 1, storageKey: 'p1/audios/w1.wav' });
+    await eli.put('/asset-budgets', AUDIO_BUDGETS);
+    await eli.put('/assets/w1/versions/w1v1/measurements', THEME);
+    const { token } = await createApiToken({ kind: 'user', userId: 'eli' }, { name: 'agent', permissions: ['assets:read', 'project:read'] as any, projectIds: ['p1'], expiresInDays: 30 }, { databases: [] } as any);
+    const agent = new Client({ name: 'test-agent', version: '1.0.0' });
+    await agent.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    const call = async (name: string, args: object) => JSON.parse(((await agent.callTool({ name, arguments: { projectId: 'p1', ...args } })) as any).content[0].text);
+    const read = await call('get_asset_measurements', { assetId: 'w1' });
+    expect(read).toMatchObject({ kind: 'audio', measurements: { integratedLufs: -14.4, truePeak: -0.3, sampleRate: 48_000 }, profile: { name: 'Music' } });
+    expect(read.exceeded).toEqual([{ metric: 'truePeak', limit: -1, value: -0.3 }]);
+    expect((await call('get_asset_budgets', {})).defaultAudioProfileId).toBe('music');
   });
 });

@@ -146,9 +146,11 @@ export const TOOLS = [
     call: ({ projectId, fileId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(fileId)}/metadata` }),
   }),
   tool({
-    name: 'get_asset_measurements', title: "Get a 3D asset's measurements", permissions: ['assets:read'],
+    name: 'get_asset_measurements', title: "Get an asset's measurements", permissions: ['assets:read'],
     description: [
-      "What a 3D asset's version measures (its latest if versionId isn't given): triangles, vertices, meshes, materials, textures (each one's name, width, height and format) and animations (name, duration in seconds), when and by whom it was measured; and the project's budget profile it's checked against, with what it has over it (`exceeded`: each metric, its limit and its value).",
+      "What a 3D or audio asset's version measures (its latest if versionId isn't given), with `kind` saying which, when and by whom it was measured; and the project's budget profile it's checked against (of its kind), with what it has over it (`exceeded`: each metric, its limit and its value).",
+      "A 3D one: triangles, vertices, meshes, materials, textures (each one's name, width, height and format) and animations (name, duration in seconds).",
+      "An audio one: duration (s), sampleRate (Hz), channels, bitDepth (null for a compressed file), format (MIME type), integratedLufs and shortTermLufsMax (LUFS, ITU-R BS.1770), truePeak (dBTP), rms (dBFS) and lra (loudness range, LU); a level is null for silence. Over its profile: loudness (more than its tolerance from the target), truePeak, audioFormat, sampleRate.",
       "`measurements` is null if no one has opened that version in the inspector yet (it's measured there, in the browser): it's unmeasured.",
     ].join(' '),
     input: { projectId, assetId: id('asset'), versionId: z.string().optional().describe('A version (list_asset_versions); the latest if not given') },
@@ -158,8 +160,8 @@ export const TOOLS = [
     }),
   }),
   tool({
-    name: 'get_asset_budgets', title: "Get a project's 3D budgets", permissions: ['project:read'],
-    description: "A project's budgets for its 3D assets: its profiles (one per kind of piece, e.g. Character, Prop), each with the most it may have of triangles, materials, textures, a texture's side in pixels, texture formats and animations; and its default profile, for an asset that chose none.",
+    name: 'get_asset_budgets', title: "Get a project's asset budgets", permissions: ['project:read'],
+    description: "A project's budgets for its 3D and audio assets: its profiles, each of a kind. A 3D one (one per kind of piece, e.g. Character, Prop) has the most it may have of triangles, materials, textures, a texture's side in pixels, texture formats and animations. An audio one (`kind: 'audio'`, e.g. Music, SFX, Dialogue, Ambience) has a target loudness (targetLufs, LUFS) and how far from it a file may be (lufsTolerance, LU), the highest true peak (maxTruePeak, dBTP), and the formats (MIME types) and sample rates (Hz) it may be in. A limit not set isn't checked. defaultProfileId and defaultAudioProfileId are the profiles an asset that chose none is checked against.",
     input: { projectId },
     projectOf: byProject,
     call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/asset-budgets` }),
@@ -453,7 +455,7 @@ export const TOOLS = [
   // the user's own tool (Blender's or Godot's MCP, a script) uploads or downloads it directly.
   tool({
     name: 'list_asset_versions', title: "List an asset's versions", permissions: ['assets:read'],
-    description: "An asset's versions, newest first: each one's id, number, file name, when it was made, and whether it was measured (a 3D one, get_asset_measurements). Any of them can be downloaded (get_asset_download_url).",
+    description: "An asset's versions, newest first: each one's id, number, file name, when it was made, and whether it was measured (a 3D or audio one, get_asset_measurements). Any of them can be downloaded (get_asset_download_url).",
     input: { projectId, assetId: id('asset') },
     projectOf: byProject,
     call: ({ projectId, assetId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/versions` }),

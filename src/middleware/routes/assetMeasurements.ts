@@ -5,18 +5,20 @@ import { canEditProject, isProjectMember } from '../../utils/auth';
 import { nosqlDb } from '../../utils/nosqlDb';
 import { recordFirstVersion } from '../../services/assetVersions';
 import {
-  AssetBudgets, checkBudgets, checkMeasurements, EMPTY_BUDGETS, exceededBy, profileFor,
+  AssetBudgets, checkBudgets, checkMeasurements, EMPTY_BUDGETS, exceededBy, kindOfCategory, profileFor, profileKind,
 } from '../../services/assetMeasurements';
 
-// A 3D asset's measurements, kept with each version, and the project's budgets they're checked
-// against (see services/assetMeasurements).
+// An asset's measurements (a 3D one's or an audio one's), kept with each version, and the
+// project's budgets they're checked against (see services/assetMeasurements).
 export function assetMeasurementsRouter(_config: StreamByConfig): Router {
   const router = Router();
   const Project = getModel('projects');
 
   const budgetsOf = async (projectId: string): Promise<AssetBudgets> => {
     const doc: any = await nosqlDb()?.collection('asset_budgets').findOne({ projectId });
-    return doc ? { profiles: doc.profiles ?? [], defaultProfileId: doc.defaultProfileId ?? null } : EMPTY_BUDGETS;
+    return doc
+      ? { profiles: doc.profiles ?? [], defaultProfileId: doc.defaultProfileId ?? null, defaultAudioProfileId: doc.defaultAudioProfileId ?? null }
+      : EMPTY_BUDGETS;
   };
   const chosenProfile = async (projectId: string, assetId: string): Promise<string | null> =>
     ((await nosqlDb()?.collection('media_metadata').findOne({ projectId, assetId })) as any)?.budgetProfileId ?? null;
@@ -34,7 +36,10 @@ export function assetMeasurementsRouter(_config: StreamByConfig): Router {
     if (!db) { res.status(500).json({ message: 'Database not available' }); return null; }
     const file: any = await db.collection('storage_files').findOne({ fileId: assetId, projectId });
     if (!file) { res.status(404).json({ message: 'Asset not found' }); return null; }
-    return { auth, project, file, db, projectId, assetId };
+    // Only 3D and audio assets are measured.
+    const kind = kindOfCategory(file.category);
+    if (!kind) { res.status(400).json({ message: 'Only 3D models and audio files are measured' }); return null; }
+    return { auth, project, file, db, projectId, assetId, kind };
   };
 
   // ── The project's budgets ──
@@ -81,8 +86,8 @@ export function assetMeasurementsRouter(_config: StreamByConfig): Router {
       const found = await assetFor(req, res, true);
       if (!found) return;
       const profileId = req.body?.profileId ?? null;
-      if (profileId !== null && !(await budgetsOf(found.projectId)).profiles.some(p => p.id === profileId)) {
-        return res.status(400).json({ message: "profileId is one of the project's budget profiles, or null for its default" });
+      if (profileId !== null && !(await budgetsOf(found.projectId)).profiles.some(p => p.id === profileId && profileKind(p) === found.kind)) {
+        return res.status(400).json({ message: `profileId is one of the project's ${found.kind === 'audio' ? 'audio' : '3D'} budget profiles, or null for its default` });
       }
       await found.db.collection('media_metadata').updateOne(
         { assetId: found.assetId, projectId: found.projectId },
@@ -101,7 +106,7 @@ export function assetMeasurementsRouter(_config: StreamByConfig): Router {
     try {
       const found = await assetFor(req, res);
       if (!found) return;
-      const { db, projectId, assetId, file } = found;
+      const { db, projectId, assetId, file, kind } = found;
       // An asset made before versions were kept gets its first one.
       await recordFirstVersion(file);
       const versionId = typeof req.query.versionId === 'string' ? req.query.versionId : undefined;
@@ -113,10 +118,11 @@ export function assetMeasurementsRouter(_config: StreamByConfig): Router {
 
       const budgets = await budgetsOf(projectId);
       const chosen = await chosenProfile(projectId, assetId);
-      const profile = profileFor(budgets, chosen);
-      const measurements = version.measurements ?? null;
+      const profile = profileFor(budgets, chosen, kind);
+      // Kept before measurements said what they're of: a 3D asset's.
+      const measurements = version.measurements ? { kind, ...version.measurements } : null;
       res.json({
-        assetId, versionId: version.versionId, version: version.version,
+        assetId, versionId: version.versionId, version: version.version, kind,
         measurements, profile, profileId: chosen,
         exceeded: measurements ? exceededBy(measurements, profile) : [],
       });
@@ -130,15 +136,15 @@ export function assetMeasurementsRouter(_config: StreamByConfig): Router {
     try {
       const found = await assetFor(req, res, true);
       if (!found) return;
-      const { db, projectId, assetId, auth } = found;
-      const measurements = checkMeasurements(req.body, auth.userId);
+      const { db, projectId, assetId, auth, kind } = found;
+      const measurements = checkMeasurements(req.body, auth.userId, kind);
       if ('error' in measurements) return res.status(400).json({ message: measurements.error });
       const result = await db.collection('asset_versions').updateOne(
         { projectId, assetId, versionId: req.params.versionId },
         { $set: { measurements } },
       );
       if (!result.matchedCount) return res.status(404).json({ message: 'Version not found' });
-      const profile = profileFor(await budgetsOf(projectId), await chosenProfile(projectId, assetId));
+      const profile = profileFor(await budgetsOf(projectId), await chosenProfile(projectId, assetId), kind);
       res.json({ measurements, profile, exceeded: exceededBy(measurements, profile) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to save the measurements', details: err.message });

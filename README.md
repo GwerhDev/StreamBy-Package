@@ -84,23 +84,42 @@ server.listen(3000);
 
 ---
 
-## 📐 What a 3D asset measures, against the project's budgets
+## 📐 What a 3D or audio asset measures, against the project's budgets
 
 StreamBy measures nothing itself: whoever opens a version measures it (StreamBy-UI's inspector,
-in the browser with three.js; later a worker or a local tool) and sends what it measures with
-`PUT /projects/:projectId/assets/:assetId/versions/:versionId/measurements` (`assets:write`):
-`{ triangles, vertices, meshes, materials, textures: [{ name, width, height, format }],
-animations: [{ name, duration }], tool? }`, checked and kept with the version (each time again).
+in the browser: three.js for a 3D asset, the Web Audio API for an audio one; later a worker or a
+local tool) and sends what it measures with
+`PUT /projects/:projectId/assets/:assetId/versions/:versionId/measurements` (`assets:write`),
+checked and kept with the version (each time again). What's sent goes by the asset's category:
+
+- A 3D model (`3d-models`): `{ triangles, vertices, meshes, materials, textures: [{ name, width,
+  height, format }], animations: [{ name, duration }], tool? }`.
+- An audio file (`audios`): `{ duration, sampleRate, channels, bitDepth, format, integratedLufs,
+  shortTermLufsMax, truePeak, rms, lra, tool? }`: seconds, Hz, bits per sample (null for a
+  compressed file), its MIME type, loudness in LUFS (ITU-R BS.1770 / EBU R 128: integrated, and
+  the loudest 3 s), true peak in dBTP, RMS in dBFS and loudness range in LU (a level is null for
+  silence).
+
 `GET /projects/:projectId/assets/:assetId/measurements?versionId=` (`assets:read`; the latest
-version if none is given) answers them (`null` while unmeasured), the budget profile they're
-checked against and what's over it (`exceeded`: each metric, its limit and its value).
+version if none is given) answers them with their `kind` (`model`, `audio`; `null` while
+unmeasured), the budget profile they're checked against and what's over it (`exceeded`: each
+metric, its limit and its value). Other categories aren't measured (400).
 
 A project's budgets (`GET`, `PUT /projects/:projectId/asset-budgets`; `project:read`,
-`project:update`) are profiles, one per kind of piece, each with the most it may have of
-triangles, materials, textures, a texture's side (px), texture formats (MIME types) and
-animations (a limit not set isn't checked), and a default profile. An asset chooses its own with
-`PUT .../assets/:assetId/budget-profile { profileId }` (null: the default). From the MCP server:
-`get_asset_measurements`, `get_asset_budgets`, and `list_asset_versions` says which are measured.
+`project:update`) are profiles, each of a kind:
+
+- 3D (the default), one per kind of piece: the most it may have of triangles, materials,
+  textures, a texture's side (px), texture formats (MIME types) and animations.
+- Audio (`kind: 'audio'`), one per kind of sound (music, SFX, dialogue, ambience...): a target
+  loudness (`targetLufs`) and how far from it a file may be (`lufsTolerance`, 1 LU if not set),
+  the highest true peak (`maxTruePeak`, dBTP), and the formats (`audioFormats`, MIME types) and
+  sample rates (`sampleRates`, Hz) it may be in.
+
+A limit not set isn't checked. `defaultProfileId` (a 3D profile) and `defaultAudioProfileId` (an
+audio one) are what an asset that chose none is checked against; an asset chooses its own (of its
+kind) with `PUT .../assets/:assetId/budget-profile { profileId }` (null: the default). From the
+MCP server: `get_asset_measurements`, `get_asset_budgets`, and `list_asset_versions` says which
+are measured.
 
 ## 🗃️ A project's database records
 
