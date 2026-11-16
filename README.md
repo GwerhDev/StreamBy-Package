@@ -377,6 +377,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `list_projects` | any token |
 | `get_project` | `project:read` |
 | `create_project` | `projects:create` |
+| `update_project`, `request_project_image_upload`; `archive_project` (a user's token only: their own list) | `project:update` |
 | `delete_project` | `project:delete` |
 | `list_assets` (by category, optionally in one storage connection, and filtered by name), `get_asset_metadata`, `get_asset_measurements` | `assets:read` |
 | `update_asset_metadata` | `assets:write` |
@@ -1142,7 +1143,7 @@ describe each area; this is the map.
 | Area | Routes |
 |---|---|
 | Session | `GET /auth`, `GET /user/subscription`, `GET /users/search?q=` |
-| Projects | `GET /projects` (`?archived=`), `GET /projects/explore`, `POST /projects/create`, `GET`, `PATCH`, `DELETE /projects/:id`, `GET /projects/:id/preview`, `GET /:projectId/image` (its image, open), `PATCH /projects/:id/archive` and `/unarchive`, `POST /projects/:id/image`, `GET` and `PATCH /projects/:id/origins`, `GET` and `PUT /projects/:id/permissions`, `GET /projects/:id/dependents/:kind/:resourceId` |
+| Projects | `GET /projects` (`?archived=`), `GET /projects/explore`, `POST /projects/create`, `GET`, `PATCH` (its details only: `name`, `description`, `image`, `allowedOrigin`, `public`, `category`; with `baseUpdatedAt`, 409 if it was saved since), `DELETE /projects/:id`, `GET /projects/:id/preview`, `GET /:projectId/image` (its image, open), `PATCH /projects/:id/archive` and `/unarchive`, `POST /projects/:id/image`, `GET` and `PATCH /projects/:id/origins`, `GET` and `PUT /projects/:id/permissions`, `GET /projects/:id/dependents/:kind/:resourceId` |
 | Members and teams | `GET`, `POST /projects/:id/members`, `PATCH`, `DELETE /projects/:id/members/:userId` (and `/accept`, `/approve`, `/reject`), `POST /projects/:id/request-join`, `GET`, `POST /projects/:id/teams`, `PATCH`, `DELETE /projects/:id/teams/:teamId` |
 | Integrations | `GET`, `POST /user/integrations`, `PATCH`, `DELETE /user/integrations/:id` (and `/dependents`), `GET /user/integrations/oauth/:provider/start` and `/callback`; a project's: `GET`, `POST /projects/:id/integrations`, `DELETE /projects/:id/integrations/:integrationId` |
 | Connections | `/projects/:id/connections` (APIs), `/projects/:id/connections/db` (databases, their tables and records), `/projects/:id/connections/storage` (storages, their files and folders), `GET /databases`, `GET /storages` |

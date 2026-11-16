@@ -17,6 +17,7 @@ import { projectImageUrl, publicBaseOf } from '../../services/storageReferences'
 import { deletePermissionsOf, readProjectPermissions, setProjectPermissions, ROLE_ACTIONS, APP_PERMISSIONS } from '../../services/projectPermissions';
 import { jobStore } from '../../services/jobStore';
 import { documentStore } from '../../services/documents';
+import { parseProjectDetails, savedSince, updatedAtOf } from '../../services/projectDetails';
 export function projectRouter(config: StreamByConfig): Router {
   const router = Router();
 
@@ -241,7 +242,6 @@ export function projectRouter(config: StreamByConfig): Router {
       const auth = (req as any).auth as Auth;
 
       const projectId = req.params.id;
-      const updates = req.body;
 
       const project = await Project.findOne({ _id: projectId });
 
@@ -249,21 +249,41 @@ export function projectRouter(config: StreamByConfig): Router {
         return res.status(404).json({ message: 'Project not found' });
       }
 
-      if (!updates || typeof updates !== 'object') {
-        return res.status(400).json({ message: 'Missing updates payload' });
-      }
-
       if (!canEditProject(project, auth.userId)) {
         return res.status(403).json({ message: 'Unauthorized project access' });
       }
 
-      const updated = await Project.update({ _id: projectId }, updates);
+      // Its details only: a payload can't reach its members, connections or anything else.
+      const parsed = parseProjectDetails(req.body);
+      if ('error' in parsed) return res.status(400).json({ message: parsed.error });
+      const { changes, baseUpdatedAt } = parsed;
+
+      // Saved on the project as it was read (an agent's update_project always says when): not
+      // over someone else's save since.
+      if (baseUpdatedAt !== undefined && savedSince(project, baseUpdatedAt)) {
+        return res.status(409).json({
+          message: 'The project was saved since it was read: read it again and make the change on it',
+          updatedAt: updatedAtOf(project),
+        });
+      }
+
+      // Making it private takes a subscriber plan, as making a private one does.
+      if (changes.public === false && project.public !== false && (req as any).subscription === 'freemium') {
+        return res.status(403).json({ message: 'Private projects require a subscriber plan' });
+      }
+
+      const updated = await Project.update({ _id: projectId }, { ...changes, updatedAt: new Date() } as any);
       if (!updated) {
         return res.status(404).json({ message: 'Project not found or not updated' });
       }
+      const saved = await Project.findOne({ _id: projectId }) ?? updated;
       const projects = await activeProjectsOf(req, auth.userId);
 
-      res.status(200).json({ success: true, projects: projects, projectId: updated._id || updated.id, message: 'Project updated successfully' });
+      res.status(200).json({
+        success: true, projects: projects, projectId: updated._id || updated.id,
+        project: present(req, { ...saved, id: saved._id || saved.id, _id: undefined, connections: saved.connections || [], exports: exportSummaries(saved.exports) }),
+        message: 'Project updated successfully',
+      });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to update project', details: err.message });
     }

@@ -22,6 +22,8 @@ export interface ToolDefinition<S extends z.ZodRawShape = z.ZodRawShape> {
   // It changes something (it isn't only a read); and whether what it does can't be undone.
   write?: boolean;
   destructive?: boolean;
+  // About the token's user (their own list of projects): a project's token doesn't get it.
+  userTokenOnly?: boolean;
   input: S;
   // The project it acts on, when it acts on one (for the audit log).
   projectOf?: (args: z.infer<z.ZodObject<S>>) => string | undefined;
@@ -698,6 +700,47 @@ export const TOOLS = [
     },
     call: (fields) => ({ method: 'POST', path: '/projects/create', body: defined(fields) }),
     pick: (data) => ({ projectId: data?.projectId, message: data?.message }),
+  }),
+  tool({
+    name: 'update_project', title: "Update a project's details", permissions: ['project:update'], write: true,
+    description: [
+      "Changes a project's details, as its settings in the UI do: its name, description, category, visibility (public shows it in Explore) and image. What isn't given stays as it is; the new name and image show in the Dashboard and in Explore.",
+      "`baseUpdatedAt` is the project's updatedAt as it was read (get_project), or null if it had none: if it was saved since, nothing is changed and the answer says so; read it again and make the change on it.",
+      "Making it private needs a subscriber plan. For a new image, upload it first (request_project_image_upload) and give its imageUrl here.",
+      "It's refused where the token's user may not change the project (a viewer, or an editor where its admins keep it to themselves).",
+    ].join(' '),
+    input: {
+      projectId,
+      baseUpdatedAt: z.string().nullable().describe("The project's updatedAt as it was read (get_project); null if it had none"),
+      name: z.string().min(1).optional(),
+      description: z.string().optional(),
+      category: z.string().nullable().optional().describe('Its category; null clears it'),
+      public: z.boolean().optional().describe('Whether it shows in Explore'),
+      image: z.string().optional().describe('The imageUrl request_project_image_upload gave, once its file is uploaded'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}`, body: defined(fields) }),
+    pick: (data) => data?.project,
+  }),
+  tool({
+    name: 'request_project_image_upload', title: "Request an upload URL for a project's image", permissions: ['project:update'], write: true,
+    description: [
+      "Gives a signed URL to upload a project's new image (its cover in the Dashboard and in Explore) to, as its settings in the UI do.",
+      "It doesn't upload anything: the image is sent by the tool that has it, with an HTTP PUT of a JPEG's bytes to `upload.url` and the `upload.headers` given, within the hour.",
+      "Then update_project with `image` set to the `imageUrl` given makes it the project's image.",
+    ].join(' '),
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/upload-project-image-url/${enc(projectId)}` }),
+    pick: (data) => ({ upload: { url: data?.url, method: 'PUT', headers: { 'Content-Type': 'image/jpeg' } }, imageUrl: data?.imageUrl }),
+  }),
+  tool({
+    name: 'archive_project', title: 'Archive a project', permissions: ['project:update'], write: true, userTokenOnly: true,
+    description: "Archives a project in the token's user's own list of projects (it moves to their Archive), or with archived false brings it back, as \"Archive this project\" in the UI. Any member does it for themselves: the project, and the other members' lists, stay as they are.",
+    input: { projectId, archived: z.boolean().describe('true archives it, false brings it back') },
+    projectOf: byProject,
+    call: ({ projectId, archived }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/${archived ? 'archive' : 'unarchive'}` }),
+    pick: (data, { archived }) => ({ archived, message: data?.message }),
   }),
   tool({
     name: 'move_document', title: 'Move a document', permissions: ['docs:write'], write: true,

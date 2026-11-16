@@ -18,11 +18,12 @@ const errorText = (body: unknown, status: number) => {
 /**
  * The tools an API token may use: those whose every permission it has. An app approved to write
  * (`oauth`) also gets those a project may add for its apps (deleting a document, say): each call
- * is checked in its project, and refused where the project doesn't.
+ * is checked in its project, and refused where the project doesn't. A tool about its user only
+ * (archiving a project in their own list) is a user's token's alone.
  */
 export const toolsFor = (scope: Auth['apiToken'], { oauth = false }: { oauth?: boolean } = {}) => {
   const addable = oauth && isWritingApp(scope?.permissions);
-  return TOOLS.filter(tool => tool.permissions.every(p =>
+  return TOOLS.filter(tool => (!tool.userTokenOnly || scope?.kind === 'user') && tool.permissions.every(p =>
     !!scope?.permissions.includes(p) || (addable && (APP_PERMISSIONS as readonly string[]).includes(p))));
 };
 
