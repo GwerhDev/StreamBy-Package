@@ -110,6 +110,18 @@ describe('review notes on a moment of an audio version', () => {
     expect((await eli.get('/streamby/projects/p1/assets/a1/versions/v1/annotations')).body.annotations).toEqual([]);
   });
 
+  it("a note past the end of its file is refused, when it's known how long the file lasts", async () => {
+    const eli = asToken(await tokenFor(['assets:write']));
+    // Not measured yet: any time is taken.
+    expect((await eli.post(N, { type: 'timecoded', startSeconds: 540, text: 'Unknown length' })).status).toBe(201);
+    mongo.db.collection('asset_versions').docs.push({ versionId: 'v2', assetId: 'a1', projectId: 'p1', version: 2, measurements: { kind: 'audio', duration: 180 } });
+    const past = await eli.post(N, { type: 'timecoded', startSeconds: 540, text: 'At 9:00' });
+    expect([past.status, past.body.message]).toEqual([400, 'The note is past the end of the file, which lasts 3:00 (180 s)']);
+    expect((await eli.post(N, { type: 'timecoded', startSeconds: 170, endSeconds: 181, text: 'Runs past it' })).status).toBe(400);
+    expect((await eli.post(N, { type: 'timecoded', startSeconds: 170, endSeconds: 180, text: 'To the end' })).status).toBe(201);
+    expect(mongo.db.docs('annotations').map((n: any) => n.text)).toEqual(['Unknown length', 'To the end']);
+  });
+
   it("a note's members hear of it, so whoever has the review open reads it again", async () => {
     events.length = 0;
     const eli = asToken(await tokenFor(['assets:write']));
@@ -176,6 +188,15 @@ describe('review notes through MCP', () => {
     expect(made.isError).toBeFalsy();
     const notes = JSON.parse((await call(client, 'list_review_notes', { projectId: 'p1', assetId: 'a1', versionId: 'v2' })).content[0].text);
     expect(notes).toEqual([expect.objectContaining({ timecode: '1:23–1:35', startSeconds: 83, endSeconds: 95, text: 'Bass masks the vocal: cut 200 Hz', author: 'agent', taskId: null })]);
+  });
+
+  it("an agent's note past the end of the file is refused, saying how long it lasts", async () => {
+    mongo.db.collection('asset_versions').docs.push({ versionId: 'v2', assetId: 'a1', projectId: 'p1', version: 2, measurements: { kind: 'audio', duration: 180 } });
+    const client = await connect(await tokenFor(['assets:read', 'assets:write']));
+    const past = await call(client, 'create_review_note', { projectId: 'p1', assetId: 'a1', versionId: 'v2', startSeconds: 540, text: 'At 9:00' });
+    expect(past.isError).toBe(true);
+    expect(past.content[0].text).toContain('lasts 3:00 (180 s)');
+    expect(mongo.db.docs('annotations')).toHaveLength(0);
   });
 
   it('a token that only reads gets the lists, not the note', async () => {

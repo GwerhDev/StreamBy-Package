@@ -18,6 +18,22 @@ export function checkNoteTime(body: { startSeconds?: unknown; endSeconds?: unkno
   return { time: { startSeconds, endSeconds } };
 }
 
+/**
+ * A note's time against its file's duration (seconds), when it's known: past its end, it's
+ * refused. Unknown (no one measured the version yet), any time is taken.
+ */
+export function checkNoteWithin(time: NoteTime, duration: number | null): string | null {
+  if (duration === null) return null;
+  const last = time.endSeconds ?? time.startSeconds;
+  return last > duration ? `The note is past the end of the file, which lasts ${clock(duration)} (${duration} s)` : null;
+}
+
+/** A version's duration, in seconds, as it was measured (an audio one's); null if unknown. */
+export function versionDuration(version: { measurements?: { duration?: unknown } | null } | null): number | null {
+  const duration = version?.measurements?.duration;
+  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : null;
+}
+
 /** A moment as a clock: 1:23, or 1:02:03 past an hour (whole seconds). */
 export function clock(seconds: number): string {
   const whole = Math.floor(seconds);

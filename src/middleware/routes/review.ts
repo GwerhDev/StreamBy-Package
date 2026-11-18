@@ -9,7 +9,7 @@ import { getConnection, getConnectedIds } from '../../adapters/database/connecti
 import crypto from 'crypto';
 import { afterGateChange } from './deliverable';
 import { advanceRuns } from '../../services/pipelineRuns';
-import { checkNoteTime, noteTask, noteTimecode } from '../../services/reviewNotes';
+import { checkNoteTime, checkNoteWithin, noteTask, noteTimecode, versionDuration, NoteTime } from '../../services/reviewNotes';
 import { newTask } from '../../services/productionTasks';
 
 function getDb() {
@@ -218,11 +218,11 @@ export function reviewRouter(config: StreamByConfig): Router {
 
         if (!type || !text) return res.status(400).json({ message: 'type and text are required' });
         // A timecoded note is on an instant of the file, or a range of it.
-        let time: { startSeconds?: number; endSeconds?: number; timecode?: string } = {};
+        let noteTime: NoteTime | null = null;
         if (type === 'timecoded') {
           const checked = checkNoteTime(req.body);
           if ('error' in checked) return res.status(400).json({ message: checked.error });
-          time = { ...checked.time, timecode: noteTimecode(checked.time) };
+          noteTime = checked.time;
         }
 
         const project = await Project.findOne({ _id: projectId });
@@ -231,6 +231,14 @@ export function reviewRouter(config: StreamByConfig): Router {
 
         const db = getDb();
         if (!db) return res.status(500).json({ message: 'Database not available' });
+
+        // Within the file, when it's known how long it lasts.
+        if (noteTime) {
+          const version = await db.collection('asset_versions').findOne({ projectId, assetId, versionId }) as any;
+          const outside = checkNoteWithin(noteTime, versionDuration(version));
+          if (outside) return res.status(400).json({ message: outside });
+        }
+        const time = noteTime ? { ...noteTime, timecode: noteTimecode(noteTime) } : {};
 
         const annotation = {
           id: crypto.randomUUID(),
