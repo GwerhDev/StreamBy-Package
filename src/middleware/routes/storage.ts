@@ -11,7 +11,9 @@ import { resolveStorageAdapter } from '../../services/connectionResolver';
 import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 import { signedUrlTtl } from '../../services/signedUrls';
-import { archiveCurrentVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions, orphanedContentKeys } from '../../services/assetVersions';
+import { archiveCurrentVersion, findVersion, recordFirstVersion, versionStorageKeys, deleteVersions, orphanedContentKeys, versionsCollection } from '../../services/assetVersions';
+import { UploadStart, versionUploaded } from '../../services/pipelineRuns';
+import { callbackBaseOf } from './worker';
 import { deleteDeliverablesOf } from '../../services/deliverables';
 import { broadcastRights, deleteRightsOf, rightsFromQuery, RightsValues, saveRights } from '../../services/rights';
 import { tokenAllows } from '../../services/auth';
@@ -405,6 +407,85 @@ export function storageRouter(config: StreamByConfig & { adapter?: StorageAdapte
       res.json({ url, fileId, fileName, contentType: contentType ?? null, ...(version ? { versionId, version } : {}), ...expiry(expiresIn) });
     } catch (err: any) {
       res.status(500).json({ message: 'Failed to generate download URL', details: err.message });
+    }
+  });
+
+  // An upload is done: whoever sent the bytes (to the signed URL, straight to the storage, which
+  // StreamBy never hears from) says so. The asset's latest version, once its bytes are there
+  // (the ones declared, if it declared their sha256), is uploaded: the pipelines of the cards
+  // it's linked to that are set to start on a new version start their runs. Said again, it's
+  // answered as it is, starting nothing.
+  router.post('/projects/:projectId/assets/:fileId/uploaded', async (req: Request, res: Response) => {
+    try {
+      const auth = (req as any).auth as Auth;
+      const { projectId, fileId } = req.params;
+      const versionId = req.body?.versionId;
+      if (versionId !== undefined && (typeof versionId !== 'string' || !versionId)) return res.status(400).json({ message: 'versionId is a version of the asset' });
+
+      const project = await Project.findOne({ _id: projectId });
+      if (!project) return res.status(404).json({ message: 'Project not found' });
+      if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized access' });
+
+      const collection = getRawFilesCollection();
+      const versions = versionsCollection();
+      if (!collection || !versions) return res.status(500).json({ message: 'Database not available' });
+      const fileDoc = await collection.findOne({ fileId, projectId });
+      if (!fileDoc) return res.status(404).json({ message: 'File not found' });
+      await recordFirstVersion(fileDoc as any);
+      const [latest]: any[] = await versions.find({ projectId, assetId: fileId }).sort({ version: -1 }).limit(1).toArray();
+      if (!latest) return res.status(404).json({ message: 'Version not found' });
+      if (versionId && versionId !== latest.versionId) {
+        const earlier = await findVersion(projectId, fileId, versionId);
+        return earlier
+          ? res.status(409).json({ message: "Only the asset's latest version is uploaded: that one is an earlier one" })
+          : res.status(404).json({ message: 'Version not found' });
+      }
+
+      // Its bytes, where the storage can tell.
+      const connId: string | undefined = fileDoc.storageConnectionId;
+      const fileAdapter = connId && findStorageConn(project, connId) ? await resolveConnAdapter(connId, project, auth) : adapter;
+      if ('error' in fileAdapter) return res.status(fileAdapter.status).json({ message: fileAdapter.error });
+      if (fileAdapter.contentInfo) {
+        const stored = await fileAdapter.contentInfo(latest.storageKey);
+        if (!stored) return res.status(409).json({ message: "The file isn't in the storage yet: send it to the upload URL first" });
+        if (latest.sha256 && stored.sha256 !== latest.sha256) {
+          return res.status(409).json({ message: "What the storage has isn't the file declared (its sha256 differs): send it again" });
+        }
+      }
+
+      const uploadedAt = new Date();
+      // Once: of two at once, or one said again, only the first starts runs.
+      const first = await versions.updateOne(
+        { projectId, assetId: fileId, versionId: latest.versionId, uploadedAt: { $exists: false } },
+        { $set: { uploadedAt, uploadedBy: auth.userId } },
+      );
+      // Let go of this claim when the runs it should start didn't, for a later call to start them.
+      const release = () => versions.updateOne(
+        { projectId, assetId: fileId, versionId: latest.versionId, uploadedAt },
+        { $unset: { uploadedAt: '', uploadedBy: '' } },
+      );
+      let starts: UploadStart[] = [];
+      let recorded = !!first.matchedCount;
+      if (first.matchedCount) {
+        let outcome;
+        try {
+          outcome = await versionUploaded(project, fileDoc as any, auth, tokenAllows(auth.apiToken, 'jobs:run'), callbackBaseOf(req, config));
+        } catch (err: any) {
+          console.error('❌ StreamBy pipelines: a version uploaded:', err?.message ?? err);
+          await release();
+          return res.status(500).json({ message: "Its pipelines' runs couldn't start: say the upload is done again", details: err?.message });
+        }
+        starts = outcome.starts;
+        // Not recorded: someone who may run jobs saying it starts them.
+        if (outcome.mayNotRun) { await release(); recorded = false; }
+      }
+      res.json({
+        assetId: fileId, versionId: latest.versionId, version: latest.version,
+        uploadedAt: first.matchedCount ? (recorded ? uploadedAt : null) : latest.uploadedAt ?? null,
+        runs: starts.map(r => ({ shotId: r.shotId, pipelineId: r.pipelineId, started: r.started, runId: r.run?.id ?? null, reason: r.reason })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: 'Failed to record the upload', details: err.message });
     }
   });
 

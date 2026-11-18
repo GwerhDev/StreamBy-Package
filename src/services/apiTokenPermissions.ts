@@ -95,6 +95,8 @@ const RULES = [
   rule('read', `${P}/asset-budgets`, 'project:read'),
   rule(['PUT'], `${P}/asset-budgets`, 'project:update'),
   rule(['PATCH'], `${P}/assets/[^/]+/metadata`, 'assets:write'),
+  // An upload done: its version recorded as uploaded (its pipelines' runs start as the caller, if it may run jobs).
+  rule(['POST'], `${P}/assets/[^/]+/uploaded`, 'assets:write'),
   rule(['POST'], `${P}/assets/[^/]+/qc-report`, 'assets:write'),
   rule('read', `${P}/(reviews(/[^/]+)?|assets/[^/]+/versions/[^/]+/annotations)`, 'assets:read'),
   rule(['POST', 'PATCH'], `${P}/(reviews(/[^/]+/decision)?|assets/[^/]+/versions/[^/]+/annotations(/[^/]+/resolve)?)`, 'assets:write'),

@@ -78,6 +78,15 @@ const rightsFields = {
   comments: z.string().optional(),
 };
 
+// What starts a shot's run of a pipeline by itself, and what its version_uploaded trigger takes.
+const triggers = z.array(z.enum(['card_linked', 'card_done', 'deliverable_marked', 'version_uploaded'])).optional().describe(
+  "What starts a shot's run of it by itself: a shot linked to it, a shot done, an asset marked as a shot's deliverable, a new version of a shot's asset uploaded (complete_asset_upload). A run can always be started by hand (start_pipeline_run)",
+);
+const uploadFilter = z.object({
+  categories: z.array(z.enum(CATEGORIES)).optional().describe('Only assets of these categories (e.g. ["audios"]); any if not given'),
+  folderIds: z.array(z.string()).optional().describe('Only assets in these Storage folders, or inside them (list_storage_folders); any if not given'),
+}).nullable().optional().describe('What version_uploaded starts a run on; null for any upload');
+
 // Only the fields given (an unset optional field isn't sent as undefined).
 // A database connection's routes.
 const databaseOf = (projectId: string, connectionId: string) => `/projects/${enc(projectId)}/connections/db/${enc(connectionId)}`;
@@ -391,14 +400,14 @@ export const TOOLS = [
   tool({
     name: 'create_pipeline', title: 'Create a pipeline', permissions: ['workflow:write'], write: true,
     description: "Creates a pipeline in a project. It shows under Pipelines, and the workflow canvas draws its node.",
-    input: { projectId, name: z.string().min(1), description: z.string().optional(), order: z.number().optional(), triggers: z.array(z.enum(['card_linked', 'card_done', 'deliverable_marked'])).optional().describe("What starts a shot's run of it by itself: a shot linked to it, a shot done, an asset marked as a shot's deliverable. A run can always be started by hand (start_pipeline_run)") },
+    input: { projectId, name: z.string().min(1), description: z.string().optional(), order: z.number().optional(), triggers, uploadFilter },
     projectOf: byProject,
     call: ({ projectId, ...fields }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/pipelines`, body: defined(fields) }),
   }),
   tool({
     name: 'update_pipeline', title: 'Update a pipeline', permissions: ['workflow:write'], write: true,
-    description: "Changes a pipeline's name, description, order or triggers.",
-    input: { projectId, pipelineId: id('pipeline'), name: z.string().min(1).optional(), description: z.string().optional(), order: z.number().optional(), triggers: z.array(z.enum(['card_linked', 'card_done', 'deliverable_marked'])).optional().describe("What starts a shot's run of it by itself: a shot linked to it, a shot done, an asset marked as a shot's deliverable. A run can always be started by hand (start_pipeline_run)") },
+    description: "Changes a pipeline's name, description, order, triggers or what its version_uploaded trigger takes (uploadFilter).",
+    input: { projectId, pipelineId: id('pipeline'), name: z.string().min(1).optional(), description: z.string().optional(), order: z.number().optional(), triggers, uploadFilter },
     projectOf: byProject,
     call: ({ projectId, pipelineId, ...fields }) => ({ method: 'PATCH', path: `/projects/${enc(projectId)}/pipelines/${enc(pipelineId)}`, body: defined(fields) }),
   }),
@@ -513,6 +522,7 @@ export const TOOLS = [
       "Categories: images, audios, videos, 3d-models (.glb, .gltf, .obj, .fbx, .stl, .ply); contentType must match it.",
       "For a new asset taken from someone else (a CC model, a stock image), give its license metadata too, so it's credited (it needs the rights:write permission); for a new version, set_asset_rights changes it.",
       "Give the file's sha256 for it to be in an export's catalog (what a build fetches its deliverables from): the storage then refuses bytes that don't match it, and the upload must send `upload.headers` as given (they carry it).",
+      "Once the PUT is done, call complete_asset_upload: StreamBy doesn't hear from the storage, and that's what starts the pipelines set to run on a new version.",
     ].join(' '),
     input: {
       projectId,
@@ -544,6 +554,13 @@ export const TOOLS = [
       upload: { method: 'PUT', url: data?.url, headers: data?.headers ?? { 'Content-Type': contentType } },
       expiresAt: data?.expiresAt ?? null,
     }),
+  }),
+  tool({
+    name: 'complete_asset_upload', title: 'Complete an upload', permissions: ['assets:write'], write: true,
+    description: "Says an upload is done, after the HTTP PUT of the file to the URL request_asset_upload gave: StreamBy checks the storage has it (the bytes declared, if their sha256 was given) and records the asset's latest version as uploaded. The pipelines of the shots linked to the asset that are set to start on a new version (version_uploaded, of its category and folder if they're set to) start their runs, as you. A shot with a run of it going keeps that one. It answers each run started, or not (started: false, with the reason). Without jobs:run (for your token and your role), the runs that should start don't, and the version isn't recorded as uploaded (uploadedAt: null): someone who may run jobs calling it starts them. Once recorded, calling it again starts nothing.",
+    input: { projectId, assetId: id('asset'), versionId: z.string().optional().describe('The version uploaded (request_asset_upload answers it); the latest if not given') },
+    projectOf: byProject,
+    call: ({ projectId, assetId, versionId }) => ({ method: 'POST', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/uploaded`, body: defined({ versionId }) }),
   }),
   tool({
     name: 'get_asset_download_url', title: 'Get a download URL', permissions: ['assets:read'],

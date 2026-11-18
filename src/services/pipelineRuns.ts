@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Auth, JobRecord, StorageAdapter, StreamByConfig } from '../types';
+import { Auth, JobRecord, StorageAdapter, StorageCategoryName, StreamByConfig } from '../types';
 import { nosqlDb } from '../utils/nosqlDb';
 import { activeMemberOf } from '../utils/auth';
 import { emitToUser } from './wsHub';
@@ -26,15 +26,16 @@ import { getModel } from '../models/manager';
 // so: a card's or a task's status (never its column's name), a review's decision, a document
 // published, a job ended. Each of those events moves the runs it may concern on (advanceRuns).
 //
-// A run starts by hand, or by the pipeline's triggers: a card linked to it, a card done, or one
-// of its card's assets marked as a deliverable. Its workers run as whoever started it, while
+// A run starts by hand, or by the pipeline's triggers: a card linked to it, a card done, one
+// of its card's assets marked as a deliverable, or a new version of its card's asset uploaded
+// (only of the asset categories and Storage folders it's set to, if any). Its workers run as whoever started it, while
 // their role lets them run jobs. A pipeline with no triggers (as every one before them) never
 // starts a run by itself: it works as it always did.
 
 export const MEETING_NODE = 'meetingNode';
 export const TASKS_NODE = 'tasksNode';
 
-export const PIPELINE_TRIGGERS = ['card_linked', 'card_done', 'deliverable_marked'] as const;
+export const PIPELINE_TRIGGERS = ['card_linked', 'card_done', 'deliverable_marked', 'version_uploaded'] as const;
 export type PipelineTrigger = typeof PIPELINE_TRIGGERS[number] | 'manual';
 
 export type StepKind = 'meeting' | 'tasks' | 'review' | 'credits' | 'worker' | 'deliverable' | 'pass';
@@ -116,6 +117,47 @@ export function checkTriggers(value: unknown): PipelineTrigger[] | { error: stri
     return { error: `triggers must be a list of: ${PIPELINE_TRIGGERS.join(', ')} (a run can always be started by hand)` };
   }
   return [...new Set(value as PipelineTrigger[])];
+}
+
+/** What a version_uploaded trigger takes: assets of these categories, in these folders (or inside them); none, any. */
+export interface UploadFilter {
+  categories: StorageCategoryName[];
+  folderIds: string[];
+}
+const UPLOAD_CATEGORIES: StorageCategoryName[] = ['images', 'audios', 'videos', '3d-models'];
+const NO_FILTER: UploadFilter = { categories: [], folderIds: [] };
+
+/** A pipeline's upload filter, as saved (none: any upload). */
+export function uploadFilterOf(pipeline: any): UploadFilter {
+  const saved = pipeline?.uploadFilter;
+  if (!saved || typeof saved !== 'object') return NO_FILTER;
+  return {
+    categories: Array.isArray(saved.categories) ? saved.categories.filter((c: unknown) => (UPLOAD_CATEGORIES as unknown[]).includes(c)) : [],
+    folderIds: Array.isArray(saved.folderIds) ? saved.folderIds.filter((f: unknown) => typeof f === 'string' && f) : [],
+  };
+}
+
+/** The upload filter given for a pipeline, checked (null clears it). */
+export function checkUploadFilter(value: unknown): UploadFilter | { error: string } {
+  if (value === null) return NO_FILTER;
+  const error = { error: `uploadFilter is { categories?: (${UPLOAD_CATEGORIES.join(', ')})[], folderIds?: string[] }, or null for any upload` };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return error;
+  const { categories = [], folderIds = [] } = value as Record<string, unknown>;
+  if (!Array.isArray(categories) || !categories.every(c => (UPLOAD_CATEGORIES as unknown[]).includes(c))) return error;
+  if (!Array.isArray(folderIds) || !folderIds.every(f => typeof f === 'string' && f)) return error;
+  return { categories: [...new Set(categories as StorageCategoryName[])], folderIds: [...new Set(folderIds as string[])] };
+}
+
+// The folders a file is in: its own, and each one that holds it, up to the top.
+async function foldersHolding(projectId: string, folderId: string | null | undefined): Promise<Set<string>> {
+  const held = new Set<string>();
+  const folders = db()?.collection('storage_folders');
+  for (let id = folderId ?? null; id && !held.has(id) && held.size < 64;) {
+    held.add(id);
+    const folder: any = folders ? await folders.findOne({ projectId, folderId: id }) : null;
+    id = folder?.parentId ?? null;
+  }
+  return held;
 }
 
 // ── Where it is ──
@@ -488,6 +530,62 @@ export async function deliverableMarked(project: any, deliverable: { shotId: str
   if (triggersOf(pipeline).includes('deliverable_marked') && await mayRun(project, auth, tokenMayRun)) {
     await startRun(project, card.pipelineId, card.id, 'deliverable_marked', auth!, callbackBase);
   }
+}
+
+/** What a new version did to a card's pipeline: started its run, or found one going. */
+export interface UploadStart {
+  shotId: string;
+  pipelineId: string;
+  started: boolean;
+  run: PipelineRun | null;
+  reason: string | null;
+}
+
+/** Why runs that should start on an upload didn't: the caller may not run jobs (token or role). */
+export const MAY_NOT_RUN = "You may not run jobs (jobs:run, for your token and your role): ask someone who may to say the upload is done";
+
+/**
+ * A new version of an asset is uploaded: each card it's linked to whose pipeline is set to start
+ * on it (and takes its category and folder) starts its run. A card with a run going keeps it, as
+ * a start by hand would. `mayNotRun`: some should start, but the caller may not run jobs, so
+ * none did (each one answered with why); with none set to start, it's false.
+ */
+export async function versionUploaded(
+  project: any, file: { fileId: string; category?: string; folderId?: string | null },
+  auth: Auth | undefined, tokenMayRun: boolean, callbackBase: string,
+): Promise<{ starts: UploadStart[]; mayNotRun: boolean }> {
+  const projectId = String(project._id ?? project.id);
+  const cards = (await db()?.collection('production_shots').find({ projectId, assetId: file.fileId }).toArray()) ?? [];
+  // First, which cards' pipelines are set to start on this upload.
+  let folders: Set<string> | null = null;
+  const due: any[] = [];
+  for (const card of cards.filter((c: any) => c.pipelineId) as any[]) {
+    const pipeline = await db()!.collection('pipelines').findOne({ id: card.pipelineId, projectId });
+    if (!triggersOf(pipeline).includes('version_uploaded')) continue;
+    const filter = uploadFilterOf(pipeline);
+    if (filter.categories.length && !(filter.categories as string[]).includes(file.category ?? '')) continue;
+    if (filter.folderIds.length) {
+      folders ??= await foldersHolding(projectId, file.folderId);
+      if (!filter.folderIds.some(id => folders!.has(id))) continue;
+    }
+    due.push(card);
+  }
+  if (!due.length) return { starts: [], mayNotRun: false };
+  // Then whether the caller may start them.
+  if (!(await mayRun(project, auth, tokenMayRun))) {
+    return {
+      starts: due.map(card => ({ shotId: card.id, pipelineId: card.pipelineId, started: false, run: null, reason: MAY_NOT_RUN })),
+      mayNotRun: true,
+    };
+  }
+  const starts: UploadStart[] = [];
+  for (const card of due) {
+    const result = await startRun(project, card.pipelineId, card.id, 'version_uploaded', auth!, callbackBase);
+    starts.push('error' in result
+      ? { shotId: card.id, pipelineId: card.pipelineId, started: false, run: result.run ?? null, reason: result.error }
+      : { shotId: card.id, pipelineId: card.pipelineId, started: true, run: result.run, reason: null });
+  }
+  return { starts, mayNotRun: false };
 }
 
 /** A pipeline, or a card, is gone: so are its runs. */

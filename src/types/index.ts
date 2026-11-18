@@ -410,6 +410,8 @@ export interface Pipeline {
   nodeSchema: NodeSchema | null;
   // What starts a card's run of it by itself (see services/pipelineRuns): none, only by hand.
   triggers?: string[];
+  // What its version_uploaded trigger takes: asset categories and Storage folders (none: any).
+  uploadFilter?: { categories: StorageCategoryName[]; folderIds: string[] };
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;

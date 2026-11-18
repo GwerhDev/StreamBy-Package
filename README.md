@@ -430,7 +430,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `create_sequence`, `create_shot`, `create_shots`, `create_task`, `create_task_template`, `update_task_template`, `apply_task_template` | `production:write` |
 | `delete_sequence`, `delete_shot`, `delete_task`, `delete_task_template` | `production:delete` |
 | `list_asset_versions`, `get_asset_download_url`, `list_deliverables`, `list_storage_folders` | `assets:read` |
-| `request_asset_upload` (with license metadata, also `rights:write`), `mark_deliverable`, `remove_deliverable`, `create_storage_folder`, `rename_storage_folder`, `move_asset`, `rename_asset` | `assets:write` |
+| `request_asset_upload` (with license metadata, also `rights:write`), `complete_asset_upload`, `mark_deliverable`, `remove_deliverable`, `create_storage_folder`, `rename_storage_folder`, `move_asset`, `rename_asset` | `assets:write` |
 | `delete_storage_folder` | `assets:delete` |
 | `list_documents`, `get_document`, `list_document_versions` | `docs:read` |
 | `create_document`, `update_document`, `update_document_section`, `move_document` | `docs:write` |
@@ -583,7 +583,9 @@ scene as glTF and deliver it for shot SH010 of Portfolio"* goes:
    urllib.request.urlopen(req)
    ```
 
-4. `mark_deliverable` with the asset's id and `shotId`: it shows in the shot's panel.
+4. `complete_asset_upload` with the asset's id: StreamBy checks the file is there, and the
+   pipelines set to start on a new version (`version_uploaded`) start their runs.
+5. `mark_deliverable` with the asset's id and `shotId`: it shows in the shot's panel.
 
 Bringing an asset into Blender or Godot is the other way around: `get_asset_download_url`, and
 code there that downloads the URL and imports the file (in Blender,
@@ -979,8 +981,20 @@ never its column's name.
 **Starting a run.** By hand (`POST /projects/:projectId/pipelines/:pipelineId/runs` `{ shotId }`,
 `jobs:run`; a 409 with the run when the card has one going), or by the pipeline's `triggers`:
 `card_linked` (a card linked to it), `card_done` (a card done), `deliverable_marked` (an asset
-marked as a card's deliverable). A pipeline with none, as every one before them, starts nothing by
-itself. A trigger starts a run only for a request that may run jobs (`jobs:run`, for its token and
+marked as a card's deliverable), `version_uploaded` (a new version of a card's asset uploaded). A
+pipeline with none, as every one before them, starts nothing by itself.
+
+`version_uploaded` takes the pipeline's `uploadFilter` (`{ categories?, folderIds? }`, `null` for
+any upload): only assets of those categories, in those Storage folders or inside them. Since the
+bytes go straight to the storage, StreamBy hears of an upload when whoever sent them says it's
+done: `POST /projects/:projectId/assets/:assetId/uploaded` (`{ versionId? }`, `assets:write`;
+`complete_asset_upload` from the MCP server). It checks the storage has the file (its declared
+sha256, if one was given; a 409 if not), records the asset's latest version as uploaded, and
+starts the runs, answering each one (`started: false`, with the reason, for a card with a run going,
+which keeps it). Said by someone who may not run jobs when runs should start, none do and the
+version isn't recorded (`uploadedAt: null`), so someone who may can say it again; the same if
+starting them fails (a 500). Once recorded, said again, it starts nothing. The UI says it after each
+upload. A trigger starts a run only for a request that may run jobs (`jobs:run`, for its token and
 its role), and the run's workers run as whoever started it, while their role lets them.
 
 **Reading them.** `GET /projects/:projectId/pipelines/:pipelineId/runs` (`?shotId=`) and

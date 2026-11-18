@@ -6,7 +6,7 @@ import { canEditProject, isProjectMember } from '../../utils/auth';
 import { tokenAllows } from '../../services/auth';
 import { cardKey, numberCards, readKey } from '../../services/cardKeys';
 import {
-  advanceRuns, checkTriggers, deleteRunsOf, describeRun, listRuns, startRun, triggersOf, usePipelineRuns,
+  advanceRuns, checkTriggers, checkUploadFilter, uploadFilterOf, deleteRunsOf, describeRun, listRuns, startRun, triggersOf, usePipelineRuns,
 } from '../../services/pipelineRuns';
 import { callbackBaseOf } from './worker';
 import { getConnection, getConnectedIds } from '../../adapters/database/connectionManager';
@@ -31,8 +31,9 @@ export function pipelineRouter(config: StreamByConfig): Router {
   const Project = getModel('projects');
   usePipelineRuns(config);
 
-  // A pipeline as it's answered: with its triggers (none, for one saved before it had them).
-  const withTriggers = (pipeline: any) => (pipeline ? { ...pipeline, triggers: triggersOf(pipeline) } : pipeline);
+  // A pipeline as it's answered: with its triggers (none, for one saved before it had them) and
+  // what its version_uploaded trigger takes.
+  const withTriggers = (pipeline: any) => (pipeline ? { ...pipeline, triggers: triggersOf(pipeline), uploadFilter: uploadFilterOf(pipeline) } : pipeline);
 
   const toRef = (p: Pick<Pipeline, 'id' | 'name' | 'order'>): PipelineRef => ({ id: p.id, name: p.name, order: p.order });
 
@@ -79,6 +80,8 @@ export function pipelineRouter(config: StreamByConfig): Router {
       if (!name) return res.status(400).json({ message: 'name is required' });
       const triggers = req.body.triggers === undefined ? [] : checkTriggers(req.body.triggers);
       if ('error' in triggers) return res.status(400).json({ message: triggers.error });
+      const uploadFilter = req.body.uploadFilter === undefined ? uploadFilterOf(null) : checkUploadFilter(req.body.uploadFilter);
+      if ('error' in uploadFilter) return res.status(400).json({ message: uploadFilter.error });
 
       const project = await Project.findOne({ _id: projectId });
       if (!project) return res.status(404).json({ message: 'Project not found' });
@@ -96,6 +99,7 @@ export function pipelineRouter(config: StreamByConfig): Router {
         order: order ?? (project.pipelines?.length ?? 0),
         nodeSchema: null,
         triggers,
+        uploadFilter,
         createdBy: auth.userId,
         createdAt: now,
         updatedAt: now,
@@ -147,6 +151,11 @@ export function pipelineRouter(config: StreamByConfig): Router {
         const triggers = checkTriggers(req.body.triggers);
         if ('error' in triggers) return res.status(400).json({ message: triggers.error });
         $set.triggers = triggers;
+      }
+      if (req.body.uploadFilter !== undefined) {
+        const uploadFilter = checkUploadFilter(req.body.uploadFilter);
+        if ('error' in uploadFilter) return res.status(400).json({ message: uploadFilter.error });
+        $set.uploadFilter = uploadFilter;
       }
       if (name !== undefined) $set.name = name;
       if (description !== undefined) $set.description = description;
