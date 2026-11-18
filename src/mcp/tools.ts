@@ -168,6 +168,29 @@ export const TOOLS = [
     pick: (data) => data?.budgets,
   }),
   tool({
+    name: 'list_reviews', title: "List a project's review sessions", permissions: ['assets:read'],
+    description: "A project's review sessions, newest first: each one's id, the asset and the version it reviews (assetId, assetVersionId), its status (open, approved, rejected, expired), how many approvals it needs and the votes it has. They're in the project's Reviews; an approved one lets its Review Gates pass.",
+    input: { projectId },
+    projectOf: byProject,
+    call: ({ projectId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/reviews` }),
+    pick: (data) => (data?.reviews ?? []).map((r: any) => ({
+      id: r.id, assetId: r.assetId, assetVersionId: r.assetVersionId, status: r.status, requiredApprovers: r.requiredApprovers,
+      approvals: (r.approvals ?? []).map((a: any) => ({ username: a.username, decision: a.decision, comment: a.comment ?? null })),
+      deadline: r.deadline ?? null, createdAt: r.createdAt,
+    })),
+  }),
+  tool({
+    name: 'list_review_notes', title: "List a version's review notes", permissions: ['assets:read'],
+    description: "The review notes on an asset's version, oldest first. A note on audio is on a moment of it: startSeconds (seconds from its start) and, for a range, endSeconds; timecode is that time as it's read (1:23, or 1:23–1:40). Each one says who wrote it, whether it's resolved, and the task it became (taskId, of the card shotId), if it did. They show on the waveform in the review.",
+    input: { projectId, assetId: id('asset'), versionId: id('version') },
+    projectOf: byProject,
+    call: ({ projectId, assetId, versionId }) => ({ method: 'GET', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/versions/${enc(versionId)}/annotations` }),
+    pick: (data) => (data?.annotations ?? []).map((n: any) => ({
+      id: n.id, type: n.type, startSeconds: n.startSeconds ?? null, endSeconds: n.endSeconds ?? null, timecode: n.timecode ?? null,
+      text: n.text, author: n.authorUsername, resolved: !!n.resolved, taskId: n.taskId ?? null, shotId: n.shotId ?? null, createdAt: n.createdAt,
+    })),
+  }),
+  tool({
     name: 'get_asset_rights', title: "Get an asset's rights", permissions: ['rights:read'],
     description: "An asset's license metadata: where it was taken from, its creator (name and link), its license and comments; null if it has none.",
     input: { projectId, assetId: id('asset') },
@@ -335,6 +358,22 @@ export const TOOLS = [
   }),
 
   // ── Writing ──
+  tool({
+    name: 'create_review_note', title: 'Add a review note on a moment of an audio version', permissions: ['assets:write'], write: true,
+    description: "Adds a review note on an asset's version (an audio one: a mix, a stem), on an instant of it (startSeconds, seconds from its start) or a range (to endSeconds): e.g. at 83 s, \"the bass covers the vocal\". It shows on the version's waveform in its review, with its time, for whoever has it open; someone can make it a task of the asset's card. The versions are list_asset_versions; what one measures, get_asset_measurements.",
+    input: {
+      projectId, assetId: id('asset'), versionId: id('version'),
+      startSeconds: z.number().min(0).describe('Where it is: seconds from the start of the file'),
+      endSeconds: z.number().optional().describe('For a range, where it ends (after startSeconds)'),
+      text: z.string().min(1).describe('What the note says'),
+    },
+    projectOf: byProject,
+    call: ({ projectId, assetId, versionId, ...note }) => ({
+      method: 'POST', path: `/projects/${enc(projectId)}/assets/${enc(assetId)}/versions/${enc(versionId)}/annotations`,
+      body: defined({ type: 'timecoded', ...note }),
+    }),
+    pick: (data) => data?.annotation,
+  }),
   tool({
     name: 'update_asset_metadata', title: "Update an asset's custom tags", permissions: ['assets:write'], write: true,
     description: "Sets an asset's custom tags (key/value pairs), replacing the ones it had. They show in the file's Metadata tab, in Storage.",

@@ -17,6 +17,7 @@ import { checkTemplate, createTemplate, deleteTemplate, findTemplate, listTempla
 import { tokenAllows } from '../../services/auth';
 import { advanceRuns, cardChanged, deleteRunsOf, TASKS_NODE } from '../../services/pipelineRuns';
 import { readLabels, setLabels } from '../../services/productionLabels';
+import { newTask } from '../../services/productionTasks';
 import { callbackBaseOf } from './worker';
 
 function getDb() {
@@ -637,23 +638,7 @@ export function productionRouter(config: StreamByConfig): Router {
       const badStep = await stepError(projectId, values, card);
       if (badStep) return res.status(400).json({ message: badStep });
 
-      const now = new Date();
-      const task = {
-        id: crypto.randomUUID(),
-        shotId,
-        projectId,
-        name: values.name,
-        status: values.status ?? 'todo',
-        priority: values.priority ?? 'medium',
-        assignedTo: values.assignedTo ?? [],
-        teamIds: values.teamIds ?? [],
-        dueDate: values.dueDate ?? null,
-        notes: values.notes ?? null,
-        stepId: values.stepId ?? null,
-        createdBy: auth.userId,
-        createdAt: now,
-        updatedAt: now,
-      };
+      const task = newTask({ projectId, shotId, userId: auth.userId, values });
 
       await db.collection('production_tasks').insertOne({ ...task });
       await afterTaskChange(project, shotId);

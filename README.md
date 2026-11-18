@@ -121,6 +121,16 @@ kind) with `PUT .../assets/:assetId/budget-profile { profileId }` (null: the def
 MCP server: `get_asset_measurements`, `get_asset_budgets`, and `list_asset_versions` says which
 are measured.
 
+## 🎧 Reviewing audio: notes on a moment of a version
+
+A review note on an audio version is on an instant of it or a range:
+`POST .../assets/:assetId/versions/:versionId/annotations { type: 'timecoded', startSeconds, endSeconds?, text }`
+(seconds from its start; `timecode` is that time as it's read, `1:23` or `1:23–1:40`). Its
+project's members hear of it (`annotationEvent`), so a review open shows it. A note becomes a
+task of the card (shot) the asset is linked to, its time in the task's name:
+`POST .../annotations/:annotationId/task` (`{ shotId }` when several cards are linked; it needs
+`production:write`). Approving the review still lets its Review Gates pass, as always.
+
 ## 🗃️ A project's database records
 
 A database connection's tables (or collections) and records are under
@@ -400,6 +410,7 @@ A token sees only the tools whose permissions it has (an app: those its scopes g
 | `delete_project` | `project:delete` |
 | `list_assets` (by category, optionally in one storage connection, and filtered by name), `get_asset_metadata`, `get_asset_measurements` | `assets:read` |
 | `update_asset_metadata` | `assets:write` |
+| `list_reviews`, `list_review_notes` / `create_review_note` (a note on an instant or a range of an audio version, in seconds) | `assets:read` / `assets:write` |
 | `delete_asset` | `assets:delete` |
 | `get_asset_rights`, `get_credits_sheet` / `set_asset_rights` | `rights:read` / `rights:write` |
 | `get_workflow`, `list_pipelines`, `get_pipeline`, `list_pipeline_runs` | `workflow:read` |

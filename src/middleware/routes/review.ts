@@ -9,6 +9,8 @@ import { getConnection, getConnectedIds } from '../../adapters/database/connecti
 import crypto from 'crypto';
 import { afterGateChange } from './deliverable';
 import { advanceRuns } from '../../services/pipelineRuns';
+import { checkNoteTime, noteTask, noteTimecode } from '../../services/reviewNotes';
+import { newTask } from '../../services/productionTasks';
 
 function getDb() {
   const ids = getConnectedIds().filter(id => getConnection(id).type === 'nosql');
@@ -20,6 +22,14 @@ function broadcastReviewUpdate(review: ReviewSessionRecord, project: any) {
   const members: { userId: string }[] = project.members ?? [];
   for (const m of members) {
     emitToUser(m.userId, { type: 'reviewEvent', data: review });
+  }
+}
+
+// A version's notes changed (one added, resolved, made a task): whoever has its review open
+// reads them again (an agent's note, made by MCP, shows up there).
+function broadcastAnnotationsChanged(project: any, change: { assetId: string; assetVersionId: string }) {
+  for (const m of (project.members ?? []) as { userId: string }[]) {
+    emitToUser(m.userId, { type: 'annotationEvent', data: { projectId: String(project._id ?? project.id), ...change } });
   }
 }
 
@@ -204,9 +214,16 @@ export function reviewRouter(config: StreamByConfig): Router {
       try {
         const auth = (req as any).auth as Auth;
         const { projectId, assetId, versionId } = req.params;
-        const { type, timecode, position3d, regionRect, text } = req.body;
+        const { type, position3d, regionRect, text } = req.body;
 
         if (!type || !text) return res.status(400).json({ message: 'type and text are required' });
+        // A timecoded note is on an instant of the file, or a range of it.
+        let time: { startSeconds?: number; endSeconds?: number; timecode?: string } = {};
+        if (type === 'timecoded') {
+          const checked = checkNoteTime(req.body);
+          if ('error' in checked) return res.status(400).json({ message: checked.error });
+          time = { ...checked.time, timecode: noteTimecode(checked.time) };
+        }
 
         const project = await Project.findOne({ _id: projectId });
         if (!project) return res.status(404).json({ message: 'Project not found' });
@@ -223,7 +240,7 @@ export function reviewRouter(config: StreamByConfig): Router {
           authorId: auth.userId,
           authorUsername: (auth as any).username ?? auth.userId,
           type,
-          timecode,
+          ...time,
           position3d,
           regionRect,
           text,
@@ -232,6 +249,7 @@ export function reviewRouter(config: StreamByConfig): Router {
         };
 
         await db.collection('annotations').insertOne({ ...annotation });
+        broadcastAnnotationsChanged(project, { assetId, assetVersionId: versionId });
         res.status(201).json({ annotation });
       } catch (err: any) {
         res.status(500).json({ message: err.message });
@@ -257,7 +275,55 @@ export function reviewRouter(config: StreamByConfig): Router {
           { $set: { resolved: true, resolvedBy: auth.userId } },
         );
 
+        broadcastAnnotationsChanged(project, { assetId, assetVersionId: versionId });
         res.json({ message: 'Annotation resolved' });
+      } catch (err: any) {
+        res.status(500).json({ message: err.message });
+      }
+    },
+  );
+
+  // A note made a task of the card (shot) its asset is linked to, its time in the task's name.
+  // With several cards linked, the one it goes to is given (shotId); without one, it can't.
+  router.post(
+    '/projects/:projectId/assets/:assetId/versions/:versionId/annotations/:annotationId/task',
+    async (req: Request, res: Response) => {
+      try {
+        const auth = (req as any).auth as Auth;
+        const { projectId, assetId, versionId, annotationId } = req.params;
+        const project = await Project.findOne({ _id: projectId });
+        if (!project) return res.status(404).json({ message: 'Project not found' });
+        if (!canEditProject(project, auth.userId)) return res.status(403).json({ message: 'Unauthorized' });
+
+        const db = getDb();
+        if (!db) return res.status(500).json({ message: 'Database not available' });
+
+        const notes = db.collection('annotations');
+        const note = await notes.findOne({ id: annotationId, assetId, assetVersionId: versionId, projectId }) as any;
+        if (!note) return res.status(404).json({ message: 'Annotation not found' });
+        if (note.type !== 'timecoded' || typeof note.startSeconds !== 'number') {
+          return res.status(400).json({ message: 'Only a note on a moment of the file becomes a task' });
+        }
+        if (note.taskId) return res.status(409).json({ message: 'This note is already a task' });
+
+        const cards = await db.collection('production_shots').find({ projectId, assetId }).toArray() as any[];
+        if (!cards.length) return res.status(409).json({ message: 'No card on the board is linked to this asset' });
+        const { shotId } = req.body ?? {};
+        const card = shotId ? cards.find(c => c.id === shotId) : cards.length === 1 ? cards[0] : null;
+        if (!card) {
+          return res.status(shotId ? 400 : 409).json({
+            message: shotId ? 'shotId must be a card linked to this asset' : 'Several cards are linked to this asset: choose one (shotId)',
+            shots: cards.map(c => ({ id: c.id, key: c.key ?? null, name: c.name })),
+          });
+        }
+
+        const task = newTask({ projectId, shotId: card.id, userId: auth.userId, values: noteTask(note) });
+        await db.collection('production_tasks').insertOne({ ...task });
+        await notes.updateOne({ id: annotationId, projectId }, { $set: { taskId: task.id, shotId: card.id } });
+        await advanceRuns(project, { shotId: card.id }).catch(err => console.error('❌ StreamBy pipelines: a task changed:', err?.message ?? err));
+        broadcastAnnotationsChanged(project, { assetId, assetVersionId: versionId });
+
+        res.status(201).json({ task, annotation: { ...note, taskId: task.id, shotId: card.id } });
       } catch (err: any) {
         res.status(500).json({ message: err.message });
       }

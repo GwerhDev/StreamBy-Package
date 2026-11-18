@@ -502,12 +502,19 @@ export interface AnnotationRecord {
   authorId: string;
   authorUsername: string;
   type: AnnotationType;
+  // A timecoded note's time: the instant (seconds from the file's start), and where a range
+  // ends; timecode is that time as it's read (1:23, or 1:23–1:40).
+  startSeconds?: number;
+  endSeconds?: number;
   timecode?: string;
   position3d?: { x: number; y: number; z: number };
   regionRect?: { x: number; y: number; width: number; height: number };
   text: string;
   resolved: boolean;
   resolvedBy?: string;
+  // The task it became, of the card (shot) the asset is linked to.
+  taskId?: string;
+  shotId?: string;
   createdAt: Date;
 }
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';

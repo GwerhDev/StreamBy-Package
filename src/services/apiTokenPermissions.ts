@@ -98,6 +98,8 @@ const RULES = [
   rule(['POST'], `${P}/assets/[^/]+/qc-report`, 'assets:write'),
   rule('read', `${P}/(reviews(/[^/]+)?|assets/[^/]+/versions/[^/]+/annotations)`, 'assets:read'),
   rule(['POST', 'PATCH'], `${P}/(reviews(/[^/]+/decision)?|assets/[^/]+/versions/[^/]+/annotations(/[^/]+/resolve)?)`, 'assets:write'),
+  // A review note made a task of its asset's card: a change to the production board.
+  rule(['POST'], `${P}/assets/[^/]+/versions/[^/]+/annotations/[^/]+/task`, 'production:write'),
 
   // Deliverables: an asset (or a version) delivered for a shot or an export.
   rule('read', `${P}/deliverables(/gates)?`, 'assets:read'),
