@@ -147,6 +147,42 @@ describe('review notes on a moment of an audio version', () => {
     expect(mongo.db.docs('production_tasks')).toHaveLength(1);
   });
 
+  it('two requests at once make one task: the other is refused', async () => {
+    card('c1', 'a1');
+    const eli = asToken(await tokenFor(['assets:write', 'production:write']));
+    const note = (await eli.post(N, { type: 'timecoded', startSeconds: 83, text: 'Bass' })).body.annotation;
+    // Both have read the note (no task yet) before either goes on: each waits for the other at
+    // the cards' lookup.
+    const shots = mongo.db.collection('production_shots');
+    const find = shots.find.bind(shots);
+    let arrived = 0;
+    let bothIn!: () => void;
+    const together = new Promise<void>(resolve => { bothIn = resolve; });
+    vi.spyOn(shots, 'find').mockImplementation((filter: any) => {
+      const cursor = find(filter);
+      const toArray = cursor.toArray;
+      cursor.toArray = async () => { if (++arrived === 2) bothIn(); await together; return toArray(); };
+      return cursor;
+    });
+    const both = await Promise.all([eli.post(`${N}/${note.id}/task`), eli.post(`${N}/${note.id}/task`)]);
+    expect(both.map(r => r.status).sort()).toEqual([201, 409]);
+    expect(mongo.db.docs('production_tasks')).toHaveLength(1);
+    expect(mongo.db.docs('annotations')[0].taskId).toBe(mongo.db.docs('production_tasks')[0].id);
+  });
+
+  it("a task that couldn't be made lets the note go, to be made again", async () => {
+    card('c1', 'a1');
+    const eli = asToken(await tokenFor(['assets:write', 'production:write']));
+    const note = (await eli.post(N, { type: 'timecoded', startSeconds: 83, text: 'Bass' })).body.annotation;
+    const tasks = mongo.db.collection('production_tasks');
+    vi.spyOn(tasks, 'insertOne').mockRejectedValueOnce(new Error('write failed'));
+    expect((await eli.post(`${N}/${note.id}/task`)).status).toBe(500);
+    expect(mongo.db.docs('annotations')[0].taskId).toBeUndefined();
+    expect(mongo.db.docs('annotations')[0].shotId).toBeUndefined();
+    expect((await eli.post(`${N}/${note.id}/task`)).status).toBe(201);
+    expect(mongo.db.docs('production_tasks')).toHaveLength(1);
+  });
+
   it('with no card linked it can\'t; with several, the one given', async () => {
     const eli = asToken(await tokenFor(['assets:write', 'production:write']));
     const note = (await eli.post(N, { type: 'timecoded', startSeconds: 1, text: 'Hiss' })).body.annotation;

@@ -326,8 +326,21 @@ export function reviewRouter(config: StreamByConfig): Router {
         }
 
         const task = newTask({ projectId, shotId: card.id, userId: auth.userId, values: noteTask(note) });
-        await db.collection('production_tasks').insertOne({ ...task });
-        await notes.updateOne({ id: annotationId, projectId }, { $set: { taskId: task.id, shotId: card.id } });
+        // The note is claimed for this task before it's made, in one conditional write: of two
+        // requests at once, only one finds it without a task, and the other is refused.
+        const claim = { id: annotationId, projectId, taskId: task.id };
+        const claimed = await notes.updateOne(
+          { id: annotationId, projectId, $or: [{ taskId: { $exists: false } }, { taskId: null }] },
+          { $set: { taskId: task.id, shotId: card.id } },
+        );
+        if (!claimed.matchedCount) return res.status(409).json({ message: 'This note is already a task' });
+        try {
+          await db.collection('production_tasks').insertOne({ ...task });
+        } catch (err) {
+          // Not made: the note is let go, so it can be made a task again.
+          await notes.updateOne(claim, { $unset: { taskId: '', shotId: '' } }).catch(() => {});
+          throw err;
+        }
         await advanceRuns(project, { shotId: card.id }).catch(err => console.error('❌ StreamBy pipelines: a task changed:', err?.message ?? err));
         broadcastAnnotationsChanged(project, { assetId, assetVersionId: versionId });
 
